@@ -1,5 +1,10 @@
 import type { HtmlReportLink, RepeatedElement, TestInfo } from './insights';
-import type { TestCoverageData } from './types';
+import type { A11yHint } from './a11y';
+import type { InventoryElement, TestCoverageData } from './types';
+
+/** Recorded role, accessible name and attributes of an element (see `InventoryElement`). */
+type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs'>;
+const details = (e: ElementDetails): ElementDetails => ({ role: e.role, name: e.name, nameFrom: e.nameFrom, attrs: e.attrs });
 
 export interface ElementCoverage {
   key: string;
@@ -27,6 +32,15 @@ export interface ElementCoverage {
   testIds?: string[];
   /** `TestCase.id`s of the tests in `testedByFailing`. */
   failingTestIds?: string[];
+  /** Recorded role, accessible name, its source and raw attributes, of the variant `label` shows. */
+  role?: string;
+  name?: string;
+  nameFrom?: string;
+  attrs?: Record<string, string>;
+  /** A Playwright line that interacts with this element (see `locators.ts`). */
+  suggestedLocator?: string;
+  /** Informational accessibility hints (see `a11y.ts`). Don't affect coverage. */
+  a11yHints?: A11yHint[];
 }
 
 export interface ScreenshotBox {
@@ -51,6 +65,8 @@ export interface RouteCoverage {
   percent: number;
   /** Untested elements that failing tests touched. */
   failingOnly: number;
+  /** Number of accessibility hints on this route's elements. */
+  a11yHints?: number;
   elements: ElementCoverage[];
   screenshots: RouteScreenshot[];
 }
@@ -61,6 +77,8 @@ export interface CoverageSummary {
   tested: number;
   percent: number;
   failingOnly: number;
+  /** Total accessibility hints across routes. */
+  a11yHints?: number;
   routes: RouteCoverage[];
   /** Every test, with what's needed to link to it in Playwright's HTML report. Set by the reporter. */
   tests?: TestInfo[];
@@ -116,7 +134,7 @@ export function aggregate(
   opts: { normalizeUrl: NormalizeUrl; maxScreenshotsPerRoute: number },
 ): CoverageSummary {
   type RouteAcc = {
-    elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string>; labels: Set<string>; idSet: Set<string>; failingIdSet: Set<string> }>;
+    elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string>; labels: Map<string, ElementDetails>; idSet: Set<string>; failingIdSet: Set<string> }>;
     snapshots: { snap: TestCoverageData['snapshots'][number]; test: string }[];
   };
   const routes = new Map<string, RouteAcc>();
@@ -139,7 +157,7 @@ export function aggregate(
         const n = counts.get(el.key)!;
         if (existing) {
           existing.instances = Math.max(existing.instances, n);
-          existing.labels.add(el.label);
+          if (!existing.labels.has(el.label)) existing.labels.set(el.label, details(el));
         } else
           acc.elements.set(el.key, {
             key: el.key,
@@ -152,7 +170,7 @@ export function aggregate(
             interactionCounts: {},
             testedBySet: new Set(),
             failingSet: new Set(),
-            labels: new Set([el.label]),
+            labels: new Map([[el.label, details(el)]]),
             idSet: new Set(),
             failingIdSet: new Set(),
           });
@@ -170,7 +188,7 @@ export function aggregate(
         // Interacted with but never captured in an inventory (transient element).
         el = {
           key: i.key, label: i.label, tag: '?', instances: 1, tested: false,
-          testedBy: [], testedByFailing: [], interactionCounts: {}, testedBySet: new Set(), failingSet: new Set(), labels: new Set([i.label]),
+          testedBy: [], testedByFailing: [], interactionCounts: {}, testedBySet: new Set(), failingSet: new Set(), labels: new Map([[i.label, details(i)]]),
           idSet: new Set(), failingIdSet: new Set(),
         };
         acc.elements.set(i.key, el);
@@ -193,9 +211,10 @@ export function aggregate(
     const elements = [...acc.elements.values()].map(({ testedBySet, failingSet, labels, idSet, failingIdSet, ...e }) => {
       // Elements sharing a key (e.g. a link on every table row) can have different
       // labels; pick one independent of test order so reports are reproducible.
-      const sorted = [...labels].sort();
+      const sorted = [...labels.keys()].sort();
       return {
         ...e,
+        ...labels.get(sorted[0]),
         label: sorted.length > 1 ? `${sorted[0]} (+${sorted.length - 1} variants)` : sorted[0],
         testedBy: [...testedBySet].sort(),
         testedByFailing: [...failingSet].filter((t) => !testedBySet.has(t)).sort(),
