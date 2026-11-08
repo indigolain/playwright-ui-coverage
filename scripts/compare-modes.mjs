@@ -5,7 +5,7 @@
 //   node scripts/compare-modes.mjs <a/coverage.json> <b/coverage.json>
 //
 // Compared: totals, and per route every element by key: the coverage fields
-// in COMPARED. Text-derived fields (label, name, suggested locator, hints) are
+// in COMPARED (interaction types, not counts). Text-derived fields (label, name, suggested locator, hints) are
 // display-only and may contain live text (a counter, a clock), so they aren't.
 //
 // Ignored: generatedAt and the chosen screenshots. Those depend on timing, not
@@ -45,7 +45,13 @@ function normalize(summary) {
       tested: r.tested,
       percent: r.percent,
       elements: r.elements
-        .map((e) => ({ ...pick(e), testedBy: sorted(e.testedBy), testedByFailing: sorted(e.testedByFailing) }))
+        .map((e) => ({
+          ...pick(e),
+          testedBy: sorted(e.testedBy),
+          testedByFailing: sorted(e.testedByFailing),
+          // Event types only: counts depend on timing (scroll events coalesce, retried actions).
+          interactionCounts: e.interactionCounts && Object.keys(e.interactionCounts).sort(),
+        }))
         .sort((a, b) => a.key.localeCompare(b.key)),
     })),
   };
