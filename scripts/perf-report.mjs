@@ -11,7 +11,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { renderHtml } = createRequire(import.meta.url)(path.join(root, 'dist', 'html.js'));
+const dist = (m) => createRequire(import.meta.url)(path.join(root, 'dist', m));
+const { renderHtml } = dist('html.js');
+const { addSuggestedLocators } = dist('locators.js');
+const { addA11yHints } = dist('a11y.js');
 const ROUTES = Number(process.argv[2] || 300);
 const ELEMENTS = Number(process.argv[3] || 80);
 const out = path.join(root, 'perf-report');
@@ -50,11 +53,18 @@ for (let r = 0; r < ROUTES; r++) {
   const elements = [];
   for (let e = 0; e < ELEMENTS; e++) {
     const tested = rand() < cov;
-    const label = `${['button', 'link', 'textbox', 'checkbox'][e % 4]} "Item ${e}"`;
+    const role = ['button', 'link', 'textbox', 'checkbox'][e % 4];
+    // Every 9th element has no accessible name (an accessibility hint).
+    const name = e % 9 === 4 ? '' : `Item ${e}`;
+    const label = name ? `${role} "${name}"` : role;
     elements.push({
-      key: e % 5 === 0 ? `testid=${route}-el-${e}` : label,
+      key: e % 5 === 0 ? `[data-testid="${route}-el-${e}"]` : `main > div:nth-of-type(${e + 1}) > ${role === 'link' ? 'a' : 'button'}`,
       label,
-      tag: 'button',
+      tag: role === 'link' ? 'a' : role === 'textbox' ? 'input' : 'button',
+      role,
+      name,
+      nameFrom: name ? (role === 'textbox' || role === 'checkbox' ? 'label' : 'text') : '',
+      attrs: e % 5 === 0 ? { 'data-testid': `${route}-el-${e}` } : role === 'link' ? { href: `/x/${e}` } : {},
       instances: e % 11 === 0 ? 3 : 1,
       tested,
       testedBy: tested ? [`spec ${e % 7} › does thing ${e % 13}`, `spec ${e % 3} › other ${e}`].slice(0, 1 + (e % 2)) : [],
@@ -81,6 +91,9 @@ const summary = {
   percent: Math.round((testedTotal / total) * 1000) / 10,
   routes,
 };
+// Same post-processing as the reporter.
+addSuggestedLocators(summary);
+addA11yHints(summary);
 const html = renderHtml(summary);
 fs.writeFileSync(path.join(out, 'index.html'), html);
 console.log(`${ROUTES} routes x ${ELEMENTS} elements, index.html ${(html.length / 1024 / 1024).toFixed(2)} MB`);
