@@ -12,7 +12,7 @@
 // on the recording mode: whether a short-lived state (a modal, a page the test
 // leaves right away) gets a screenshot, and which test's snapshot wins the set
 // cover, vary from run to run. Each file must contain at least one screenshot,
-// though, so a broken capture still fails. Element order and testedBy order
+// though, so a broken capture still fails. Element order and testIds order
 // depend on test order, so both are sorted.
 import fs from 'node:fs';
 
@@ -30,25 +30,29 @@ function load(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-const COMPARED = ['key', 'tag', 'instances', 'tested', 'testedBy', 'testedByFailing', 'interactionCounts'];
+// coverage.json schema v1 (docs/coverage-json.md).
+const COMPARED = ['key', 'tag', 'instances', 'tested', 'testIds', 'failingTestIds', 'interactionCounts'];
 const pick = (e) => Object.fromEntries(COMPARED.filter((k) => k in e).map((k) => [k, e[k]]));
 const sorted = (list) => (Array.isArray(list) ? [...list].sort() : list);
+const counts = (s) => ({
+  coverage: s.coverage,
+  testedElementsCount: s.testedElementsCount,
+  untestedElementsCount: s.untestedElementsCount,
+  testedLinksCount: s.testedLinksCount,
+  untestedLinksCount: s.untestedLinksCount,
+});
 
-function normalize(summary) {
+function normalize(report) {
   return {
-    total: summary.total,
-    tested: summary.tested,
-    percent: summary.percent,
-    routes: summary.routes.map((r) => ({
-      route: r.route,
-      total: r.total,
-      tested: r.tested,
-      percent: r.percent,
-      elements: r.elements
+    ...counts(report.summary),
+    views: report.views.map((v) => ({
+      name: v.name,
+      ...counts(v.summary),
+      elements: v.elements
         .map((e) => ({
           ...pick(e),
-          testedBy: sorted(e.testedBy),
-          testedByFailing: sorted(e.testedByFailing),
+          testIds: sorted(e.testIds),
+          failingTestIds: sorted(e.failingTestIds),
           // Event types only: counts depend on timing (scroll events coalesce, retried actions).
           interactionCounts: e.interactionCounts && Object.keys(e.interactionCounts).sort(),
         }))
@@ -77,16 +81,17 @@ function diff(a, b, path = '$', out = []) {
 const rawA = load(fileA);
 const rawB = load(fileB);
 for (const [file, summary] of [[fileA, rawA], [fileB, rawB]]) {
-  if (summary.total === 0) {
+  const t = summary.summary;
+  if (t.testedElementsCount + t.untestedElementsCount === 0) {
     console.error(`✗ ${file} has no elements`);
     process.exit(1);
   }
-  if (!summary.routes.some((r) => r.screenshots.length > 0)) {
+  if (!summary.views.some((v) => v.screenshots.length > 0)) {
     console.error(`✗ ${file} has no screenshots`);
     process.exit(1);
   }
 }
-const shots = (summary) => summary.routes.map((r) => `${r.route}: ${r.screenshots.length}`).join(', ');
+const shots = (report) => report.views.map((v) => `${v.name}: ${v.screenshots.length}`).join(', ');
 console.log(`screenshots per route (not compared): A ${shots(rawA)} | B ${shots(rawB)}`);
 
 const a = normalize(rawA);
@@ -97,4 +102,4 @@ if (differences.length) {
   for (const d of differences.slice(0, 50)) console.error(`  ${d}`);
   process.exit(1);
 }
-console.log(`✓ same coverage: ${a.percent}% (${a.tested}/${a.total}) across ${a.routes.length} routes`);
+console.log(`✓ same coverage: ${a.coverage}% (${a.testedElementsCount}/${a.testedElementsCount + a.untestedElementsCount} elements) across ${a.views.length} views`);
