@@ -120,12 +120,13 @@ export class ContextRecorder {
       if (page.isClosed()) return;
       const before = await inventory();
       if (!before) return;
-      // Only screenshot when this state shows elements no screenshot has shown yet.
-      if (!this.hasNew(this.shotKeys, before)) return;
+      if (!this.wantsScreenshot(before)) {
+        // Record the elements without an image.
+        if (this.addNew(this.seenKeys, before)) this.snapshots.push(before);
+        return;
+      }
 
-      const image = await internal(page, () =>
-        page.screenshot({ fullPage: true, animations: 'disabled' }),
-      );
+      const { image, height } = await this.capture(page);
       const after = await inventory();
       if (!after) return;
       if (!sameLayout(before, after)) {
@@ -140,15 +141,54 @@ export class ContextRecorder {
       this.addNew(this.seenKeys, after);
       const index = shotCounters.get(this.testInfo) ?? 0;
       shotCounters.set(this.testInfo, index + 1);
-      const file = this.testInfo.outputPath(`ui-coverage-${index}.png`);
+      const file = this.testInfo.outputPath(`ui-coverage-${index}.${this.options.format === 'jpeg' ? 'jpg' : 'png'}`);
       await fs.promises.writeFile(file, image);
       // The JSON refers to the screenshot by attachment name, not by path, so it
       // still resolves after the blob reporter / merge-reports move the files.
       const name = `${SCREENSHOT_ATTACHMENT_PREFIX}${index}`;
       this.shots.push({ name, path: file });
-      this.snapshots.push({ ...after, screenshot: name });
+      this.snapshots.push(height ? { ...after, screenshot: name, screenshotHeight: height } : { ...after, screenshot: name });
       return;
     }
+  }
+
+  /** 'on': when this state shows elements no screenshot has shown yet; 'first-only': once per URL. */
+  private wantsScreenshot(inventory: Inventory): boolean {
+    const mode = this.options.screenshots;
+    if (mode === 'off') return false;
+    if (mode === 'first-only') return !this.shotKeys.has(inventory.url.split('#')[0]);
+    return this.hasNew(this.shotKeys, inventory);
+  }
+
+  /** Full-page screenshot in the configured format, cropped to `maxScreenshotHeight`. */
+  private capture(page: Page): Promise<{ image: Buffer; height?: number }> {
+    const { format, quality, maxScreenshotHeight: cap } = this.options;
+    return internal(page, async () => {
+      let clip: { x: number; y: number; width: number; height: number } | undefined;
+      if (cap > 0) {
+        const size = await page.evaluate(() => {
+          const d = document.documentElement;
+          const b = document.body;
+          return {
+            w: Math.max(d.scrollWidth, b ? b.scrollWidth : 0),
+            h: Math.max(d.scrollHeight, b ? b.scrollHeight : 0),
+          };
+        });
+        // aggregate() ignores elements below the crop; the report clips boxes to the image.
+        if (size.h > cap) clip = { x: 0, y: 0, width: size.w, height: cap };
+      }
+      const image = await page.screenshot({
+        fullPage: true,
+        animations: 'disabled',
+        type: format,
+        quality: format === 'jpeg' ? Math.min(100, Math.max(0, Math.round(quality))) : undefined,
+        clip,
+        // Full-page captures can stall if the page navigates mid-capture; give up
+        // (this state just gets no image) instead of holding up the test.
+        timeout: 5000,
+      });
+      return { image, height: clip?.height };
+    });
   }
 
   private hasNew(seen: Map<string, Set<string>>, inventory: Inventory): boolean {
