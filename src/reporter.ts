@@ -26,6 +26,25 @@ export interface UiCoverageReporterOptions {
    * totals still include inventories from every attempt).
    */
   countFailedTests?: boolean;
+  /**
+   * How tests' data is grouped into views:
+   * - `'url'`: by page URL, through `normalizeUrl` (E2E tests).
+   * - `'file'`: one view per spec file, named by its path relative to the
+   *   project's `testDir` (e.g. `components/Button.spec.tsx`). For component
+   *   tests, where every test loads the same URL.
+   * - `'auto'` (default): `'file'` for Playwright component testing
+   *   (`@playwright/experimental-ct-*`), `'url'` otherwise.
+   */
+  viewBy?: 'url' | 'file' | 'auto';
+}
+
+const CT_CONFIG_KEY = '@playwright/experimental-ct-core';
+
+/** Spec file path relative to the project's testDir, with `/` separators. */
+function specView(test: TestCase): string {
+  const testDir = test.parent.project()?.testDir;
+  const file = testDir ? path.relative(testDir, test.location.file) : path.basename(test.location.file);
+  return file.split(path.sep).join('/');
 }
 
 /**
@@ -50,6 +69,9 @@ class UiCoverageReporter implements Reporter {
   /** One entry per attachment per attempt; retries are resolved in onEnd. */
   private tests: AttemptEntry[] = [];
   private outputFolder = 'ui-coverage-report';
+  /** Each attachment's spec file view, applied in onEnd when grouping by file. */
+  private specViews = new Map<TestCoverageData, string>();
+  private componentTestConfig = false;
 
   constructor(private options: UiCoverageReporterOptions = {}) {}
 
@@ -57,18 +79,21 @@ class UiCoverageReporter implements Reporter {
     // Resolve relative to the config file's directory (like Playwright's html reporter).
     const configDir = config.configFile ? path.dirname(config.configFile) : process.cwd();
     this.outputFolder = path.resolve(configDir, this.options.outputFolder ?? 'ui-coverage-report');
+    this.componentTestConfig = CT_CONFIG_KEY in config;
   }
 
   onTestEnd(test: TestCase, result: TestResult) {
     for (const a of result.attachments) {
       if (a.name !== ATTACHMENT_NAME || !a.body) continue;
       try {
+        const data = resolveScreenshots(JSON.parse(a.body.toString('utf8')) as TestCoverageData, result);
+        this.specViews.set(data, specView(test));
         this.tests.push({
           testId: test.id,
           retry: result.retry,
           passed: isPassingResult(test, result),
           title: test.titlePath().filter(Boolean).slice(1).join(' › '),
-          data: resolveScreenshots(JSON.parse(a.body.toString('utf8')) as TestCoverageData, result),
+          data,
         });
       } catch {
         /* malformed attachment */
@@ -78,6 +103,16 @@ class UiCoverageReporter implements Reporter {
 
   async onEnd() {
     if (this.tests.length === 0) return;
+    // Auto-detect component testing from the config, or from the recorded data
+    // (merge-reports runs with a different config).
+    const viewBy = this.options.viewBy ?? 'auto';
+    const byFile =
+      viewBy === 'file' ||
+      (viewBy === 'auto' && (this.componentTestConfig || this.tests.some((t) => t.data.componentTest)));
+    for (const [data, view] of this.specViews) {
+      if (byFile) data.view = view;
+      else delete data.view;
+    }
     const entries = selectAttempts(this.tests, { countFailedTests: this.options.countFailedTests ?? false });
     const summary = aggregate(entries, {
       normalizeUrl: this.options.normalizeUrl ?? defaultNormalizeUrl,

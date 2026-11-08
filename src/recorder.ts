@@ -21,6 +21,13 @@ const recorders = new WeakMap<BrowserContext, ContextRecorder>();
 /** Screenshot counter per test, so several contexts in one test don't collide. */
 const shotCounters = new WeakMap<TestInfo, number>();
 
+/**
+ * Whether the test runs under Playwright component testing: the CT packages'
+ * `defineConfig` adds this key to the config (it's how they register their
+ * Vite plugin), so it's there in every worker.
+ */
+const isComponentTest = (testInfo: TestInfo) => '@playwright/experimental-ct-core' in (testInfo.config as object);
+
 const IMAGE_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 
 /**
@@ -232,7 +239,11 @@ export class ContextRecorder {
       ...this.shots.map((s) => ({ name: s.name, path: s.path, contentType: contentType(s.path) })),
       {
         name: ATTACHMENT_NAME,
-        body: Buffer.from(JSON.stringify({ interactions: this.interactions, snapshots: this.snapshots })),
+        body: Buffer.from(JSON.stringify({
+          interactions: this.interactions,
+          snapshots: this.snapshots,
+          ...(isComponentTest(this.testInfo) && { componentTest: true }),
+        })),
         contentType: 'application/json',
       },
     );

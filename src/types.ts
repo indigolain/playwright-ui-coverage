@@ -54,6 +54,13 @@ export interface Snapshot extends Inventory {
 export interface TestCoverageData {
   interactions: Interaction[];
   snapshots: Snapshot[];
+  /** True when the test ran under Playwright component testing (`@playwright/experimental-ct-*`). */
+  componentTest?: boolean;
+  /**
+   * View name for all of this test's data, overriding the URL. Not recorded:
+   * the reporter sets it (to the spec file) when grouping views by file.
+   */
+  view?: string;
 }
 
 export const ATTACHMENT_NAME = 'ui-coverage';
