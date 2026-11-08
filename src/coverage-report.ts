@@ -137,7 +137,13 @@ export interface ViewScreenshot {
   dpr: number;
   /** Id of the test that took it. */
   testId?: string;
-  boxes: { key: string; x: number; y: number; w: number; h: number }[];
+  /**
+   * A viewport screenshot of a short-lived state (`captureTransientStates`)
+   * rather than the full page; box coordinates are relative to the image.
+   */
+  viewport?: boolean;
+  /** `pos`: the element (or an ancestor) is `position: fixed` / `sticky`; drawn where it was on screen. */
+  boxes: { key: string; x: number; y: number; w: number; h: number; pos?: 'fixed' | 'sticky' }[];
 }
 
 /** A test that contributed data. */
@@ -388,7 +394,8 @@ export function toCoverageReport(
         file: s.source,
         dpr: s.dpr,
         ...(s.testId !== undefined ? { testId: s.testId } : {}),
-        boxes: s.boxes.map(({ key, x, y, w, h }) => ({ key, x, y, w, h })),
+        ...(s.viewport ? { viewport: true as const } : {}),
+        boxes: s.boxes.map(({ key, x, y, w, h, pos }) => (pos ? { key, x, y, w, h, pos } : { key, x, y, w, h })),
       })),
     })),
     tests: (summary.tests ?? []).map(test),

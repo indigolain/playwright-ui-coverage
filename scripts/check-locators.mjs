@@ -122,11 +122,13 @@ try {
   }
   for (const r of report.views) {
     await page.goto(`http://localhost:${port}${r.name.replace(':id', '1')}`);
-    // Show content that tests open first (the add-user dialog, "Learn more").
+    // Show content that tests open first (the add-user dialog, "Learn more", the chat panel on /long).
     await page.evaluate(() => {
       document.querySelector('dialog')?.show();
-      const more = document.getElementById('more');
-      if (more) more.hidden = false;
+      for (const id of ['more', 'chat-panel', 'feedback-note']) {
+        const el = document.getElementById(id);
+        if (el) el.hidden = false;
+      }
     });
     for (const e of r.elements) {
       const expr = e.suggestedLocator.replace(/^await /, '').replace(/\.(click|fill|check|selectOption|setInputFiles|press)\(.*$/, '');

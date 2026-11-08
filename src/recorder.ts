@@ -15,10 +15,12 @@ import {
   type RawInteractionEvent,
   type RawInventory,
   type RawNode,
+  type RawClip,
   type RawSnapshot,
 } from './model/raw';
 import { compileRules, Resolver } from './model/resolve';
 import { DOCUMENT_TAG } from './model/selector';
+import { intersects, viewportClip } from './model/geometry';
 import type { UiCoverageRules } from './model/rules';
 import { ATTACHMENT_NAME, SCREENSHOT_ATTACHMENT_PREFIX } from './types';
 
@@ -42,6 +44,9 @@ const shotCounters = new WeakMap<TestInfo, number>();
  * Vite plugin), so it's there in every worker.
  */
 const isComponentTest = (testInfo: TestInfo) => '@playwright/experimental-ct-core' in (testInfo.config as object);
+
+/** Snapshots are grouped by URL without the fragment. */
+const urlKey = (url: string) => url.split('#')[0];
 
 const IMAGE_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 
@@ -151,10 +156,26 @@ export class ContextRecorder {
   private timers = new Map<Page, NodeJS.Timeout>();
   /** Last known map of each child frame, for events that arrive after the frame is gone. */
   private frameMaps = new WeakMap<Frame, FrameMap>();
-  /** Interactions from child frames being stitched (async). */
+  /** Interactions from child frames being stitched, and short-lived-state captures (async). */
   private pending = new Set<Promise<void>>();
   /** Screenshot files, attached to the test (by name) in finish(). */
   private shots: { name: string; path: string }[] = [];
+  /**
+   * Keys the full-page screenshot in progress (snapshot chain) is about to
+   * show, so a short-lived-state capture doesn't duplicate it.
+   */
+  private inFlight?: { url: string; keys: Set<string> };
+  /**
+   * The last inventory sent with an interaction (click, submit, Enter) in each
+   * page's main frame, numbered in arrival order (`seq`). It's the page's
+   * state right before a navigation the interaction may start.
+   */
+  private lastInventory = new WeakMap<Page, { inventory: RawInventory; seq: number }>();
+  private seq = 0;
+  /** Main-frame navigations committed per page. */
+  private navigations = new WeakMap<Page, number>();
+  /** Pages with a short-lived-state screenshot in progress. */
+  private transientBusy = new WeakSet<Page>();
   private finished = false;
 
   private constructor(
@@ -184,10 +205,20 @@ export class ContextRecorder {
   }
 
   private async install() {
+    const transient = this.options.captureTransientStates && this.options.screenshots === 'on';
     await internal(this.context, async () => {
       await this.context.exposeBinding(
         '__uicovRecord',
-        ({ page, frame }, event: RawInteractionEvent, inventory?: RawInventory) => {
+        ({ page, frame }, event: RawInteractionEvent | null, inventory?: RawInventory) => {
+          if (!event) {
+            // The page settled after an interaction (`settleInventory`): maybe a short-lived state.
+            // Main frame only: boxes from a child frame are relative to that frame.
+            if (!transient || !page || frame !== page.mainFrame() || !inventory) return;
+            const p = this.captureTransient(page, inventory).catch(() => {});
+            this.pending.add(p);
+            void p.finally(() => this.pending.delete(p));
+            return;
+          }
           if (page && frame && frame !== page.mainFrame()) {
             const work = this.recordFromFrame(page, frame, event, inventory).catch(() => {});
             this.pending.add(work);
@@ -199,6 +230,7 @@ export class ContextRecorder {
           if (inventory) {
             const snap = this.toSnapshot(inventory);
             if (this.addNew(this.seenKeys, snap)) this.snapshots.push(snap);
+            if (page && frame === page.mainFrame()) this.lastInventory.set(page, { inventory, seq: ++this.seq });
           }
           if (page) this.schedule(page);
         },
@@ -206,6 +238,7 @@ export class ContextRecorder {
       await this.context.addInitScript(tracker, {
         ignoreSelectors: this.options.ignoreSelectors ?? [],
         extraCandidates: RECORDED_CANDIDATES.join(','),
+        settleInventory: transient,
         ...interactionArgs(this.options),
       });
     });
@@ -321,7 +354,13 @@ export class ContextRecorder {
     if (!main) return undefined;
     const frames = page.frames().filter((f) => f !== page.mainFrame());
     if (!frames.length) return main;
-    const out: RawInventory = { url: main.url, dpr: main.dpr, nodes: [...main.nodes], elements: [...main.elements] };
+    const out: RawInventory = {
+      url: main.url,
+      dpr: main.dpr,
+      ...(main.viewport ? { viewport: main.viewport } : {}),
+      nodes: [...main.nodes],
+      elements: [...main.elements],
+    };
     const memo = new Map<Frame, Promise<FrameMap | undefined>>();
     const parts = await Promise.all(
       frames.map((f) => Promise.all([evaluate(f).catch(() => undefined), this.frameMap(f, memo)])),
@@ -344,7 +383,13 @@ export class ContextRecorder {
 
   private toSnapshot(inv: RawInventory): RawSnapshot {
     const map = this.intern(inv.nodes);
-    return { url: inv.url, dpr: inv.dpr, elements: inv.elements.map((e) => this.remap(e, map)) };
+    const snap: RawSnapshot = { url: inv.url, dpr: inv.dpr, elements: inv.elements.map((e) => this.remap(e, map)) };
+    if (inv.viewport) snap.viewport = inv.viewport;
+    return snap;
+  }
+
+  private inventory(page: Page): Promise<RawInventory | undefined> {
+    return internal(page, () => page.evaluate(() => (window as any).__uicovInventory?.() as RawInventory | undefined));
   }
 
   private watch(page: Page) {
@@ -352,7 +397,11 @@ export class ContextRecorder {
     // A child frame (re)loaded: snapshot (the page's load event may be long past),
     // and remember where it is in case it's gone by the time its events arrive.
     page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame() || this.finished) return;
+      if (frame === page.mainFrame()) {
+        this.navigations.set(page, (this.navigations.get(page) ?? 0) + 1);
+        return;
+      }
+      if (this.finished) return;
       void this.frameMap(frame);
       this.schedule(page);
     });
@@ -380,7 +429,7 @@ export class ContextRecorder {
   }
 
   private async snapshot(page: Page) {
-    const inventory = () => this.pageInventory(page);
+    const inventory = () => this.pageInventory(page).catch(() => undefined); // undefined: navigated away
     const sameLayout = (a: RawInventory, b: RawInventory) =>
       a.url === b.url && JSON.stringify([a.nodes, a.elements]) === JSON.stringify([b.nodes, b.elements]);
 
@@ -390,6 +439,7 @@ export class ContextRecorder {
       if (page.isClosed()) return;
       const before = await inventory();
       if (!before) return;
+      const beforeSeq = this.seq;
       const beforeSnap = this.toSnapshot(before);
       if (!this.wantsScreenshot(beforeSnap)) {
         // Record the elements without an image.
@@ -397,30 +447,105 @@ export class ContextRecorder {
         return;
       }
 
-      const { image, height } = await this.capture(page);
+      const navigations = this.navigations.get(page) ?? 0;
+      this.inFlight = { url: urlKey(beforeSnap.url), keys: new Set(this.keysOf(beforeSnap, true)) };
+      let shot;
+      try {
+        shot = await this.capture(page);
+      } finally {
+        this.inFlight = undefined;
+      }
+      const capturedBeforeNavigation = (this.navigations.get(page) ?? 0) === navigations;
+      const { image, height } = shot;
       const afterRaw = await inventory();
-      if (!afterRaw) return;
-      const after = this.toSnapshot(afterRaw);
-      if (!sameLayout(before, afterRaw)) {
+      let after: RawSnapshot | undefined;
+      if (afterRaw && sameLayout(before, afterRaw)) after = this.toSnapshot(afterRaw);
+      else if (!afterRaw || afterRaw.url !== before.url) {
+        // The page navigated away (a test that opens a page and leaves it right
+        // away). The image still shows `before` if it was captured before the
+        // navigation committed, and the page didn't change until the interaction
+        // that navigated: its inventory (sent synchronously with it) arrived
+        // after `before` and has the same layout.
+        const last = this.lastInventory.get(page);
+        if (capturedBeforeNavigation && last && last.seq > beforeSeq && sameLayout(before, last.inventory))
+          after = beforeSnap;
+        else return; // the new page gets its own snapshot on load
+      }
+      if (!after) {
         if (attempt === 2) {
           // Couldn't get a stable frame: keep the elements, skip the image.
-          if (this.addNew(this.seenKeys, after)) this.snapshots.push(after);
+          const changed = this.toSnapshot(afterRaw!);
+          if (this.addNew(this.seenKeys, changed)) this.snapshots.push(changed);
         }
         continue;
       }
 
       this.addNew(this.shotKeys, after);
       this.addNew(this.seenKeys, after);
-      const index = shotCounters.get(this.testInfo) ?? 0;
-      shotCounters.set(this.testInfo, index + 1);
-      const file = this.testInfo.outputPath(`ui-coverage-${index}.${this.options.format === 'jpeg' ? 'jpg' : 'png'}`);
-      await fs.promises.writeFile(file, image);
-      // The JSON refers to the screenshot by attachment name, not by path, so it
-      // still resolves after the blob reporter / merge-reports move the files.
-      const name = `${SCREENSHOT_ATTACHMENT_PREFIX}${index}`;
-      this.shots.push({ name, path: file });
+      const name = await this.saveShot(image);
       this.snapshots.push(height ? { ...after, screenshot: name, screenshotHeight: height } : { ...after, screenshot: name });
       return;
+    }
+  }
+
+  /** Writes a screenshot file; returns its attachment name. */
+  private async saveShot(image: Buffer): Promise<string> {
+    const index = shotCounters.get(this.testInfo) ?? 0;
+    shotCounters.set(this.testInfo, index + 1);
+    const file = this.testInfo.outputPath(`ui-coverage-${index}.${this.options.format === 'jpeg' ? 'jpg' : 'png'}`);
+    await fs.promises.writeFile(file, image);
+    // The JSON refers to the screenshot by attachment name, not by path, so it
+    // still resolves after the blob reporter / merge-reports move the files.
+    const name = `${SCREENSHOT_ATTACHMENT_PREFIX}${index}`;
+    this.shots.push({ name, path: file });
+    return name;
+  }
+
+  /**
+   * A short-lived state (`captureTransientStates`): the page sent `inv` right
+   * after an interaction changed the DOM. If the viewport shows elements no
+   * screenshot has shown yet, screenshot the viewport now rather than after
+   * `snapshotDelay`, when the test may have closed it again. Runs outside the
+   * snapshot chain so it doesn't wait for a full-page capture in progress.
+   * The inventory is taken again afterwards; only elements that are still
+   * there, in the same place, are drawn on the image.
+   */
+  private async captureTransient(page: Page, inv: RawInventory) {
+    if (this.finished || this.transientBusy.has(page) || page.isClosed() || !inv.viewport) return;
+    const clip = viewportClip(inv.viewport);
+    const inClip = (s: RawSnapshot): RawSnapshot => ({ ...s, elements: s.elements.filter((e) => intersects(e, clip)) });
+    const before = this.toSnapshot(inv);
+    const flight = this.inFlight?.url === urlKey(inv.url) ? this.inFlight.keys : undefined;
+    const shown = this.shotKeys.get(urlKey(inv.url));
+    const fresh = this.keysOf(inClip(before)).some((k) => !shown?.has(k) && !flight?.has(k));
+    if (!fresh) return;
+    this.transientBusy.add(page);
+    try {
+      // A short timeout: if no frame comes quickly (the page is navigating),
+      // the state is gone anyway, and the capture holds up the screenshot queue.
+      // A plain viewport screenshot when the page isn't zoomed: it's the clip,
+      // and it never resizes the viewport (some Chromium versions do that for
+      // full-page captures with touch emulation, which scrolls the page).
+      const timeout = 2000;
+      const image = inv.viewport.zoom
+        ? await this.shoot(page, { fullPage: true, clip, timeout })
+        : await this.shoot(page, { fullPage: false, timeout });
+      const afterRaw = await this.inventory(page);
+      if (!afterRaw?.viewport || afterRaw.url !== inv.url) return;
+      // A scroll moves what the clip shows relative to fixed elements; give up.
+      if (afterRaw.viewport.x !== clip.x || afterRaw.viewport.y !== clip.y) return;
+      const after = this.toSnapshot(afterRaw);
+      const id = (e: RawSnapshot['elements'][number]) =>
+        JSON.stringify([e.node, e.name, e.x, e.y, e.w, e.h, e.pos, e.candidateOnly]);
+      const still = new Set(after.elements.map(id));
+      const stable: RawSnapshot = { ...before, elements: before.elements.filter((e) => still.has(id(e))) };
+      if (!this.hasNew(this.shotKeys, inClip(stable))) return; // the new elements were gone by then
+      this.addNew(this.shotKeys, inClip(stable));
+      this.addNew(this.seenKeys, stable);
+      const name = await this.saveShot(image);
+      this.snapshots.push({ ...stable, screenshot: name, screenshotClip: clip });
+    } finally {
+      this.transientBusy.delete(page);
     }
   }
 
@@ -428,13 +553,29 @@ export class ContextRecorder {
   private wantsScreenshot(snap: RawSnapshot): boolean {
     const mode = this.options.screenshots;
     if (mode === 'off') return false;
-    if (mode === 'first-only') return !this.shotKeys.has(snap.url.split('#')[0]);
+    if (mode === 'first-only') return !this.shotKeys.has(urlKey(snap.url));
     return this.hasNew(this.shotKeys, snap);
+  }
+
+  /** A screenshot in the configured format. */
+  private shoot(page: Page, opts: { fullPage: boolean; clip?: RawClip; timeout?: number }): Promise<Buffer> {
+    const { format, quality } = this.options;
+    return internal(page, () =>
+      page.screenshot({
+        animations: 'disabled',
+        type: format,
+        quality: format === 'jpeg' ? Math.min(100, Math.max(0, Math.round(quality))) : undefined,
+        // Captures can stall if the page navigates mid-capture; give up (this
+        // state just gets no image) instead of holding up the test.
+        timeout: 5000,
+        ...opts,
+      }),
+    );
   }
 
   /** Full-page screenshot in the configured format, cropped to `maxScreenshotHeight`. */
   private capture(page: Page): Promise<{ image: Buffer; height?: number }> {
-    const { format, quality, maxScreenshotHeight: cap } = this.options;
+    const { maxScreenshotHeight: cap } = this.options;
     return internal(page, async () => {
       let clip: { x: number; y: number; width: number; height: number } | undefined;
       if (cap > 0) {
@@ -449,16 +590,7 @@ export class ContextRecorder {
         // aggregate() ignores elements below the crop; the report clips boxes to the image.
         if (size.h > cap) clip = { x: 0, y: 0, width: size.w, height: cap };
       }
-      const image = await page.screenshot({
-        fullPage: true,
-        animations: 'disabled',
-        type: format,
-        quality: format === 'jpeg' ? Math.min(100, Math.max(0, Math.round(quality))) : undefined,
-        clip,
-        // Full-page captures can stall if the page navigates mid-capture; give up
-        // (this state just gets no image) instead of holding up the test.
-        timeout: 5000,
-      });
+      const image = await this.shoot(page, { fullPage: true, clip });
       return { image, height: clip?.height };
     });
   }
@@ -478,15 +610,15 @@ export class ContextRecorder {
   }
 
   private hasNew(seen: Map<string, Set<string>>, snap: RawSnapshot): boolean {
-    const set = seen.get(snap.url.split('#')[0]);
+    const set = seen.get(urlKey(snap.url));
     return !set || this.keysOf(snap, seen === this.shotKeys).some((k) => !set.has(k));
   }
 
   /** Adds the snapshot's keys to `seen`; returns true if any were new. */
   private addNew(seen: Map<string, Set<string>>, snap: RawSnapshot): boolean {
-    const urlKey = snap.url.split('#')[0];
-    const set = seen.get(urlKey) ?? new Set<string>();
-    seen.set(urlKey, set);
+    const url = urlKey(snap.url);
+    const set = seen.get(url) ?? new Set<string>();
+    seen.set(url, set);
     let added = false;
     for (const k of this.keysOf(snap, seen === this.shotKeys)) {
       if (!set.has(k)) {

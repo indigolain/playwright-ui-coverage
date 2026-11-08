@@ -260,6 +260,19 @@ describe('aggregate', () => {
       ]);
     });
 
+    it('places boxes of a viewport screenshot relative to its clip, clipped to it', () => {
+      // Elements at x = 0, 20, 40 (w = 10); the viewport shows x 15..45, y 0..5.
+      const shot = { ...snap('/vp.png', ['a', 'b', 'c']), screenshotClip: { x: 15, y: 0, width: 30, height: 5 } };
+      shot.elements[1] = { ...shot.elements[1], pos: 'fixed' as const };
+      const s = aggregate([{ title: 't', data: { interactions: [], snapshots: [shot] } }], opts);
+      const [screenshot] = s.routes[0].screenshots;
+      expect(screenshot.viewport).toBe(true);
+      expect(screenshot.boxes).toEqual([
+        { key: 'b', x: 5, y: 0, w: 10, h: 5, pos: 'fixed' },
+        { key: 'c', x: 25, y: 0, w: 5, h: 5 },
+      ]);
+    });
+
     it('selects screenshots per route', () => {
       const s = aggregate(
         [

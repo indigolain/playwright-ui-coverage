@@ -39,6 +39,8 @@ export interface InventoryElement {
   y: number;
   w: number;
   h: number;
+  /** `position: fixed` / `sticky` (itself or an ancestor): drawn where it was on screen. See `RawElement.pos`. */
+  pos?: 'fixed' | 'sticky';
 }
 
 export interface Inventory {
@@ -75,6 +77,11 @@ export interface Snapshot extends Inventory {
    * Elements below it are counted but not visible in the image.
    */
   screenshotHeight?: number;
+  /**
+   * Document region the screenshot shows when it's a viewport screenshot of a
+   * short-lived state (`captureTransientStates`); boxes stay in document coordinates.
+   */
+  screenshotClip?: { x: number; y: number; width: number; height: number };
 }
 
 /** Resolved data of one recording (one browser context in one test attempt). */

@@ -92,7 +92,7 @@ UI coverage: 40.4% (23/57 elements)
 ## How it works
 
 1. **Tracker** (`addInitScript`): capture-phase listeners record every interaction (`click`, `input`, `change`, `submit`, `dblclick`, `contextmenu`, keyboard activation, drag and drop, opt-in `scroll`/`focus`/`blur`, see [Interaction types](#interaction-types)) on an [interactive element](#which-elements-count), whichever Playwright API (or a real user) caused it.
-2. **Inventory + screenshot**: when a page loads and shortly after interactions, the recorder lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear. It records **raw facts** (tag, attributes, position among siblings, ancestors, accessible name), not keys: identity and filtering are decided later.
+2. **Inventory + screenshot**: when a page loads and shortly after interactions, the recorder lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear. When an interaction makes new elements appear (a modal opens), the page sends an inventory as soon as its handlers have run, and the recorder takes a viewport screenshot right away, so states a test closes again within a few milliseconds get a screenshot too (`captureTransientStates`). It records **raw facts** (tag, attributes, position among siblings, ancestors, accessible name), not keys: identity and filtering are decided later.
 3. **Reporter**: merges data from all workers, applies the [report-time rules](#report-time-rules) (filters, identity), groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it, and renders the HTML report and `coverage.json`. It also saves the raw data in `ui-coverage-report/data/`, so you can [rebuild the report](#rebuilding-the-report-report-cli) with other rules without running the tests again.
 
 ### Which elements count
@@ -328,6 +328,7 @@ export default defineUiCoverageConfig({
   recording: {
     enabled: !!process.env.UI_COVERAGE, // default: true
     snapshotDelay: 250,                  // ms, default: 250
+    captureTransientStates: true,        // default: true
     screenshots: 'on',                   // 'on' | 'first-only' | 'off', default: 'on'
     format: 'jpeg',                      // 'png' | 'jpeg', default: 'png'
     quality: 80,                         // JPEG quality 0-100, default: 80
@@ -377,6 +378,9 @@ Screenshot options:
 | `format` | `'png'` | `'jpeg'` files are usually several times smaller. |
 | `quality` | `80` | JPEG quality (ignored for PNG). |
 | `maxScreenshotHeight` | `8000` | Full-page screenshots of taller pages are cropped to this height. Elements below the crop are still counted, just not drawn on the image. `0` disables the cap. |
+| `captureTransientStates` | `true` | Screenshot short-lived states: when an interaction changes the page so that the viewport shows elements no screenshot has shown yet (a modal the test opens, fills and saves within `snapshotDelay`), take a viewport screenshot immediately instead of waiting for `snapshotDelay`. The report captions these "viewport, right after an interaction". Only with `screenshots: 'on'`. It costs an extra inventory after interactions that change the DOM, and a viewport screenshot only when something new appeared (no measurable difference in the demo's run time). |
+
+**Fixed and sticky elements.** Boxes are recorded where elements were on screen (viewport position + scroll offset). Full-page screenshots in Chromium, Firefox and WebKit paint `position: fixed` and `sticky` elements (and modal dialogs) at that same place, at the scroll position the page had, so a fixed header shows up in the middle of a full-page image when the page was scrolled, and its box is drawn there. The report draws these boxes dashed. If the page scrolls between the inventory and the screenshot, the boxes no longer match and the screenshot is retaken.
 
 In `coverage.json`, each element has `interactionCounts`: the interactions that counted as tested, by type (`{ "click": 3, "input": 1 }`). The report shows them as the tooltip of the *tested* label and of the Interactions cell. Each element also lists `testIds` / `failingTestIds`, the Playwright test ids (`TestCase.id`) of the tests that touched it, which point into the top-level `tests` array (see [coverage.json](#coveragejson)).
 
@@ -712,7 +716,7 @@ npx playwright-ui-coverage report --data ci-artifacts/ui-coverage-report/data --
 **Data format.** `ui-coverage-data.json` has `formatVersion: 1` and an `attempts` array: one entry per test attempt and browser context with `testId`, `retry`, `passed`, `title`, `project`, `trace`, `tags`, `specFile` and `data`, the recording (`formatVersion: 3`, see `RawCoverageData` in [src/model/raw.ts](src/model/raw.ts); version 2 is still read):
 
 - `nodes`: a table of DOM elements, each `{ tag, parent?, nth?, of?, attrs? }`: the parent's index, the position among same-tag siblings (`:nth-of-type`), and the attributes. Ancestor chains are stored once and shared by every element under them. Tree boundaries are pseudo-nodes: an element at the top of a shadow root has a `{ tag: '#shadow-root' }` parent, whose parent is the shadow host, and a frame's `<html>` has a `{ tag: '#document' }` parent, whose parent is the `<iframe>`.
-- `snapshots`: `{ url, dpr, screenshot?, elements }`, with each element `{ node, name?, x, y, w, h }` (`name` is the accessible name, used for labels only; `candidateOnly: true` marks elements recorded although they aren't interactive, like `<label>`).
+- `snapshots`: `{ url, dpr, viewport?, screenshot?, screenshotClip?, elements }`, with each element `{ node, name?, x, y, w, h, pos? }` (`name` is the accessible name, used for labels only; `candidateOnly: true` marks elements recorded although they aren't interactive, like `<label>`; `pos` is `fixed` or `sticky` when the element or an ancestor is). Boxes are in document CSS pixels. `viewport` is the scroll offset and viewport size; `screenshotClip` is the document region a viewport screenshot shows.
 - `interactions`: `{ event, url, element: { node, name? } }`, pointing into the same node table, so an interaction resolves to the same key as the element in the inventory.
 - `rules`: the deprecated `use.uiCoverage` identity rules, if any.
 
@@ -768,13 +772,13 @@ Notes:
 
 ## Known limitations
 
-- UI states that last shorter than `snapshotDelay` (e.g. a modal a test opens and closes instantly) still count their elements, but may not get a screenshot.
+- A UI state that lasts only a few milliseconds (shorter than a viewport screenshot takes, e.g. a panel a test opens and closes with no step in between) still counts its elements, but may not get a screenshot: the recorder only keeps a screenshot if the new elements are still there, unchanged, after it was taken. States whose new elements are outside the viewport wait for `snapshotDelay` as before.
 - Closed shadow roots aren't inventoried: only their host can count (see [Iframes and shadow DOM](#iframes-and-shadow-dom)).
 - Cross-origin iframes can run in their own process, and Chromium paints those in full-page screenshots only where they are inside the viewport. So elements of a cross-origin frame that are outside the viewport when a screenshot is taken still count, but get no box in it (a later screenshot taken while they are in view shows them).
 - The deprecated recording-time `use.uiCoverage.ignoreSelectors` doesn't reach into frames from the parent page (`iframe.ads button`); use the reporter's `ignoreSelectors`, which does.
 - Hover-only interactions aren't counted.
 - With `scroll` enabled, Playwright's automatic scrolling-into-view before actions also counts as a `scroll` of the container. That's why `scroll` is off by default.
-- Elements with `position: fixed` may be offset in full-page screenshots.
+- With `maxScreenshotHeight`, a page scrolled below the crop has its fixed elements (a fixed header) painted below the crop too, so they aren't drawn on that screenshot.
 
 ## Development
 

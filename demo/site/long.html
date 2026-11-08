@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme — Docs</title><link rel="stylesheet" href="/style.css">
+<style>
+  /* A long scrolling page with a fixed header, a sticky sidebar and a fixed chat button. */
+  body { padding-top: 48px; }
+  .topbar { position: fixed; top: 0; left: 0; right: 0; height: 48px; display: flex; align-items: center; gap: 16px; padding: 0 24px; background: #111827; z-index: 10; }
+  .topbar a { color: #e5e7eb; text-decoration: none; }
+  .topbar button { margin-left: auto; }
+  .layout { display: flex; gap: 24px; max-width: 960px; margin: 0 auto; padding: 24px; align-items: flex-start; }
+  .sidebar { position: sticky; top: 72px; width: 180px; flex: none; display: flex; flex-direction: column; gap: 8px; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; background: #f9fafb; }
+  .content { flex: 1; }
+  .content section { min-height: 700px; border-bottom: 1px solid #e5e7eb; padding-bottom: 24px; }
+  .chat { position: fixed; right: 24px; bottom: 24px; border-radius: 999px; padding: 12px 20px; box-shadow: 0 4px 12px rgba(0,0,0,.2); z-index: 10; }
+  .chat-panel { position: fixed; right: 24px; bottom: 84px; width: 260px; border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; background: #fff; box-shadow: 0 4px 12px rgba(0,0,0,.2); z-index: 10; }
+  .chat-panel label { margin-top: 0; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a href="/">Home</a><a href="/users">Users</a><a href="/long">Docs</a>
+  <button data-testid="sign-in">Sign in</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" aria-label="Sections">
+    <a href="#intro">Intro</a>
+    <a href="#setup">Setup</a>
+    <a href="#usage">Usage</a>
+    <a href="#faq">FAQ</a>
+    <button data-testid="print">Print</button>
+  </aside>
+  <div class="content">
+    <section id="intro"><h1>Docs</h1><p>A long page: the header and the chat button are fixed, the sidebar is sticky.</p><button data-testid="intro-more">Read more</button>
+      <p id="feedback-note" hidden>Thanks for your feedback. <button data-testid="undo-feedback" onclick="this.parentElement.hidden = true">Undo</button></p></section>
+    <section id="setup"><h2>Setup</h2><p>Setup text.</p><button data-testid="copy-install">Copy install command</button></section>
+    <section id="usage"><h2>Usage</h2><p>Usage text.</p><button data-testid="run-example">Run example</button></section>
+    <section id="faq"><h2>FAQ</h2><p>FAQ text.</p><button data-testid="feedback" onclick="this.textContent = 'Thanks!'; document.getElementById('feedback-note').hidden = false">Was this helpful?</button></section>
+  </div>
+</div>
+<button class="chat primary" data-testid="chat" onclick="const p = document.getElementById('chat-panel'); p.hidden = !p.hidden">Chat</button>
+<div class="chat-panel" id="chat-panel" hidden>
+  <label for="chat-message">Message</label>
+  <input id="chat-message">
+  <button data-testid="chat-send" onclick="document.getElementById('chat-panel').hidden = true">Send</button>
+</div>
+</body>
+</html>
