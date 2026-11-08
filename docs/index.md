@@ -36,9 +36,3 @@ features:
     details: Filters, views and identity rules are applied when the report is built. Rebuild the report from stored data without running the tests again.
     link: /guide/how-it-works
 ---
-
-<div class="home-shot">
-
-![The UI coverage report: a route list with coverage % per view, and a screenshot of the /users page with green boxes on tested elements and red boxes on untested ones](./images/report-overview.png)
-
-</div>
