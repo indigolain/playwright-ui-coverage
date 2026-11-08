@@ -28,7 +28,8 @@
     "demo": "playwright test",
     "demo:serve": "node demo/server.mjs",
     "docs:screenshots": "node scripts/screenshots.mjs",
-    "demo:register": "UICOV_MODE=register playwright test"
+    "demo:register": "UICOV_MODE=register playwright test",
+    "test": "vitest run --dir test"
   },
   "keywords": [
     "playwright",
@@ -39,11 +40,12 @@
     "reporter"
   ],
   "peerDependencies": {
-    "@playwright/test": ">=1.40.0"
+    "@playwright/test": ">=1.50.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0",
+    "@playwright/test": "^1.50.0",
     "@types/node": "^22.0.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^5.1.0"
   }
 }

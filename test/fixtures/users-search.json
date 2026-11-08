@@ -1,0 +1,30 @@
+{
+  "interactions": [
+    { "key": "#search", "label": "searchbox \"Search users\"", "event": "input", "url": "http://localhost:4173/users" },
+    { "key": "#search", "label": "searchbox \"Search users\"", "event": "change", "url": "http://localhost:4173/users?q=grace" }
+  ],
+  "snapshots": [
+    {
+      "url": "http://localhost:4173/users",
+      "dpr": 1,
+      "screenshot": "/results/users-search/ui-coverage-0.png",
+      "elements": [
+        { "key": "#search", "label": "searchbox \"Search users\"", "tag": "input", "x": 10, "y": 10, "w": 200, "h": 30 },
+        { "key": "[data-testid=\"add-user\"]", "label": "button \"Add user\"", "tag": "button", "x": 220, "y": 10, "w": 80, "h": 30 },
+        { "key": "link \"Ada Lovelace\"", "label": "link \"Ada Lovelace\"", "tag": "a", "x": 10, "y": 50, "w": 100, "h": 20 },
+        { "key": "link \"Grace Hopper\"", "label": "link \"Grace Hopper\"", "tag": "a", "x": 10, "y": 80, "w": 100, "h": 20 },
+        { "key": "button \"Delete\"", "label": "button \"Delete\"", "tag": "button", "x": 300, "y": 50, "w": 60, "h": 20 },
+        { "key": "button \"Delete\"", "label": "button \"Delete\"", "tag": "button", "x": 300, "y": 80, "w": 60, "h": 20 }
+      ]
+    },
+    {
+      "url": "http://localhost:4173/users?q=grace",
+      "dpr": 1,
+      "elements": [
+        { "key": "#search", "label": "searchbox \"Search users\"", "tag": "input", "x": 10, "y": 10, "w": 200, "h": 30 },
+        { "key": "link \"Grace Hopper\"", "label": "link \"Grace Hopper\"", "tag": "a", "x": 10, "y": 50, "w": 100, "h": 20 },
+        { "key": "button \"Delete\"", "label": "button \"Delete\"", "tag": "button", "x": 300, "y": 50, "w": 60, "h": 20 }
+      ]
+    }
+  ]
+}

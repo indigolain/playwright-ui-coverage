@@ -45,7 +45,7 @@ export default defineConfig({
 });
 ```
 
-This is the quickest way to try it on an existing suite. It hooks into Playwright's internal instrumentation, the same hook Playwright's trace recorder uses. That API is private, so if a Playwright release changes it, register mode switches itself off with a warning. Option B keeps working either way.
+This is the quickest way to try it on an existing suite. It hooks into Playwright's internal instrumentation, the same hook Playwright's trace recorder uses. That API is private, so if a Playwright release changes it, register mode switches itself off with a warning (set `UICOV_STRICT=1` to make that an error, e.g. in CI). Option B keeps working either way.
 
 ### Option B: fixture (stable, recommended for long-term use)
 
@@ -114,6 +114,10 @@ Anything inside an element with `data-uicov-ignore` is always excluded.
 | `maxScreenshotsPerRoute` | `3` | Screenshots chosen to cover the most elements. |
 | `threshold` | none | Fail the run if overall coverage % is below this. |
 
+## Compatibility
+
+- **`@playwright/test` 1.50 or later.** CI runs the demo in both modes on Chromium, Firefox and WebKit with 1.50.0 and the latest release, and weekly against `@playwright/test@next`. Older versions still record coverage, but show an extra `attach "ui-coverage"` step in each test's report.
+
 ## Known limitations
 
 - UI states that last shorter than `snapshotDelay` (e.g. a modal a test opens and closes instantly) still count their elements, but may not get a screenshot.
@@ -131,6 +135,8 @@ npm run demo:register # register mode: same tests, config-only recording
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
 npm run typecheck
 npm run build         # compiles to dist/
+npm test              # unit tests (vitest)
+BROWSER=firefox scripts/demo-both-modes.sh  # what CI runs: both modes, same coverage, no extra steps
 ```
 
 ## License

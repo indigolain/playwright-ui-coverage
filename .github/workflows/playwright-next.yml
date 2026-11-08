@@ -1,0 +1,41 @@
+name: Playwright next
+
+# Weekly run against the next Playwright release, to catch changes to the
+# private instrumentation API that register mode relies on before they ship.
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  demo:
+    name: demo (${{ matrix.browser }}, @playwright/test next)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install @playwright/test@next
+        run: npm install --no-save @playwright/test@next && npx playwright --version
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: scripts/demo-both-modes.sh
+        env:
+          BROWSER: ${{ matrix.browser }}
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: demo-${{ matrix.browser }}-next
+          path: |
+            .ui-coverage-ci/
+            ui-coverage-report/
+            test-results/
+          include-hidden-files: true
+          retention-days: 7

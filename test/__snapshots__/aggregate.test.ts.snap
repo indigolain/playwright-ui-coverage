@@ -1,0 +1,244 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`aggregate > matches the snapshot 1`] = `
+{
+  "percent": 57.1,
+  "routes": [
+    {
+      "elements": [
+        {
+          "instances": 1,
+          "key": "#archive",
+          "label": "button "Archive"",
+          "tag": "button",
+          "tested": false,
+          "testedBy": [],
+        },
+        {
+          "instances": 1,
+          "key": "#cancel",
+          "label": "button "Cancel"",
+          "tag": "button",
+          "tested": false,
+          "testedBy": [],
+        },
+        {
+          "instances": 1,
+          "key": "#save",
+          "label": "button "Save"",
+          "tag": "button",
+          "tested": true,
+          "testedBy": [
+            "app › hash routes",
+          ],
+        },
+      ],
+      "percent": 33.3,
+      "route": "/app/#/items/:id",
+      "screenshots": [],
+      "tested": 1,
+      "total": 3,
+    },
+    {
+      "elements": [
+        {
+          "instances": 1,
+          "key": "button "Cancel"",
+          "label": "button "Cancel"",
+          "tag": "button",
+          "tested": false,
+          "testedBy": [],
+        },
+        {
+          "instances": 3,
+          "key": "button "Delete"",
+          "label": "button "Delete"",
+          "tag": "button",
+          "tested": false,
+          "testedBy": [],
+        },
+        {
+          "instances": 1,
+          "key": "link "Ada Lovelace"",
+          "label": "link "Ada Lovelace"",
+          "tag": "a",
+          "tested": false,
+          "testedBy": [],
+        },
+        {
+          "instances": 1,
+          "key": "link "Grace Hopper"",
+          "label": "link "Grace Hopper"",
+          "tag": "a",
+          "tested": false,
+          "testedBy": [],
+        },
+        {
+          "instances": 1,
+          "key": "[data-testid="add-user"]",
+          "label": "button "Add user"",
+          "tag": "button",
+          "tested": true,
+          "testedBy": [
+            "users › add",
+          ],
+        },
+        {
+          "instances": 1,
+          "key": "button "Dismiss"",
+          "label": "button "Dismiss"",
+          "tag": "?",
+          "tested": true,
+          "testedBy": [
+            "users › add",
+          ],
+        },
+        {
+          "instances": 1,
+          "key": "button "Save"",
+          "label": "button "Save"",
+          "tag": "button",
+          "tested": true,
+          "testedBy": [
+            "users › add",
+          ],
+        },
+        {
+          "instances": 1,
+          "key": "link "Katherine Johnson"",
+          "label": "link "Katherine Johnson"",
+          "tag": "a",
+          "tested": true,
+          "testedBy": [
+            "users › add",
+          ],
+        },
+        {
+          "instances": 1,
+          "key": "#search",
+          "label": "searchbox "Search users"",
+          "tag": "input",
+          "tested": true,
+          "testedBy": [
+            "users › search",
+          ],
+        },
+        {
+          "instances": 1,
+          "key": "#new-name",
+          "label": "textbox "Name"",
+          "tag": "input",
+          "tested": true,
+          "testedBy": [
+            "users › add",
+          ],
+        },
+      ],
+      "percent": 60,
+      "route": "/users",
+      "screenshots": [
+        {
+          "boxes": [
+            {
+              "h": 30,
+              "key": "#search",
+              "w": 200,
+              "x": 10,
+              "y": 10,
+            },
+            {
+              "h": 30,
+              "key": "[data-testid="add-user"]",
+              "w": 80,
+              "x": 220,
+              "y": 10,
+            },
+            {
+              "h": 20,
+              "key": "link "Ada Lovelace"",
+              "w": 100,
+              "x": 10,
+              "y": 50,
+            },
+            {
+              "h": 20,
+              "key": "link "Grace Hopper"",
+              "w": 100,
+              "x": 10,
+              "y": 80,
+            },
+            {
+              "h": 20,
+              "key": "button "Delete"",
+              "w": 60,
+              "x": 300,
+              "y": 50,
+            },
+            {
+              "h": 20,
+              "key": "button "Delete"",
+              "w": 60,
+              "x": 300,
+              "y": 80,
+            },
+          ],
+          "dpr": 1,
+          "source": "/results/users-search/ui-coverage-0.png",
+          "test": "users › search",
+        },
+        {
+          "boxes": [
+            {
+              "h": 30,
+              "key": "#new-name",
+              "w": 180,
+              "x": 400,
+              "y": 200,
+            },
+            {
+              "h": 30,
+              "key": "button "Save"",
+              "w": 60,
+              "x": 400,
+              "y": 250,
+            },
+            {
+              "h": 30,
+              "key": "button "Cancel"",
+              "w": 60,
+              "x": 470,
+              "y": 250,
+            },
+          ],
+          "dpr": 2,
+          "source": "/results/users-add/ui-coverage-1.png",
+          "test": "users › add",
+        },
+      ],
+      "tested": 6,
+      "total": 10,
+    },
+    {
+      "elements": [
+        {
+          "instances": 1,
+          "key": "link "← Back to users"",
+          "label": "link "← Back to users"",
+          "tag": "?",
+          "tested": true,
+          "testedBy": [
+            "users › add",
+          ],
+        },
+      ],
+      "percent": 100,
+      "route": "/users/:id",
+      "screenshots": [],
+      "tested": 1,
+      "total": 1,
+    },
+  ],
+  "tested": 8,
+  "total": 14,
+}
+`;

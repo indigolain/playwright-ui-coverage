@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: typecheck, build, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+  demo:
+    # Each job runs the demo in both recording modes (fixture and register)
+    # and checks that they produce the same coverage.json, so a broken
+    # register hook fails CI. See scripts/demo-both-modes.sh.
+    name: demo (${{ matrix.browser }}, @playwright/test ${{ matrix.playwright }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+        # Oldest supported version (keep in sync with peerDependencies and README) and latest.
+        playwright: ['1.50.0', latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install @playwright/test@${{ matrix.playwright }}
+        run: npm install --no-save @playwright/test@${{ matrix.playwright }} && npx playwright --version
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: scripts/demo-both-modes.sh
+        env:
+          BROWSER: ${{ matrix.browser }}
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: demo-${{ matrix.browser }}-${{ matrix.playwright }}
+          path: |
+            .ui-coverage-ci/
+            ui-coverage-report/
+            test-results/
+          include-hidden-files: true
+          retention-days: 7
