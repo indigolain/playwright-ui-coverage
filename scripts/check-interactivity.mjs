@@ -97,7 +97,29 @@ const check = async (name, fn) => {
   }
 };
 
-async function setup(opts = options) {
+// Open shadow roots are part of the composed tree; closed ones are opaque.
+const SHADOW_PAGE = `<!doctype html><html><body>
+  <x-host id="host"></x-host>
+  <x-card id="card" tabindex="0"></x-card>
+  <x-closed id="closed" role="button" tabindex="0" aria-label="Closed"></x-closed>
+  <section data-uicov-ignore><x-host id="ignored-host"></x-host></section>
+  <div id="decl-host"><template shadowrootmode="open"><button id="decl-btn">Declarative</button></template></div>
+<script>
+  const define = (name, html, mode = 'open') => customElements.define(name, class extends HTMLElement {
+    connectedCallback() {
+      if (this.done) return;
+      this.done = true;
+      this.attachShadow({ mode }).innerHTML = html;
+    }
+  });
+  define('x-host', '<button id="sb">Shadow</button><label id="sl" for="si">Field</label><input id="si"><x-inner></x-inner>');
+  define('x-inner', '<a id="deep" href="#deep">Deep</a>');
+  define('x-card', '<span>Card</span> <button id="only">Only</button>');
+  define('x-closed', '<button id="hidden">Hidden</button>', 'closed');
+</script>
+</body></html>`;
+
+async function setup(opts = options, body = PAGE) {
   const context = await browser.newContext();
   const recorded = [];
   await context.exposeBinding(
@@ -107,7 +129,7 @@ async function setup(opts = options) {
   await context.addInitScript(tracker, opts);
   const page = await context.newPage();
   page.on('console', () => {}); // invalid selector warning
-  await page.route('http://uicov.test/', (route) => route.fulfill({ contentType: 'text/html', body: PAGE }));
+  await page.route('http://uicov.test/', (route) => route.fulfill({ contentType: 'text/html', body }));
   await page.goto('http://uicov.test/');
   const take = async () => {
     await page.waitForTimeout(50);
@@ -223,6 +245,37 @@ try {
     assert.ok(!keys.includes('#scroller'), 'scroll container inventoried although scroll is off');
     await s.context.close();
   });
+
+  console.log('shadow DOM');
+  const s = await setup(options, SHADOW_PAGE);
+  await check('inventory walks open shadow roots (nested, declarative); closed ones are opaque', async () => {
+    const inv = await s.page.evaluate(() => window.__uicovInventory());
+    assert.deepEqual(keysOf(inv.nodes, inv.elements.filter((e) => !e.candidateOnly)), [
+      '#host >> #sb',
+      '#host >> #si',
+      '#host >> x-inner >> #deep',
+      '#card >> #only', // the card contains one widget (in its shadow root): it counts as that one
+      '#closed',
+      '#decl-host >> #decl-btn',
+    ]);
+  });
+  await check('events inside shadow roots credit the inner element', async () => {
+    await s.page.click('#host >> #sb');
+    await s.page.click('#host >> #deep');
+    await s.page.click('#card', { position: { x: 2, y: 2 } });
+    await s.page.click('#closed');
+    await s.page.click('#ignored-host >> #sb');
+    assert.deepEqual(await s.take(), ['click:#host >> #sb', 'click:#host >> x-inner >> #deep', 'click:#card >> #only', 'click:#closed']);
+  });
+  await check('non-composed events (change) and labels inside a shadow root', async () => {
+    await s.page.goto('http://uicov.test/');
+    await s.take();
+    await s.page.click('#host >> #sl'); // forwarded to the input
+    await s.page.fill('#host >> #si', 'x');
+    await s.page.locator('#host >> #si').blur();
+    assert.deepEqual(await s.take(), ['click:#host >> #si', 'input:#host >> #si', 'change:#host >> #si']);
+  });
+  await s.context.close();
 } finally {
   await browser.close();
 }

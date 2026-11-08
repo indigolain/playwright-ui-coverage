@@ -11,18 +11,27 @@ import type { UiCoverageRules } from './rules';
  * Version of the `ui-coverage` test attachment payload (`RawCoverageData`).
  * Payloads without `formatVersion` are the pre-0.2 format, where keys and
  * labels were computed in the browser (`TestCoverageData` in `types.ts`).
+ * 3 added frame and shadow root boundaries to the node table (`RawNode.tag`);
+ * version 2 payloads are read as they are (they have none).
  */
-export const RECORDING_FORMAT_VERSION = 2;
+export const RECORDING_FORMAT_VERSION = 3;
+/** Recording format versions this version reads. */
+export const READABLE_RECORDING_FORMAT_VERSIONS: readonly number[] = [2, 3];
 
 /**
  * One DOM element: a recorded candidate or one of its ancestors. Nodes are
  * stored once per test attempt in `RawCoverageData.nodes` and point to their
  * parent, so ancestor chains shared by many elements are stored once.
+ *
+ * Tree boundaries are pseudo-nodes: an element at the top of an open shadow
+ * root has a `#shadow-root` node as parent, whose parent is the shadow host;
+ * a frame's `<html>` has a `#document` node as parent, whose parent is the
+ * `<iframe>` (or `<frame>`) element in the embedding document.
  */
 export interface RawNode {
-  /** Lowercase tag name. */
+  /** Lowercase tag name, or `#shadow-root` / `#document` for a tree boundary. */
   tag: string;
-  /** Index into `nodes` of the parent element. Absent for `<html>` (or a detached root). */
+  /** Index into `nodes` of the parent node. Absent for the top document's `<html>` (or a detached root). */
   parent?: number;
   /** 1-based position among same-tag siblings (`:nth-of-type`). Absent when `of` is absent. */
   nth?: number;
@@ -94,7 +103,8 @@ export interface RawInteraction {
 
 /** Payload of the `ui-coverage` attachment (one per browser context per test attempt). */
 export interface RawCoverageData {
-  formatVersion: typeof RECORDING_FORMAT_VERSION;
+  /** `RECORDING_FORMAT_VERSION` when written; older readable versions are accepted. */
+  formatVersion: number;
   nodes: RawNode[];
   /**
    * Identity rules set in `use.uiCoverage` (deprecated there) when recording;
@@ -108,12 +118,40 @@ export interface RawCoverageData {
   componentTest?: boolean;
 }
 
-/** Result of the in-page `__uicovInventory()` (node indices are local to it). */
+/**
+ * Result of the in-page `__uicovInventory()` (node indices are local to it).
+ * Boxes are in the coordinates of the frame's own document; the recorder maps
+ * child frames' boxes into the page's.
+ */
 export interface RawInventory {
   url: string;
   dpr: number;
   nodes: RawNode[];
   elements: RawElement[];
+  /** The document's scroll offset (`scrollX`/`scrollY`), to map a frame's boxes into the page. */
+  scrollX?: number;
+  scrollY?: number;
+  /** The viewport size (`innerWidth`/`innerHeight`). */
+  viewportWidth?: number;
+  viewportHeight?: number;
+}
+
+/**
+ * Result of the in-page `__uicovFrameHost(el)` for an `<iframe>` element:
+ * its node chain and the box of its content area (where the frame's viewport
+ * is), in the coordinates of the document it is in.
+ */
+export interface RawFrameHost {
+  nodes: RawNode[];
+  /** Index into `nodes` of the frame element. */
+  node: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** The embedding document's scroll offset. */
+  scrollX: number;
+  scrollY: number;
 }
 
 /** First argument of the `__uicovRecord` binding (node indices are local to it). */
