@@ -39,6 +39,8 @@ export {
   BUILTIN_ATTRIBUTE_FILTERS,
   BUILTIN_IDENTITY_ATTRIBUTES,
   type AttributeFilter,
+  type AutoGroupOptions,
+  type ElementGroupRule,
   type LinkRules,
   type UiCoverageRules,
 } from './model/rules';
@@ -78,6 +80,7 @@ export type {
   CoverageCounts,
   ViewCoverage,
   ElementCoverage,
+  ElementGroup,
   LinkCoverage,
   UntestedView,
   UntestedViewReferrer,

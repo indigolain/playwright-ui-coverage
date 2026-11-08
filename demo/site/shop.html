@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme — Shop</title><link rel="stylesheet" href="/style.css">
+<style>
+  .products { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+  .card h3 { margin: 0 0 4px; font-size: 16px; }
+  .card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .forms { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .forms form { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+  label.chip { display: inline-block; font-weight: 400; padding: 4px 10px; border-radius: 999px; background: #eef2ff; cursor: pointer; }
+</style>
+</head>
+<body>
+<nav><a href="/">Home</a><a href="/users">Users</a><a href="/settings">Settings</a></nav>
+<main>
+  <h1>Shop</h1>
+  <!-- Grouping demo (README "Element grouping"). Repeated cards: each card's
+       "Add to cart" (per-product test ids) and "Save for later" (no ids) are
+       one element each, with 3 instances. -->
+  <ul class="products">
+    <li class="card" data-testid="product-1">
+      <h3>Desk lamp</h3><p>$25</p>
+      <div class="card-actions">
+        <button class="primary" data-testid="add-to-cart-1" onclick="added(this)">Add to cart</button>
+        <button onclick="this.textContent = 'Saved'">Save for later</button>
+      </div>
+    </li>
+    <li class="card" data-testid="product-2">
+      <h3>Office chair</h3><p>$140</p>
+      <div class="card-actions">
+        <button class="primary" data-testid="add-to-cart-2" onclick="added(this)">Add to cart</button>
+        <button onclick="this.textContent = 'Saved'">Save for later</button>
+      </div>
+    </li>
+    <li class="card" data-testid="product-3">
+      <h3>Monitor arm</h3><p>$60</p>
+      <div class="card-actions">
+        <button class="primary" data-testid="add-to-cart-3" onclick="added(this)">Add to cart</button>
+        <button onclick="this.textContent = 'Saved'">Save for later</button>
+      </div>
+    </li>
+  </ul>
+  <p id="cart">Cart: 0 items</p>
+
+  <!-- Explicit group in the markup: the five stars are one element ("star-rating"). -->
+  <h2>Rate us</h2>
+  <div class="row stars" data-uicov-group="star-rating">
+    <button aria-label="1 star" onclick="rated(1)">★</button>
+    <button aria-label="2 stars" onclick="rated(2)">★</button>
+    <button aria-label="3 stars" onclick="rated(3)">★</button>
+    <button aria-label="4 stars" onclick="rated(4)">★</button>
+    <button aria-label="5 stars" onclick="rated(5)">★</button>
+  </div>
+  <p id="rating"></p>
+
+  <!-- Form boundary: the same name / data-testid in two forms are separate elements. -->
+  <div class="forms">
+    <form id="signin" onsubmit="event.preventDefault(); document.getElementById('welcome').hidden = false">
+      <h2>Sign in</h2>
+      <input name="email" type="email" aria-label="Email" placeholder="Email">
+      <input name="password" type="password" aria-label="Password" placeholder="Password">
+      <p><button type="submit" class="primary" data-testid="submit">Sign in</button></p>
+    </form>
+    <form id="signup" onsubmit="event.preventDefault()">
+      <h2>Create account</h2>
+      <input name="email" type="email" aria-label="Email" placeholder="Email">
+      <input name="password" type="password" aria-label="Password" placeholder="Password">
+      <p><button type="submit" class="primary" data-testid="submit">Create account</button></p>
+    </form>
+  </div>
+  <p id="welcome" hidden>Welcome back!</p>
+
+  <!-- A focusable label counts, but its events go to the control: it is grouped with the input. -->
+  <p><label class="chip" for="gift-note" tabindex="0">Gift note</label></p>
+  <input id="gift-note" placeholder="Write a message">
+</main>
+<script>
+  let count = 0;
+  function added(b) { document.getElementById('cart').textContent = 'Cart: ' + ++count + ' items'; }
+  function rated(n) { document.getElementById('rating').textContent = 'Thanks for ' + n + ' stars!'; }
+</script>
+</body>
+</html>

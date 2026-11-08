@@ -18,7 +18,7 @@ export interface LocatorOptions {
 
 /** The subset of `ElementCoverage` the suggestion is built from. */
 export type LocatorInput = Pick<ElementCoverage, 'key' | 'label' | 'tag' | 'instances'> &
-  Partial<Pick<ElementCoverage, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames'>>;
+  Partial<Pick<ElementCoverage, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames' | 'group'>>;
 
 /** The tracker truncates names to this many characters. */
 const MAX_NAME = 60;
@@ -99,7 +99,10 @@ function selectorFromKey(key: string, uicovId?: string): string {
  */
 export function cssFromKey(e: LocatorInput): string {
   const frames = e.frames ?? [];
-  const key = frames.length ? withinFrame(e.key, frames[frames.length - 1]) : e.key;
+  let key = frames.length ? withinFrame(e.key, frames[frames.length - 1]) : e.key;
+  // data-uicov-group on a wrapper: the key matches the wrapper, so look for the element inside it.
+  if (e.group?.reason === 'markup' && e.attrs && e.attrs['data-uicov-group'] === undefined && /^[a-z][\w-]*$/.test(e.tag))
+    key += ` ${e.tag}`;
   return selectorFromKey(key, e.attrs?.['data-uicov-id']);
 }
 
@@ -168,8 +171,20 @@ export function suggest(e: LocatorInput, opts: LocatorOptions = {}, ctx: Suggest
   };
   const textArg = () => (truncated ? str(name) : `${str(name)}, { exact: true }`);
   let locator: string;
-  const testId = testIdOf(e, testIdAttr);
-  if (testId !== undefined) locator = `page.getByTestId(${str(testId)})`;
+  let testId = testIdOf(e, testIdAttr);
+  const frames = e.frames ?? [];
+  const ownKey = frames.length ? withinFrame(e.key, frames[frames.length - 1]) : e.key;
+  const testIdSelector = testId === undefined ? '' : `[${testIdAttr}=${JSON.stringify(testId)}]`;
+  // A group whose members have different test ids: this one's would find only one member.
+  if (testId !== undefined && e.group && e.group.members > 1 && !ownKey.includes(testIdSelector)) testId = undefined;
+  // The same test id in several forms: the key is scoped by the form (`#signup [data-testid="submit"]`).
+  const formScope =
+    testId !== undefined && ownKey !== testIdSelector && ownKey.endsWith(` ${testIdSelector}`) && !ownKey.includes('>>')
+      ? ownKey.slice(0, -testIdSelector.length - 1)
+      : '';
+  if (testId !== undefined && formScope)
+    locator = `page.locator(${str(selectorFromKey(formScope))}).getByTestId(${str(testId)})`;
+  else if (testId !== undefined) locator = `page.getByTestId(${str(testId)})`;
   else if (variants > 1) {
     // The name changes between runs or instances (counters, timestamps, row
     // data); the key doesn't, so a name-based locator would likely break.

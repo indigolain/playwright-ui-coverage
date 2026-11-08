@@ -33,6 +33,8 @@ export interface InventoryElement {
    * (each is a prefix of `key`). Absent in the top document.
    */
   frames?: string[];
+  /** Grouping facts from the recorded structure (internal, see `grouping.ts`). */
+  grouping?: GroupHints;
   /**
    * For `<a href>` / `<area href>`: the destination as the browser resolved it,
    * set only when a `<base>` element made it differ from the `href` attribute
@@ -47,6 +49,43 @@ export interface InventoryElement {
   h: number;
   /** `position: fixed` / `sticky` (itself or an ancestor): drawn where it was on screen. See `RawElement.pos`. */
   pos?: 'fixed' | 'sticky';
+}
+
+/** Why elements were merged into one (`group.reason` in coverage.json). */
+export type GroupReason = 'markup' | 'config' | 'same-key' | 'row' | 'repeated' | 'label';
+
+/** One level of an element's ancestor chain, for building a repeated group's key. */
+export interface GroupLevel {
+  /** `tag` or `tag:nth-of-type(n)`. */
+  step: string;
+  /** Tag only, for when members differ in position. */
+  tag: string;
+  /** The level's attribute identity (`[data-testid="x"]`, `#id`), if any. */
+  anchor?: string;
+  /** Combinator before this level: ` > ` or ` >> ` (into a shadow root or frame). */
+  sep: string;
+}
+
+/**
+ * What the report-time rules found out about an element's grouping, from the
+ * recorded structure (`model/resolve.ts`). Applied per view by `grouping.ts`,
+ * which needs every element of the view (most heuristics need 2 members).
+ */
+export interface GroupHints {
+  /** Opted out (`data-uicov-group=""`, an `elementGroups` entry with `exclude`). */
+  none?: true;
+  /** Explicit group (markup or `elementGroups`): applies as-is. */
+  explicit?: { key: string; name: string; reason: 'markup' | 'config' };
+  /** Key of the nearest `<form>` / `role=form` ancestor. */
+  form?: string;
+  /** Group key for the element's column/position in a table or grid. */
+  row?: string;
+  /** Signature of the element's shape (tags, classes, role, name) and its ancestor chain. */
+  repeated?: { sig: string; levels: GroupLevel[] };
+  /** For a counted `<label>`: the key of its control. */
+  label?: string;
+  /** Set by `grouping.ts` on a label merged into its control: not counted as an instance. */
+  joined?: true;
 }
 
 export interface Inventory {
@@ -65,6 +104,7 @@ export interface Interaction {
   name?: string;
   nameFrom?: string;
   frames?: string[];
+  grouping?: GroupHints;
   /** Same as `InventoryElement.href`. */
   href?: string;
   event: string;

@@ -90,6 +90,10 @@ exports[`aggregate > matches the snapshot 1`] = `
         },
         {
           "attrs": undefined,
+          "group": {
+            "members": 1,
+            "reason": "same-key",
+          },
           "instances": 3,
           "interactionCounts": {},
           "interactionTotal": 0,
