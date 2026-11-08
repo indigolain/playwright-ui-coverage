@@ -10,6 +10,9 @@
     <button class="primary" data-testid="get-started" onclick="location.href='/users'">Get started</button>
     <button onclick="document.getElementById('more').hidden = false">Learn more</button>
   </div>
+  <!-- The count differs on every run (and changes when clicked); identity comes from data-uicov-id. -->
+  <p><button data-uicov-id="like-button" onclick="this.querySelector('span').textContent = +this.querySelector('span').textContent + 1">♥ Like (<span id="likes"></span>)</button></p>
+  <script>document.getElementById('likes').textContent = 100 + Math.floor(Math.random() * 900);</script>
   <p id="more" hidden>More info, with a <a href="https://playwright.dev">link to Playwright</a>.</p>
 
   <h2>Newsletter</h2>

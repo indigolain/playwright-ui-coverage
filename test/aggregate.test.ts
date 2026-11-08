@@ -68,7 +68,7 @@ describe('aggregate', () => {
     expect(element(s, '/users', 'link "Ada Lovelace"').tested).toBe(false);
   });
 
-  it('lists each test once in testedBy, in order of first interaction', () => {
+  it('lists each test once in testedBy, sorted', () => {
     const data = fixture('users-search');
     const s = aggregate(
       [
@@ -78,7 +78,7 @@ describe('aggregate', () => {
       opts,
     );
     // users-search interacts with #search twice.
-    expect(element(s, '/users', '#search').testedBy).toEqual(['b', 'a']);
+    expect(element(s, '/users', '#search').testedBy).toEqual(['a', 'b']);
   });
 
   it('counts interactions on elements that were never inventoried', () => {
@@ -90,6 +90,8 @@ describe('aggregate', () => {
       instances: 1,
       tested: true,
       testedBy: ['users › add'],
+      testedByFailing: [],
+      interactionCounts: { click: 1 },
     });
   });
 
@@ -148,6 +150,45 @@ describe('aggregate', () => {
     expect(s.routes.map((r) => r.route)).toEqual(['app', 'users']);
   });
 
+  it('counts interactions per event type', () => {
+    const s = aggregate(tests(), opts);
+    expect(element(s, '/users', '#search').interactionCounts).toEqual({ change: 1, input: 1 });
+    expect(element(s, '/users', 'link "Ada Lovelace"').interactionCounts).toEqual({});
+  });
+
+  it("records 'failing' entries in testedByFailing only, and drops 'ignore' entries", () => {
+    const s = aggregate(
+      [
+        { title: 'passes', data: fixture('users-search') },
+        { title: 'fails', data: fixture('users-add'), interactions: 'failing' },
+        { title: 'skipped', data: fixture('hash-app'), interactions: 'ignore' },
+      ],
+      opts,
+    );
+    expect(element(s, '/users', 'button "Save"')).toMatchObject({ tested: false, testedBy: [], testedByFailing: ['fails'] });
+    // Tested by a passing test: the failing one isn't listed again.
+    expect(element(s, '/users', '#search')).toMatchObject({ tested: true, testedBy: ['passes'], testedByFailing: [] });
+    expect(route(s, '/users').failingOnly).toBeGreaterThan(0);
+    // Inventories of ignored entries still count, their interactions don't.
+    expect(route(s, '/app/#/items/:id')).toMatchObject({ total: 3, tested: 0 });
+  });
+
+  it('puts all data of an entry with `view` into that view', () => {
+    const s = aggregate([{ title: 't', data: { ...fixture('users-add'), view: 'users.spec.ts' } }], opts);
+    expect(s.routes.map((r) => r.route)).toEqual(['users.spec.ts']);
+  });
+
+  it('merges different labels for one key into a stable label', () => {
+    const data = (label: string): TestCoverageData => ({
+      interactions: [],
+      snapshots: [{ url: 'http://x/', dpr: 1, elements: [{ ...el('row-link'), label }] }],
+    });
+    const s1 = aggregate([{ title: 'a', data: data('link "Ada"') }, { title: 'b', data: data('link "Grace"') }], opts);
+    const s2 = aggregate([{ title: 'b', data: data('link "Grace"') }, { title: 'a', data: data('link "Ada"') }], opts);
+    expect(s1.routes[0].elements[0].label).toBe('link "Ada" (+1 variants)');
+    expect(s2.routes[0].elements[0].label).toBe('link "Ada" (+1 variants)');
+  });
+
   describe('screenshot selection', () => {
     it('picks screenshots greedily by how many unseen elements they add', () => {
       const s = aggregate(
@@ -197,13 +238,26 @@ describe('aggregate', () => {
     it('keeps dpr, test title and every box of the chosen screenshot', () => {
       const s = aggregate([{ title: 'users › add', data: fixture('users-add') }], opts);
       const [first, second] = route(s, '/users').screenshots;
-      expect(first).toMatchObject({ source: '/results/users-add/ui-coverage-0.png', dpr: 2, test: 'users › add' });
+      expect(first).toMatchObject({ source: 'ui-coverage-screenshot-0', dpr: 2, test: 'users › add' });
       // Both "Delete" instances get a box.
       expect(first.boxes.filter((b) => b.key === 'button "Delete"')).toEqual([
         { key: 'button "Delete"', x: 300, y: 50, w: 60, h: 20 },
         { key: 'button "Delete"', x: 300, y: 80, w: 60, h: 20 },
       ]);
-      expect(second.source).toBe('/results/users-add/ui-coverage-1.png');
+      expect(second.source).toBe('ui-coverage-screenshot-1');
+    });
+
+    it('only counts and boxes elements inside a cropped screenshot', () => {
+      const tall = { ...snap('/tall.png', ['a', 'b']), screenshotHeight: 100 };
+      tall.elements[1].y = 150; // below the crop
+      const s = aggregate(
+        [{ title: 't', data: { interactions: [], snapshots: [tall, snap('/b.png', ['b'])] } }],
+        opts,
+      );
+      expect(s.routes[0].screenshots.map((x) => [x.source, x.boxes.map((b) => b.key)])).toEqual([
+        ['/tall.png', ['a']],
+        ['/b.png', ['b']],
+      ]);
     });
 
     it('selects screenshots per route', () => {

@@ -12,6 +12,7 @@ const routes = [
   [/^\/users\/?$/, 'users.html'],
   [/^\/users\/\d+\/?$/, 'user.html'],
   [/^\/settings\/?$/, 'settings.html'],
+  [/^\/widgets\/?$/, 'widgets.html'],
 ];
 
 http

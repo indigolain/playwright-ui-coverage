@@ -8,6 +8,16 @@ export interface ElementCoverage {
   instances: number;
   tested: boolean;
   testedBy: string[];
+  /**
+   * Tests that touched this element only in attempts that didn't pass (and so
+   * don't count). Non-empty with `tested: false` means "touched by failing tests only".
+   */
+  testedByFailing: string[];
+  /**
+   * Interactions that counted as tested, by event type (e.g. `{ click: 3, input: 1 }`).
+   * Empty for untested elements.
+   */
+  interactionCounts: Record<string, number>;
 }
 
 export interface ScreenshotBox {
@@ -30,6 +40,8 @@ export interface RouteCoverage {
   total: number;
   tested: number;
   percent: number;
+  /** Untested elements that failing tests touched. */
+  failingOnly: number;
   elements: ElementCoverage[];
   screenshots: RouteScreenshot[];
 }
@@ -39,6 +51,7 @@ export interface CoverageSummary {
   total: number;
   tested: number;
   percent: number;
+  failingOnly: number;
   routes: RouteCoverage[];
 }
 
@@ -65,9 +78,17 @@ export const defaultNormalizeUrl: NormalizeUrl = (url) => {
   return route;
 };
 
-interface TestEntry {
+/**
+ * How an entry's interactions count: `tested` marks elements tested, `failing`
+ * only records them in `testedByFailing`, `ignore` drops them. Inventories always count.
+ */
+export type InteractionUse = 'tested' | 'failing' | 'ignore';
+
+export interface TestEntry {
   title: string;
   data: TestCoverageData;
+  /** Default: `tested`. */
+  interactions?: InteractionUse;
 }
 
 const percent = (tested: number, total: number) =>
@@ -78,12 +99,13 @@ export function aggregate(
   opts: { normalizeUrl: NormalizeUrl; maxScreenshotsPerRoute: number },
 ): CoverageSummary {
   type RouteAcc = {
-    elements: Map<string, ElementCoverage & { testedBySet: Set<string> }>;
+    elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string>; labels: Set<string> }>;
     snapshots: { snap: TestCoverageData['snapshots'][number]; test: string }[];
   };
   const routes = new Map<string, RouteAcc>();
-  const routeFor = (url: string) => {
-    const r = opts.normalizeUrl(url);
+  /** `view` (set for `viewBy: 'file'`) puts all of an entry's data in one view, whatever the URL. */
+  const routeFor = (url: string, view?: string) => {
+    const r = view ?? opts.normalizeUrl(url);
     if (!routes.has(r)) routes.set(r, { elements: new Map(), snapshots: [] });
     return routes.get(r)!;
   };
@@ -91,15 +113,17 @@ export function aggregate(
   // Pass 1: inventories.
   for (const { title, data } of tests) {
     for (const snap of data.snapshots) {
-      const acc = routeFor(snap.url);
+      const acc = routeFor(snap.url, data.view);
       acc.snapshots.push({ snap, test: title });
       const counts = new Map<string, number>();
       for (const el of snap.elements) counts.set(el.key, (counts.get(el.key) ?? 0) + 1);
       for (const el of snap.elements) {
         const existing = acc.elements.get(el.key);
         const n = counts.get(el.key)!;
-        if (existing) existing.instances = Math.max(existing.instances, n);
-        else
+        if (existing) {
+          existing.instances = Math.max(existing.instances, n);
+          existing.labels.add(el.label);
+        } else
           acc.elements.set(el.key, {
             key: el.key,
             label: el.label,
@@ -107,35 +131,62 @@ export function aggregate(
             instances: n,
             tested: false,
             testedBy: [],
+            testedByFailing: [],
+            interactionCounts: {},
             testedBySet: new Set(),
+            failingSet: new Set(),
+            labels: new Set([el.label]),
           });
       }
     }
   }
 
   // Pass 2: interactions.
-  for (const { title, data } of tests) {
+  for (const { title, data, interactions: use = 'tested' } of tests) {
+    if (use === 'ignore') continue;
     for (const i of data.interactions) {
-      const acc = routeFor(i.url);
+      const acc = routeFor(i.url, data.view);
       let el = acc.elements.get(i.key);
       if (!el) {
         // Interacted with but never captured in an inventory (transient element).
-        el = { key: i.key, label: i.label, tag: '?', instances: 1, tested: false, testedBy: [], testedBySet: new Set() };
+        el = {
+          key: i.key, label: i.label, tag: '?', instances: 1, tested: false,
+          testedBy: [], testedByFailing: [], interactionCounts: {}, testedBySet: new Set(), failingSet: new Set(), labels: new Set([i.label]),
+        };
         acc.elements.set(i.key, el);
       }
-      el.tested = true;
-      el.testedBySet.add(title);
+      if (use === 'failing') {
+        el.failingSet.add(title);
+      } else {
+        el.tested = true;
+        el.testedBySet.add(title);
+        el.interactionCounts[i.event] = (el.interactionCounts[i.event] ?? 0) + 1;
+      }
     }
   }
 
   const result: RouteCoverage[] = [];
   for (const [route, acc] of routes) {
-    const elements = [...acc.elements.values()].map(({ testedBySet, ...e }) => ({
-      ...e,
-      testedBy: [...testedBySet],
-    }));
+    const elements = [...acc.elements.values()].map(({ testedBySet, failingSet, labels, ...e }) => {
+      // Elements sharing a key (e.g. a link on every table row) can have different
+      // labels; pick one independent of test order so reports are reproducible.
+      const sorted = [...labels].sort();
+      return {
+        ...e,
+        label: sorted.length > 1 ? `${sorted[0]} (+${sorted.length - 1} variants)` : sorted[0],
+        testedBy: [...testedBySet].sort(),
+        testedByFailing: [...failingSet].filter((t) => !testedBySet.has(t)).sort(),
+        // Sorted by type so the JSON doesn't depend on test order.
+        interactionCounts: Object.fromEntries(
+          Object.entries(e.interactionCounts).sort(([a], [b]) => a.localeCompare(b)),
+        ),
+      };
+    });
     if (elements.length === 0) continue;
 
+    // Elements actually in the image (a cropped screenshot hides those below its height).
+    const visible = (snap: TestCoverageData['snapshots'][number]) =>
+      snap.screenshotHeight ? snap.elements.filter((e) => e.y < snap.screenshotHeight!) : snap.elements;
     // Greedy set cover: pick screenshots that show the most not-yet-shown elements.
     const chosen: RouteScreenshot[] = [];
     const shown = new Set<string>();
@@ -144,7 +195,7 @@ export function aggregate(
       let best = -1;
       let bestGain = 0;
       candidates.forEach((c, idx) => {
-        const gain = new Set(c.snap.elements.map((e) => e.key).filter((k) => !shown.has(k))).size;
+        const gain = new Set(visible(c.snap).map((e) => e.key).filter((k) => !shown.has(k))).size;
         if (gain > bestGain) {
           bestGain = gain;
           best = idx;
@@ -152,22 +203,25 @@ export function aggregate(
       });
       if (best < 0) break;
       const [{ snap, test }] = candidates.splice(best, 1);
-      snap.elements.forEach((e) => shown.add(e.key));
+      const inImage = visible(snap);
+      inImage.forEach((e) => shown.add(e.key));
       chosen.push({
         source: snap.screenshot!,
         dpr: snap.dpr,
         test,
-        boxes: snap.elements.map(({ key, x, y, w, h }) => ({ key, x, y, w, h })),
+        boxes: inImage.map(({ key, x, y, w, h }) => ({ key, x, y, w, h })),
       });
     }
 
     const tested = elements.filter((e) => e.tested).length;
+    const failingOnly = elements.filter((e) => !e.tested && e.testedByFailing.length > 0).length;
     elements.sort((a, b) => Number(a.tested) - Number(b.tested) || a.label.localeCompare(b.label));
     result.push({
       route,
       total: elements.length,
       tested,
       percent: percent(tested, elements.length),
+      failingOnly,
       elements,
       screenshots: chosen,
     });
@@ -176,5 +230,13 @@ export function aggregate(
   result.sort((a, b) => a.route.localeCompare(b.route));
   const total = result.reduce((s, r) => s + r.total, 0);
   const tested = result.reduce((s, r) => s + r.tested, 0);
-  return { generatedAt: new Date().toISOString(), total, tested, percent: percent(tested, total), routes: result };
+  const failingOnly = result.reduce((s, r) => s + r.failingOnly, 0);
+  return {
+    generatedAt: new Date().toISOString(),
+    total,
+    tested,
+    percent: percent(tested, total),
+    failingOnly,
+    routes: result,
+  };
 }

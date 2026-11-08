@@ -1,9 +1,11 @@
 // Playwright reporter used by CI (UICOV_CHECK_STEPS=1): fails the run if UI
 // coverage recording shows up as steps in the report or trace, which happens
 // when its calls aren't marked internal. It sees every step category (API
-// calls, hooks, fixtures, attachments). The demo tests never call these APIs.
+// calls, hooks, fixtures, attachments).
 //
 // CommonJS on purpose: older Playwright versions can hang loading ESM reporters.
+const path = require('node:path');
+
 const FORBIDDEN = /evaluate|screenshot|exposeBinding|addInitScript|attach|ui-?coverage/i;
 
 class NoStepsReporter {
@@ -19,7 +21,13 @@ class NoStepsReporter {
 
   onStepBegin(test, _result, step) {
     this.steps++;
-    if (FORBIDDEN.test(step.title)) this.found.push(`${test.title}: [${step.category}] "${step.title}"`);
+    const file = step.location?.file ?? '';
+    // Steps the tests make themselves (e.g. a locator.evaluate) point at demo/tests;
+    // leaked recording steps point at src/ or nowhere.
+    const fromLibrary = file.includes(`${path.sep}src${path.sep}`);
+    const fromTest = file.includes(`${path.sep}demo${path.sep}tests${path.sep}`);
+    if (fromLibrary || (FORBIDDEN.test(step.title) && !fromTest))
+      this.found.push(`${test.title}: [${step.category}] "${step.title}"${file ? ` at ${path.relative(process.cwd(), file)}:${step.location.line}` : ''}`);
   }
 
   onEnd() {

@@ -7,13 +7,16 @@
   <h1>Settings</h1>
   <form onsubmit="event.preventDefault(); document.getElementById('saved').hidden = false">
     <label><input type="checkbox" id="notify"> Email notifications</label>
+    <!-- Generated id (React useId style) is filtered out; identity falls back to name. -->
+    <label for=":r1:">Display name</label>
+    <input id=":r1:" name="displayName">
     <label for="theme">Theme</label>
     <select id="theme"><option>System</option><option>Light</option><option>Dark</option></select>
     <label for="bio">Bio</label>
     <textarea id="bio" rows="3" cols="40"></textarea>
     <div class="row" style="margin-top:16px">
       <button type="submit" class="primary">Save settings</button>
-      <button type="reset">Reset</button>
+      <button type="reset" id="mui-48213">Reset</button>
     </div>
   </form>
   <p id="saved" hidden>Saved.</p>

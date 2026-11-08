@@ -7,7 +7,7 @@
     {
       "url": "http://localhost:4173/users",
       "dpr": 1,
-      "screenshot": "/results/users-search/ui-coverage-0.png",
+      "screenshot": "ui-coverage-screenshot-0",
       "elements": [
         { "key": "#search", "label": "searchbox \"Search users\"", "tag": "input", "x": 10, "y": 10, "w": 200, "h": 30 },
         { "key": "[data-testid=\"add-user\"]", "label": "button \"Add user\"", "tag": "button", "x": 220, "y": 10, "w": 80, "h": 30 },

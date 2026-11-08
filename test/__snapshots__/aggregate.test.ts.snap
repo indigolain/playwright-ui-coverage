@@ -2,28 +2,36 @@
 
 exports[`aggregate > matches the snapshot 1`] = `
 {
+  "failingOnly": 0,
   "percent": 57.1,
   "routes": [
     {
       "elements": [
         {
           "instances": 1,
+          "interactionCounts": {},
           "key": "#archive",
           "label": "button "Archive"",
           "tag": "button",
           "tested": false,
           "testedBy": [],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {},
           "key": "#cancel",
           "label": "button "Cancel"",
           "tag": "button",
           "tested": false,
           "testedBy": [],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {
+            "click": 1,
+          },
           "key": "#save",
           "label": "button "Save"",
           "tag": "button",
@@ -31,8 +39,10 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedBy": [
             "app › hash routes",
           ],
+          "testedByFailing": [],
         },
       ],
+      "failingOnly": 0,
       "percent": 33.3,
       "route": "/app/#/items/:id",
       "screenshots": [],
@@ -43,38 +53,49 @@ exports[`aggregate > matches the snapshot 1`] = `
       "elements": [
         {
           "instances": 1,
+          "interactionCounts": {},
           "key": "button "Cancel"",
           "label": "button "Cancel"",
           "tag": "button",
           "tested": false,
           "testedBy": [],
+          "testedByFailing": [],
         },
         {
           "instances": 3,
+          "interactionCounts": {},
           "key": "button "Delete"",
           "label": "button "Delete"",
           "tag": "button",
           "tested": false,
           "testedBy": [],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {},
           "key": "link "Ada Lovelace"",
           "label": "link "Ada Lovelace"",
           "tag": "a",
           "tested": false,
           "testedBy": [],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {},
           "key": "link "Grace Hopper"",
           "label": "link "Grace Hopper"",
           "tag": "a",
           "tested": false,
           "testedBy": [],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {
+            "click": 1,
+          },
           "key": "[data-testid="add-user"]",
           "label": "button "Add user"",
           "tag": "button",
@@ -82,9 +103,13 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedBy": [
             "users › add",
           ],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {
+            "click": 1,
+          },
           "key": "button "Dismiss"",
           "label": "button "Dismiss"",
           "tag": "?",
@@ -92,9 +117,13 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedBy": [
             "users › add",
           ],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {
+            "click": 1,
+          },
           "key": "button "Save"",
           "label": "button "Save"",
           "tag": "button",
@@ -102,9 +131,13 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedBy": [
             "users › add",
           ],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {
+            "click": 1,
+          },
           "key": "link "Katherine Johnson"",
           "label": "link "Katherine Johnson"",
           "tag": "a",
@@ -112,9 +145,14 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedBy": [
             "users › add",
           ],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {
+            "change": 1,
+            "input": 1,
+          },
           "key": "#search",
           "label": "searchbox "Search users"",
           "tag": "input",
@@ -122,9 +160,13 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedBy": [
             "users › search",
           ],
+          "testedByFailing": [],
         },
         {
           "instances": 1,
+          "interactionCounts": {
+            "input": 1,
+          },
           "key": "#new-name",
           "label": "textbox "Name"",
           "tag": "input",
@@ -132,8 +174,10 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedBy": [
             "users › add",
           ],
+          "testedByFailing": [],
         },
       ],
+      "failingOnly": 0,
       "percent": 60,
       "route": "/users",
       "screenshots": [
@@ -183,7 +227,7 @@ exports[`aggregate > matches the snapshot 1`] = `
             },
           ],
           "dpr": 1,
-          "source": "/results/users-search/ui-coverage-0.png",
+          "source": "ui-coverage-screenshot-0",
           "test": "users › search",
         },
         {
@@ -211,7 +255,7 @@ exports[`aggregate > matches the snapshot 1`] = `
             },
           ],
           "dpr": 2,
-          "source": "/results/users-add/ui-coverage-1.png",
+          "source": "ui-coverage-screenshot-1",
           "test": "users › add",
         },
       ],
@@ -222,6 +266,9 @@ exports[`aggregate > matches the snapshot 1`] = `
       "elements": [
         {
           "instances": 1,
+          "interactionCounts": {
+            "click": 1,
+          },
           "key": "link "← Back to users"",
           "label": "link "← Back to users"",
           "tag": "?",
@@ -229,8 +276,10 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedBy": [
             "users › add",
           ],
+          "testedByFailing": [],
         },
       ],
+      "failingOnly": 0,
       "percent": 100,
       "route": "/users/:id",
       "screenshots": [],

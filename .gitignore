@@ -4,4 +4,6 @@ test-results/
 playwright-report/
 ui-coverage-report/
 .DS_Store
+.claude/
+perf-report/
 .ui-coverage-ci/

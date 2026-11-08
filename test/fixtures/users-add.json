@@ -11,7 +11,7 @@
     {
       "url": "http://localhost:4173/users",
       "dpr": 2,
-      "screenshot": "/results/users-add/ui-coverage-0.png",
+      "screenshot": "ui-coverage-screenshot-0",
       "elements": [
         { "key": "#search", "label": "searchbox \"Search users\"", "tag": "input", "x": 10, "y": 10, "w": 200, "h": 30 },
         { "key": "[data-testid=\"add-user\"]", "label": "button \"Add user\"", "tag": "button", "x": 220, "y": 10, "w": 80, "h": 30 },
@@ -24,7 +24,7 @@
     {
       "url": "http://localhost:4173/users",
       "dpr": 2,
-      "screenshot": "/results/users-add/ui-coverage-1.png",
+      "screenshot": "ui-coverage-screenshot-1",
       "elements": [
         { "key": "#new-name", "label": "textbox \"Name\"", "tag": "input", "x": 400, "y": 200, "w": 180, "h": 30 },
         { "key": "button \"Save\"", "label": "button \"Save\"", "tag": "button", "x": 400, "y": 250, "w": 60, "h": 30 },

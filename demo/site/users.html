@@ -8,14 +8,14 @@
   <div class="row">
     <input type="search" aria-label="Search users" placeholder="Search…" oninput="filter(this.value)">
     <button class="primary" onclick="document.getElementById('add').showModal()">Add user</button>
-    <button onclick="alert('exported')">Export CSV</button>
+    <button onclick="alert('exported')">Export CSV · <span class="stamp"></span></button>
   </div>
   <table>
     <thead><tr><th>Name</th><th></th></tr></thead>
     <tbody id="rows">
-      <tr><td><a href="/users/1">Ada Lovelace</a></td><td><button onclick="this.closest('tr').remove()">Delete</button></td></tr>
-      <tr><td><a href="/users/2">Grace Hopper</a></td><td><button onclick="this.closest('tr').remove()">Delete</button></td></tr>
-      <tr><td><a href="/users/3">Alan Turing</a></td><td><button onclick="this.closest('tr').remove()">Delete</button></td></tr>
+      <tr><td><a href="/users/1">Ada Lovelace</a></td><td><button data-action="delete-user" onclick="this.closest('tr').remove()">Delete</button></td></tr>
+      <tr><td><a href="/users/2">Grace Hopper</a></td><td><button data-action="delete-user" onclick="this.closest('tr').remove()">Delete</button></td></tr>
+      <tr><td><a href="/users/3">Alan Turing</a></td><td><button data-action="delete-user" onclick="this.closest('tr').remove()">Delete</button></td></tr>
     </tbody>
   </table>
 </main>
@@ -34,6 +34,8 @@
   </form>
 </dialog>
 <script>
+  // Text that changes on every run: the key stays structural (main > div > button:nth-of-type(2)).
+  document.querySelector('.stamp').textContent = 'as of ' + new Date().toLocaleTimeString();
   function filter(q) {
     for (const tr of document.querySelectorAll('#rows tr'))
       tr.hidden = !tr.textContent.toLowerCase().includes(q.toLowerCase());

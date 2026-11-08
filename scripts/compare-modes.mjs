@@ -4,8 +4,9 @@
 //
 //   node scripts/compare-modes.mjs <a/coverage.json> <b/coverage.json>
 //
-// Compared: totals, and per route every element (key, label, tag, instances,
-// tested, testedBy).
+// Compared: totals, and per route every element by key (tag, instances,
+// tested, testedBy, …). Labels are display-only and may contain live text
+// (a counter, a clock), so they are not compared.
 //
 // Ignored: generatedAt and the chosen screenshots. Those depend on timing, not
 // on the recording mode: whether a short-lived state (a modal, a page the test
@@ -40,7 +41,7 @@ function normalize(summary) {
       tested: r.tested,
       percent: r.percent,
       elements: r.elements
-        .map((e) => ({ ...e, testedBy: [...e.testedBy].sort() }))
+        .map(({ label, ...e }) => ({ ...e, testedBy: [...e.testedBy].sort() }))
         .sort((a, b) => a.key.localeCompare(b.key)),
     })),
   };
