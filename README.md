@@ -4,6 +4,24 @@ See which buttons, links and inputs your Playwright E2E tests **actually touch**
 
 > Status: early development (0.1.0). APIs may change.
 
+![UI coverage report: route list with coverage %, a screenshot of the /users page with green boxes on tested elements and red boxes on untested ones](docs/report-overview.png)
+
+## What you get
+
+**Every page your tests visit, with each interactive element marked.** Green means a test clicked or typed into it, red means no test did. The sidebar shows coverage per route, and dynamic segments are grouped (`/users/1`, `/users/2` → `/users/:id`).
+
+**Find what's missing.** Turn on *Untested only* to hide everything that's already covered:
+
+![Settings page with only the untested elements outlined in red: theme select, bio textarea, reset and delete account buttons, nav links](docs/report-untested-only.png)
+
+**See where each element is, and which tests cover it.** Hover a row to highlight that element on the screenshot. Repeated elements such as a "Delete" button on every row are grouped into one entry:
+
+<img src="docs/report-hover.png" alt="Hovering the 'button Delete ×3' row highlights all three Delete buttons on the screenshot in orange; the table lists each element with its status and the tests that covered it" width="720">
+
+**Dark mode** follows your system setting:
+
+<img src="docs/report-dark.png" alt="The report in dark mode showing the home page" width="720">
+
 ## Quick start
 
 ```bash
@@ -93,6 +111,7 @@ Anything inside an element with `data-uicov-ignore` is always excluded.
 npm install
 npx playwright install chromium
 npm run demo          # runs demo/tests against the demo app, writes ui-coverage-report/
+npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
 npm run typecheck
 npm run build         # compiles to dist/
 ```

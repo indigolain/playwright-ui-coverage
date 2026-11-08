@@ -22,7 +22,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "demo": "playwright test",
-    "demo:serve": "node demo/server.mjs"
+    "demo:serve": "node demo/server.mjs",
+    "docs:screenshots": "node scripts/screenshots.mjs"
   },
   "keywords": [
     "playwright",
