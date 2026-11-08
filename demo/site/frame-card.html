@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Payment</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 12px; }
+  label { display: block; margin: 6px 0; }
+  input { padding: 4px 6px; }
+</style>
+</head>
+<body>
+  <form id="pay" data-testid="pay-form">
+    <label>Card number <input name="card" data-testid="card" autocomplete="off"></label>
+    <label>Expiry <input name="expiry" placeholder="MM/YY"></label>
+    <!-- A web component inside the cross-origin frame: keys chain the frame and the host. -->
+    <brand-picker></brand-picker>
+    <button type="submit" data-testid="pay">Pay</button>
+    <span class="status"></span>
+  </form>
+<script>
+  customElements.define('brand-picker', class extends HTMLElement {
+    connectedCallback() {
+      if (this.shadowRoot) return;
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `<div role="radiogroup" aria-label="Card brand">
+          <button type="button" role="radio" aria-checked="false">Visa</button>
+          <button type="button" role="radio" aria-checked="false">Mastercard</button>
+        </div>`;
+      for (const b of root.querySelectorAll('button'))
+        b.addEventListener('click', () => root.querySelectorAll('button').forEach((o) => o.setAttribute('aria-checked', String(o === b))));
+    }
+  });
+  document.getElementById('pay').addEventListener('submit', (e) => {
+    e.preventDefault();
+    document.querySelector('.status').textContent = 'Paid';
+  });
+</script>
+</body>
+</html>

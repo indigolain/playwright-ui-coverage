@@ -87,7 +87,9 @@ try {
   else if (exact(read(report)) !== exact(baseline)) errors.push('in-place CLI rebuild differs from the reporter\'s coverage.json');
 
   // 2. A changed filter (.mjs config) updates the report without running tests.
-  const ignore = ['nav a', '[data-action="delete-user"]'];
+  //    The documentScope entry targets the buttons inside the cross-origin frame on /embedded.
+  const payments = '[data-testid="payments"]';
+  const ignore = ['nav a', '[data-action="delete-user"]', { selector: 'button', documentScope: payments }];
   const filterConfig = writeConfig(
     'filter.config.mjs',
     `export default ${JSON.stringify({ ...rules, ignoreSelectors: ignore })};\n`,
@@ -97,7 +99,15 @@ try {
     errors.push('CLI rebuild with ignoreSelectors failed');
   } else {
     const filtered = read(filteredOut);
-    const removed = keys(baseline).filter((k) => / nav > a/.test(k) || k.endsWith(' [data-action="delete-user"]'));
+    const inFrame = new Set(
+      baseline.views.flatMap((v) =>
+        v.elements.filter((e) => e.tag === 'button' && e.frames?.[0] === payments).map((e) => `${v.name} ${e.key}`),
+      ),
+    );
+    if (inFrame.size === 0) errors.push('documentScope check is vacuous: no buttons in the payments frame');
+    const removed = keys(baseline).filter(
+      (k) => / nav > a/.test(k) || k.endsWith(' [data-action="delete-user"]') || inFrame.has(k),
+    );
     const left = keys(filtered).filter((k) => removed.includes(k));
     if (removed.length === 0) errors.push('filter check is vacuous: no nav links / delete buttons in the baseline');
     if (left.length) errors.push(`ignored elements still in the report: ${left.join(', ')}`);

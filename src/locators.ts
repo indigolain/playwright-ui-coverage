@@ -9,6 +9,7 @@
  * key, and repeated elements get `.first()` with a comment.
  */
 import type { CoverageSummary, ElementCoverage } from './aggregate';
+import { splitHostChain } from './model/selector';
 
 export interface LocatorOptions {
   /** Attribute `page.getByTestId()` reads (Playwright's `use.testIdAttribute`). Default: `data-testid`. */
@@ -17,7 +18,7 @@ export interface LocatorOptions {
 
 /** The subset of `ElementCoverage` the suggestion is built from. */
 export type LocatorInput = Pick<ElementCoverage, 'key' | 'label' | 'tag' | 'instances'> &
-  Partial<Pick<ElementCoverage, 'role' | 'name' | 'nameFrom' | 'attrs'>>;
+  Partial<Pick<ElementCoverage, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames'>>;
 
 /** The tracker truncates names to this many characters. */
 const MAX_NAME = 60;
@@ -76,13 +77,39 @@ export function hasAccessibleName(e: LocatorInput): boolean {
   return true;
 }
 
-/** CSS selector for the element from its key (the key reads like one, except raw `data-uicov-id` values). */
-export function cssFromKey(e: LocatorInput): string {
-  const key = e.key;
-  if (e.attrs?.['data-uicov-id'] !== undefined && e.attrs['data-uicov-id'].trim() === key)
-    return `[data-uicov-id=${JSON.stringify(key)}]`;
+/** `key` without the `<frameKey> >> ` prefix (a `data-uicov-id` key has none). */
+const withinFrame = (key: string, frameKey: string) =>
+  key.startsWith(`${frameKey} >> `) ? key.slice(frameKey.length + 4) : key;
+
+/**
+ * A Playwright selector for a key relative to one document (`a >> b` steps
+ * into b inside a's shadow root, which Playwright's `>>` chaining does too).
+ */
+function selectorFromKey(key: string, uicovId?: string): string {
+  if (uicovId !== undefined && uicovId.trim() === key) return `[data-uicov-id=${JSON.stringify(key)}]`;
+  const parts = splitHostChain(key);
   // A positional key that starts with a plain tag walked up to <body>.
-  return /^[a-z]/i.test(key) ? `body > ${key}` : key;
+  if (/^[a-z]/i.test(parts[0])) parts[0] = `body > ${parts[0]}`;
+  return parts.join(' >> ');
+}
+
+/**
+ * Selector for the element from its key (the key reads like CSS, except raw
+ * `data-uicov-id` values), relative to its frame's document.
+ */
+export function cssFromKey(e: LocatorInput): string {
+  const frames = e.frames ?? [];
+  const key = frames.length ? withinFrame(e.key, frames[frames.length - 1]) : e.key;
+  return selectorFromKey(key, e.attrs?.['data-uicov-id']);
+}
+
+/** `page`, or `page.frameLocator(…)…` for an element inside frames. */
+export function frameScope(e: Pick<LocatorInput, 'frames'>): string {
+  const frames = e.frames ?? [];
+  return frames.reduce(
+    (scope, f, i) => `${scope}.frameLocator(${str(selectorFromKey(i ? withinFrame(f, frames[i - 1]) : f))})`,
+    'page',
+  );
 }
 
 function testIdOf(e: LocatorInput, attr: string): string | undefined {
@@ -160,6 +187,9 @@ export function suggest(e: LocatorInput, opts: LocatorOptions = {}, ctx: Suggest
   else if (named && e.nameFrom === 'text') locator = `page.getByText(${textArg()})`;
   else locator = `page.locator(${str(cssFromKey(e))})`;
 
+  // Inside frames: the same locator, from the frame (getBy* and CSS already pierce open shadow roots).
+  if (e.frames?.length) locator = frameScope(e) + locator.slice('page'.length);
+
   if (e.instances > 1) {
     locator += '.first()';
     notes.push(`${e.instances} matching elements on the page: narrow with .filter({ hasText: … }) or .nth(i)`);
@@ -224,13 +254,20 @@ export function testSkeleton(route: string, lines: string[]): string {
 /** Sets `suggestedLocator` on every element of `summary` (in place). */
 export function addSuggestedLocators(summary: CoverageSummary, opts?: LocatorOptions): void {
   for (const r of summary.routes) {
-    const namesByRole = new Map<string, string[]>();
+    // Locators search one frame, so names clash only within the same frame.
+    const byFrame = new Map<string, Map<string, string[]>>();
+    const namesIn = (e: ElementCoverage) => {
+      const f = (e.frames ?? []).join('\n');
+      if (!byFrame.has(f)) byFrame.set(f, new Map());
+      return byFrame.get(f)!;
+    };
     for (const e of r.elements) {
       const role = playwrightRole(e);
       if (!role || !hasAccessibleName(e)) continue;
+      const namesByRole = namesIn(e);
       if (!namesByRole.has(role)) namesByRole.set(role, []);
       namesByRole.get(role)!.push(e.name!.toLowerCase());
     }
-    for (const e of r.elements) e.suggestedLocator = suggestedLocator(e, opts, { namesByRole });
+    for (const e of r.elements) e.suggestedLocator = suggestedLocator(e, opts, { namesByRole: namesIn(e) });
   }
 }

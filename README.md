@@ -109,7 +109,7 @@ Never counted:
 
 - `<a href="tel:…">`, `mailto:` and `sms:` links: they hand off to another app.
 - `<label>`: clicking a label activates its control, and the control is what gets credited (once, the browser forwards the click). Other events on a label (`dblclick`, `contextmenu`, …) are credited to the control too.
-- `<iframe>`, `<embed>`, `<object>`: their content is a separate document, and clicks inside it never reach the parent page.
+- `<iframe>`, `<embed>`, `<object>` themselves: their content is a separate document. The elements inside an iframe count on their own, see [Iframes and shadow DOM](#iframes-and-shadow-dom).
 - `<option>` inside a `<select>` (the `select` counts), and elements inside a contenteditable editor (the editor counts).
 
 **Nested widgets count once, as the inner ones.** A widget that contains other widgets (a `tabindex=0` card with a "Like" and a "Share" button, a `role=combobox` wrapper around an `<input>`) is not counted itself. The inner elements are the actual controls, the ones `getByRole` finds, and counting only the outer one would merge distinct controls into one element. A click on the outer element's own area credits its inner widget if it has exactly one (it's the same control), and nothing if it has several. Widgets inside a grouping role (`group`, `menu`, `listbox`, `tree`, …) are separate widgets: a tree item with a nested group of child items still counts.
@@ -140,6 +140,16 @@ Keys are computed when the report is built, from the recorded attributes, so cha
 
 Positional keys read like CSS selectors and only use an index when there are several siblings with the same tag. Table rows (`<tr>`, `role="row"`) never get an index, so a "Delete" button on every row is one element with several instances. Positional keys change when the markup around the element changes, so for anything that matters, add a `data-testid` (or a `data-uicov-id`).
 
+### Iframes and shadow DOM
+
+Elements inside **iframes** (same-origin and cross-origin) and **open shadow roots** count like any other element of the page, under the page's URL.
+
+- **Keys** are prefixed by the key of the frame element or shadow host and ` >> `, as many times as they are nested: `iframe[data-testid="payments"] >> [data-testid="card"]`, `promo-banner >> div > button:nth-of-type(2)`, `[data-testid="payments"] >> #pay > brand-picker >> div > button`. Each part is computed in its own document or shadow tree (a positional key stops at the shadow root). A `data-uicov-id` value is still used as-is, without a prefix. Elements in a frame also list the frame elements' keys in `coverage.json` (`frames`).
+- **Recording**: each frame runs its own copy of the tracker, and the recorder places the frame's elements under the frame element (`page.frames()`), with boxes mapped into the page's coordinates (frame element's content box, scroll positions), so overlays line up on the page screenshot. Elements scrolled out of their frame still count but get no box. In shadow roots, events are credited to the element they happened on (`composedPath()`), including events that don't leave the shadow root, like `change`.
+- **Markup overrides** apply across shadow boundaries: `data-uicov-ignore` on a host excludes its shadow content. Across frames they apply at report time: an ignored `<iframe>` (by `data-uicov-ignore` or `ignoreSelectors`) excludes everything inside it.
+- **Closed shadow roots** can't be read from the page, so their content isn't recorded; the host counts if it is interactive itself (e.g. `role="button"`, `tabindex="0"`), and events inside are credited to it.
+- **Suggested locators** use `page.frameLocator('<frame key>')` for elements in frames. Playwright's locators already pierce open shadow roots.
+
 ## Options
 
 Options come in two places:
@@ -165,7 +175,7 @@ reporter: [
 
 To share them with the `report` CLI, keep them in their own file and spread it into the reporter options, e.g. `...require('./ui-coverage.config.json')` (the demo does this with `demo/ui-coverage.config.json`). The type is exported as `UiCoverageRules`.
 
-- **`ignoreSelectors`**: elements matching one of these selectors, or inside an element that does, are excluded. Same rules as `data-uicov-interactive="exclude-all"` (a `reset` inside stops it, an element's own `include` wins). Anything inside `data-uicov-ignore` is always excluded. Selectors are evaluated on the recorded structure, see [Report-time selectors](#report-time-selectors). One difference from excluding in the markup: the [nesting rule](#which-elements-count) is decided while recording, so excluding all inner widgets of a container widget doesn't make the container count.
+- **`ignoreSelectors`**: elements matching one of these selectors, or inside an element that does (also inside a frame or shadow host that does), are excluded. An entry is a selector string or `{ selector, documentScope }`, see [`documentScope`](#documentscope). Same rules as `data-uicov-interactive="exclude-all"` (a `reset` inside stops it, an element's own `include` wins). Anything inside `data-uicov-ignore` is always excluded. Selectors are evaluated on the recorded structure, see [Report-time selectors](#report-time-selectors). One difference from excluding in the markup: the [nesting rule](#which-elements-count) is decided while recording, so excluding all inner widgets of a container widget doesn't make the container count.
 - **`significantAttributes`**: attributes that identify an element, checked after `data-uicov-id` and before the built-in test-id attributes, in the order given.
 - **`attributeFilters`**: `{ attribute, value?, include? }` rules deciding whether an attribute value may be used as a key. `attribute` and `value` are regular expressions, anchored automatically (`'id'` means `^(?:id)$`). Attribute names match case-insensitively, values case-sensitively. Without `value`, the rule matches any value. The first matching rule wins: `include: false` (default) skips the value, `include: true` keeps it. Your rules run before the built-in ones, which skip:
   - React `useId` values (`:r1:`, `:R2kq:`, `«r1»`), UUIDs and hex strings of 16+ characters, in any attribute;
@@ -182,6 +192,21 @@ Selector rules run in Node on the recorded DOM structure (each element with its 
 - `:not()`, `:is()`, `:where()`, `:nth-of-type()`, `:nth-last-of-type()`, `:first-of-type`, `:last-of-type`, `:only-of-type`, `:root`.
 
 Not supported, because the data needed isn't recorded: sibling combinators (`+`, `~`), `:has()`, `:nth-child()` and friends, state pseudo-classes (`:checked`, `:hover`, `:disabled`, …). An unsupported selector fails the run (or the CLI) with a message saying which part isn't supported. Attribute values are recorded up to 256 characters (`class` up to 1024), and `style` isn't recorded.
+
+Like CSS in the browser, a selector matches within one document or shadow tree: combinators don't cross into an iframe or a shadow root (`main button` doesn't match a button in a shadow root under `<main>`), and `:root` matches each document's `<html>`. A selector without a host chain matches in every document and shadow tree.
+
+#### `documentScope`
+
+To target elements inside a frame or shadow host, give a host chain: selectors for the frame elements or shadow hosts, outermost first, separated by `>>`. Either as an object, or inline before the selector:
+
+```ts
+ignoreSelectors: [
+  { selector: 'button', documentScope: 'iframe[data-testid="payments"]' },
+  'iframe#app >> date-picker >> button.today', // the same, inline
+],
+```
+
+Each host selector is matched in the host's own document or shadow tree. The hosts must appear in that order among the element's frames and shadow hosts, but not necessarily directly nested: `documentScope: 'my-widget'` covers every tree inside any `<my-widget>`, in the page or in a frame. A key from the report (`iframe[data-testid="pay"] >> [data-testid="card"]`) works as a selector, except a positional key's first part, which is relative to `<body>`. (Ignoring the host itself, `ignoreSelectors: ['iframe#ads']`, already excludes everything inside it.)
 
 #### Deprecated: rules in `use.uiCoverage`
 
@@ -301,6 +326,8 @@ For every element, `coverage.json` has a `suggestedLocator`: one line of Playwri
 3. `page.getByRole(role, { name })`. Names from attributes and `<label>`s match exactly (`exact: true`); names from text content match like Playwright's default (case-insensitive substring), or as `/^…$/i` when that would also match a longer name on the view ("Save" and "Save draft").
 4. `page.getByLabel(…)`, `page.getByPlaceholder(…)`, `page.getByTitle(…)`, `page.getByText(…)` when the name came from there and there's no usable role (a placeholder or title as the only name always uses these).
 5. `page.locator('<key>')` otherwise. Positional keys get a `body > ` prefix.
+
+Elements inside iframes get the same locator, starting from `page.frameLocator('<frame key>')` (once per nested frame).
 
 The action follows the element: `click()` for buttons and links, `fill('…')` for text fields (with a sample value for `email`, `number`, `date`… inputs), `check()` for checkboxes, radios and switches, `selectOption('…')` for `<select>`, `setInputFiles('path/to/file')` for file inputs. Repeated elements (`×3`) get `.first()` and a comment on how to narrow it.
 
@@ -568,9 +595,9 @@ npx playwright-ui-coverage report --data ci-artifacts/ui-coverage-report/data --
 
 **What a rebuild can change:** everything the reporter does with the data: [report-time rules](#report-time-rules-reporter-options), `normalizeUrl`, `viewBy`, `threshold`, `countFailedTests`, `maxScreenshotsPerRoute`. Links to the HTML report are kept and adjusted to `--out` (`htmlReport: false` drops them). **What it can't:** what was recorded. Which elements are interactive is decided in the browser (it needs the live page: computed styles, descendants, label targets), interaction types are recording options, and screenshots are what they are. The deprecated `use.uiCoverage.ignoreSelectors` was applied while recording.
 
-**Data format.** `ui-coverage-data.json` has `formatVersion: 1` and an `attempts` array: one entry per test attempt and browser context with `testId`, `retry`, `passed`, `title`, `project`, `trace`, `tags`, `specFile` and `data`, the recording (`formatVersion: 2`, see `RawCoverageData` in [src/model/raw.ts](src/model/raw.ts)):
+**Data format.** `ui-coverage-data.json` has `formatVersion: 1` and an `attempts` array: one entry per test attempt and browser context with `testId`, `retry`, `passed`, `title`, `project`, `trace`, `tags`, `specFile` and `data`, the recording (`formatVersion: 3`, see `RawCoverageData` in [src/model/raw.ts](src/model/raw.ts); version 2 is still read):
 
-- `nodes`: a table of DOM elements, each `{ tag, parent?, nth?, of?, attrs? }`: the parent's index, the position among same-tag siblings (`:nth-of-type`), and the attributes. Ancestor chains are stored once and shared by every element under them.
+- `nodes`: a table of DOM elements, each `{ tag, parent?, nth?, of?, attrs? }`: the parent's index, the position among same-tag siblings (`:nth-of-type`), and the attributes. Ancestor chains are stored once and shared by every element under them. Tree boundaries are pseudo-nodes: an element at the top of a shadow root has a `{ tag: '#shadow-root' }` parent, whose parent is the shadow host, and a frame's `<html>` has a `{ tag: '#document' }` parent, whose parent is the `<iframe>`.
 - `snapshots`: `{ url, dpr, screenshot?, elements }`, with each element `{ node, name?, x, y, w, h }` (`name` is the accessible name, used for labels only; `candidateOnly: true` marks elements recorded although they aren't interactive, like `<label>`).
 - `interactions`: `{ event, url, element: { node, name? } }`, pointing into the same node table, so an interaction resolves to the same key as the element in the inventory.
 - `rules`: the deprecated `use.uiCoverage` identity rules, if any.
@@ -626,7 +653,9 @@ Notes:
 ## Known limitations
 
 - UI states that last shorter than `snapshotDelay` (e.g. a modal a test opens and closes instantly) still count their elements, but may not get a screenshot.
-- Inventory covers the main frame only. Iframes and shadow DOM aren't inventoried yet.
+- Closed shadow roots aren't inventoried: only their host can count (see [Iframes and shadow DOM](#iframes-and-shadow-dom)).
+- Cross-origin iframes can run in their own process, and Chromium paints those in full-page screenshots only where they are inside the viewport. So elements of a cross-origin frame that are outside the viewport when a screenshot is taken still count, but get no box in it (a later screenshot taken while they are in view shows them).
+- The deprecated recording-time `use.uiCoverage.ignoreSelectors` doesn't reach into frames from the parent page (`iframe.ads button`); use the reporter's `ignoreSelectors`, which does.
 - Hover-only interactions aren't counted.
 - With `scroll` enabled, Playwright's automatic scrolling-into-view before actions also counts as a `scroll` of the container. That's why `scroll` is off by default.
 - Elements with `position: fixed` may be offset in full-page screenshots.

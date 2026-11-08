@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Help</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 8px; }
+  .faq { height: 260px; }
+</style>
+</head>
+<body>
+  <details data-testid="faq"><summary>How do I invite someone?</summary>From the Users page, click "Add user".</details>
+  <p>
+    <button data-testid="helpful" onclick="this.textContent = 'Thanks!'">Was this helpful?</button>
+    <a href="#contact">Contact support</a>
+  </p>
+  <div class="faq"></div>
+  <!-- Below the frame's visible height: counted, but outside the frame on the page screenshot. -->
+  <a id="contact" href="#top" data-testid="back-to-top">Back to top</a>
+</body>
+</html>

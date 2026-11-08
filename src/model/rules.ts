@@ -7,7 +7,7 @@
  * file, and the deprecated `use.uiCoverage` fields are recorded with the data
  * and merged in with `mergeRules`.
  */
-import { compileSelector, SelectorError } from './selector';
+import { compileSelector, SelectorError, type CompiledSelector } from './selector';
 
 /**
  * A rule deciding whether an attribute value may be used as identity.
@@ -28,14 +28,31 @@ export interface AttributeFilter {
   include?: boolean;
 }
 
+/**
+ * A report-time selector limited to elements inside a frame or shadow host.
+ * `documentScope` is a host chain: selectors for the `<iframe>` or shadow host
+ * elements, separated by `>>` (`'iframe[data-testid="payments"]'`,
+ * `'my-widget'`, `'iframe#app >> date-picker'`). `selector` then matches
+ * elements in any tree inside those hosts. The same as writing
+ * `'<documentScope> >> <selector>'`.
+ */
+export interface ScopedSelector {
+  selector: string;
+  documentScope?: string;
+}
+
+/** A report-time selector: a string (it may contain a `>>` host chain) or a `ScopedSelector`. */
+export type RuleSelector = string | ScopedSelector;
+
 /** Rules applied when the report is built (by the reporter or the `report` CLI). */
 export interface UiCoverageRules {
   /**
-   * Elements matching one of these selectors, or inside an element that does,
-   * are excluded. Elements inside `[data-uicov-ignore]` are always excluded.
-   * Evaluated on the recorded DOM structure, see README "Report-time selectors".
+   * Elements matching one of these selectors, or inside an element that does
+   * (also across frame and shadow boundaries), are excluded. Elements inside
+   * `[data-uicov-ignore]` are always excluded. Evaluated on the recorded DOM
+   * structure, see README "Report-time selectors".
    */
-  ignoreSelectors?: string[];
+  ignoreSelectors?: RuleSelector[];
   /**
    * Attributes that identify an element, checked in order after
    * `data-uicov-id` and before the built-in test-id attributes
@@ -145,6 +162,16 @@ export function compileAttributeFilters(rules: UiCoverageRules): CompiledAttribu
   });
 }
 
+/** Compiles a `RuleSelector`. Throws `SelectorError` for invalid or unsupported syntax. */
+export function compileRuleSelector(s: RuleSelector): CompiledSelector {
+  if (typeof s === 'string') return compileSelector(s);
+  if (typeof s !== 'object' || s === null || typeof s.selector !== 'string')
+    throw new SelectorError('expected a selector string or { selector, documentScope? }');
+  if (s.documentScope !== undefined && typeof s.documentScope !== 'string')
+    throw new SelectorError('documentScope must be a string');
+  return compileSelector(s.selector, s.documentScope);
+}
+
 /**
  * Throws a descriptive error for rules that can't be applied: invalid regexes,
  * or selectors that can't be evaluated at report time. Call it early (reporter
@@ -158,7 +185,7 @@ export function validateRules(rules: UiCoverageRules, where = 'options'): void {
   compileAttributeFilters(rules);
   for (const s of rules.ignoreSelectors ?? []) {
     try {
-      compileSelector(s);
+      compileRuleSelector(s);
     } catch (e) {
       if (e instanceof SelectorError)
         throw new Error(`[playwright-ui-coverage] ${where}: ignoreSelectors entry ${JSON.stringify(s)}: ${e.message}`);

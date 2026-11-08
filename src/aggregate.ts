@@ -3,8 +3,14 @@ import type { A11yHint } from './a11y';
 import type { InventoryElement, TestCoverageData } from './types';
 
 /** Recorded role, accessible name and attributes of an element (see `InventoryElement`). */
-type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs'>;
-const details = (e: ElementDetails): ElementDetails => ({ role: e.role, name: e.name, nameFrom: e.nameFrom, attrs: e.attrs });
+type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames'>;
+const details = (e: ElementDetails): ElementDetails => ({
+  role: e.role,
+  name: e.name,
+  nameFrom: e.nameFrom,
+  attrs: e.attrs,
+  ...(e.frames ? { frames: e.frames } : {}),
+});
 
 export interface ElementCoverage {
   key: string;
@@ -37,6 +43,8 @@ export interface ElementCoverage {
   name?: string;
   nameFrom?: string;
   attrs?: Record<string, string>;
+  /** Keys of the `<iframe>` elements the element is inside, outermost first (see `InventoryElement.frames`). */
+  frames?: string[];
   /** A Playwright line that interacts with this element (see `locators.ts`). */
   suggestedLocator?: string;
   /** Informational accessibility hints (see `a11y.ts`). Don't affect coverage. */
@@ -234,8 +242,9 @@ export function aggregate(
     if (elements.length === 0) continue;
 
     // Elements actually in the image (a cropped screenshot hides those below its height).
+    // Zero-size boxes: frame content scrolled out of its frame's viewport.
     const visible = (snap: TestCoverageData['snapshots'][number]) =>
-      snap.screenshotHeight ? snap.elements.filter((e) => e.y < snap.screenshotHeight!) : snap.elements;
+      snap.elements.filter((e) => e.w > 0 && e.h > 0 && (!snap.screenshotHeight || e.y < snap.screenshotHeight));
     // Greedy set cover: pick screenshots that show the most not-yet-shown elements.
     const chosen: RouteScreenshot[] = [];
     const shown = new Set<string>();

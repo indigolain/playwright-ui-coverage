@@ -8,12 +8,17 @@
  * scroll geometry, descendants (the nesting rule), `label.control`,
  * `isContentEditable`.
  *
+ * Open shadow roots are part of the inventory and of event crediting (the
+ * composed tree); closed ones are opaque, so their host stands for them.
+ * Each frame runs its own copy: the recorder stitches child frames' data
+ * into the page (`recorder.ts`).
+ *
  * This function is serialized and injected with `page.addInitScript`, so it
  * must be fully self-contained: no imports, no references to anything outside
  * its own body (type-only imports are fine).
  */
 import type { InteractionArgs } from './interactions';
-import type { RawElementRef, RawInteractionEvent, RawInventory, RawNode } from './model/raw';
+import type { RawElementRef, RawFrameHost, RawInteractionEvent, RawInventory, RawNode } from './model/raw';
 
 export interface TrackerArgs extends InteractionArgs {
   /**
@@ -30,6 +35,86 @@ export function tracker(args: TrackerArgs): void {
   const w = window as any;
   if (w.__uicovInstalled) return;
   w.__uicovInstalled = true;
+
+  // ---- Composed tree -----------------------------------------------------
+  // Open shadow roots are walked like part of the document: an element at the
+  // top of one has the shadow host as its (composed) parent.
+
+  /** Open shadow roots seen so far (attached since the tracker started, or found by `walk`). */
+  const shadowRoots = new Set<ShadowRoot>();
+  /** Called for each newly seen root (adds the event listeners, see below). */
+  let onShadowRoot = (_root: ShadowRoot) => {};
+  const addShadowRoot = (root: ShadowRoot | null | undefined) => {
+    if (!root || shadowRoots.has(root)) return;
+    shadowRoots.add(root);
+    onShadowRoot(root);
+  };
+  // Hook attachShadow so roots created between inventories get listeners right
+  // away (non-composed events like `change` and `submit` don't leave a shadow
+  // root). Declarative shadow roots don't go through it; `walk` finds those.
+  const attachShadow = Element.prototype.attachShadow;
+  if (attachShadow) {
+    Element.prototype.attachShadow = function (this: Element, init: ShadowRootInit) {
+      const root = attachShadow.call(this, init);
+      if (init && init.mode === 'open') addShadowRoot(root);
+      return root;
+    };
+  }
+
+  /** Parent in the composed tree: the parent element, or the host for a shadow root's top-level element. */
+  const composedParent = (el: Element): Element | null =>
+    el.parentElement ?? (el.parentNode instanceof ShadowRoot ? el.parentNode.host : null);
+  /** `a` contains `b` (b !== a) in the composed tree. */
+  const composedContains = (a: Element, b: Element): boolean => {
+    for (let p = composedParent(b); p; p = composedParent(p)) if (p === a) return true;
+    return false;
+  };
+  /** `Element.closest` that continues at the shadow host. */
+  const composedClosest = (el: Element | null, sel: string): Element | null => {
+    for (let cur = el; cur; ) {
+      const found = cur.closest(sel);
+      if (found) return found;
+      const root = cur.getRootNode();
+      cur = root instanceof ShadowRoot ? root.host : null;
+    }
+    return null;
+  };
+  /** Connected open shadow roots (forgets disconnected ones). */
+  const liveRoots = (): ShadowRoot[] => {
+    const out: ShadowRoot[] = [];
+    for (const r of shadowRoots) {
+      if (r.host.isConnected) out.push(r);
+      else shadowRoots.delete(r);
+    }
+    return out;
+  };
+  /**
+   * Every element in the composed tree, in composed order (a host, then its
+   * shadow tree, then its light children). Registers open roots on the way.
+   */
+  const walk = (): Element[] => {
+    const out: Element[] = [];
+    const visit = (root: Document | ShadowRoot) => {
+      for (const el of Array.from(root.querySelectorAll('*'))) {
+        out.push(el);
+        if (el.shadowRoot) {
+          addShadowRoot(el.shadowRoot);
+          visit(el.shadowRoot);
+        }
+      }
+    };
+    visit(document);
+    return out;
+  };
+  /** `querySelectorAll` over `scope` (the document or an element) and the open shadow trees inside it. */
+  const queryComposed = (scope: Document | Element, sel: string): Element[] => {
+    const out = Array.from(scope.querySelectorAll(sel));
+    if (shadowRoots.size === 0) return out;
+    for (const r of liveRoots())
+      if (scope === document || r.host === scope || composedContains(scope as Element, r.host))
+        out.push(...Array.from(r.querySelectorAll(sel)));
+    return out;
+  };
 
   // ---- Interactivity rules ---------------------------------------------
   // Which elements count (README "Which elements count"). Kept apart from
@@ -134,17 +219,18 @@ export function tracker(args: TrackerArgs): void {
    * whole subtree, and `reset` stops inheriting (normal rules apply again).
    */
   const markupOverride = (el: Element): 'include' | 'exclude' | '' => {
-    let cur: Element | null = el.closest(OVERRIDE_SELECTOR);
+    let cur: Element | null = composedClosest(el, OVERRIDE_SELECTOR);
     while (cur) {
       const d = directiveOf(cur);
       if (d === 'reset') return '';
       if (d === 'exclude-all') return 'exclude';
       if (cur === el && (d === 'include' || d === 'exclude')) return d;
-      cur = cur.parentElement?.closest(OVERRIDE_SELECTOR) ?? null;
+      cur = composedClosest(composedParent(cur), OVERRIDE_SELECTOR);
     }
     return '';
   };
-  const hasDirectives = (el: Element) => !!el.closest(OVERRIDE_SELECTOR);
+  /** Directives apply across shadow boundaries: `exclude-all` on a host covers its shadow tree. */
+  const hasDirectives = (el: Element) => !!composedClosest(el, OVERRIDE_SELECTOR);
 
   /** Interactive by markup and overrides, before the nesting rule. */
   const isWidget = (el: Element): boolean => {
@@ -155,16 +241,16 @@ export function tracker(args: TrackerArgs): void {
   const isForced = (el: Element) => el.hasAttribute('data-uicov-interactive') && markupOverride(el) === 'include';
 
   /**
-   * The widgets inside `el` that count: not inside a nested group
-   * (GROUP_ROLES), and not themselves containers of another one.
+   * The widgets inside `el` (including its open shadow trees) that count: not
+   * inside a nested group (GROUP_ROLES), and not themselves containers of another one.
    */
   const innerWidgets = (el: Element): Element[] => {
-    const found = Array.from(el.querySelectorAll(CANDIDATES)).filter((d) => {
+    const found = queryComposed(el, CANDIDATES).filter((d) => {
       if (!isWidget(d)) return false;
-      for (let p = d.parentElement; p && p !== el; p = p.parentElement) if (GROUP_ROLES.has(firstRole(p))) return false;
+      for (let p = composedParent(d); p && p !== el; p = composedParent(p)) if (GROUP_ROLES.has(firstRole(p))) return false;
       return true;
     });
-    return found.filter((d) => isForced(d) || !found.some((o) => o !== d && d.contains(o)));
+    return found.filter((d) => isForced(d) || !found.some((o) => o !== d && composedContains(d, o)));
   };
 
   /**
@@ -180,14 +266,13 @@ export function tracker(args: TrackerArgs): void {
     return isScrollContainer(el) && markupOverride(el) !== 'exclude';
   };
 
-  /** Every interactive element in the document, in document order. */
-  const interactiveElements = (): Element[] => {
-    const found = new Set(Array.from(document.querySelectorAll(CANDIDATES)).filter(isInteractive));
+  /** The interactive elements among `all` (every element, in composed order: `walk()`), in that order. */
+  const interactiveElements = (all: Element[]): Element[] => {
+    const found = new Set(queryComposed(document, CANDIDATES).filter(isInteractive));
     if (scrollEnabled) {
-      for (const el of Array.from(document.querySelectorAll('body *')))
-        if (!found.has(el) && isScrollContainer(el) && isInteractive(el)) found.add(el);
+      for (const el of all) if (!found.has(el) && isScrollContainer(el) && isInteractive(el)) found.add(el);
     }
-    return Array.from(found).sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    return all.filter((el) => found.has(el));
   };
 
   /**
@@ -202,7 +287,7 @@ export function tracker(args: TrackerArgs): void {
       target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
     if (!el) return null;
     if (type === 'scroll') return isInteractive(el) ? el : null;
-    for (; el; el = el.parentElement) {
+    for (; el; el = composedParent(el)) {
       if (el.tagName === 'LABEL' && (el as HTMLLabelElement).control) {
         if (type === 'click') return null;
         const control = (el as HTMLLabelElement).control!;
@@ -226,9 +311,12 @@ export function tracker(args: TrackerArgs): void {
   const nameOf = (el: Element): { name: string; nameFrom: string } => {
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
+      // ids are per tree: look them up in the element's document or shadow root.
+      const root = el.getRootNode() as Document | ShadowRoot;
+      const byId = (id: string) => (root.getElementById ? root.getElementById(id) : document.getElementById(id));
       const text = labelledBy
         .split(/\s+/)
-        .map((id) => document.getElementById(id)?.textContent || '')
+        .map((id) => byId(id)?.textContent || '')
         .join(' ');
       if (clean(text)) return { name: clean(text), nameFrom: 'aria-labelledby' };
     }
@@ -276,12 +364,22 @@ export function tracker(args: TrackerArgs): void {
    */
   const nodeTable = () => {
     const nodes: RawNode[] = [];
-    const index = new Map<Element, number>();
+    const index = new Map<Node, number>();
+    /** A shadow root is a `#shadow-root` pseudo-node under its host. */
+    const addRoot = (root: ShadowRoot): number => {
+      const known = index.get(root);
+      if (known !== undefined) return known;
+      const node: RawNode = { tag: '#shadow-root', parent: add(root.host) };
+      index.set(root, nodes.length);
+      nodes.push(node);
+      return nodes.length - 1;
+    };
     const add = (el: Element): number => {
       const known = index.get(el);
       if (known !== undefined) return known;
-      const parentEl = el.parentElement;
-      const parent = parentEl ? add(parentEl) : undefined;
+      const parentEl: Element | ShadowRoot | null =
+        el.parentElement ?? (el.parentNode instanceof ShadowRoot ? el.parentNode : null);
+      const parent = !parentEl ? undefined : parentEl instanceof ShadowRoot ? addRoot(parentEl) : add(parentEl);
       const node: RawNode = { tag: el.tagName.toLowerCase() };
       if (parent !== undefined) node.parent = parent;
       if (parentEl) {
@@ -367,13 +465,14 @@ export function tracker(args: TrackerArgs): void {
 
   const record = (e: Event) => {
     const type = e.type;
-    let target: EventTarget | null = e.target;
+    // The innermost target: for events from open shadow trees, e.target is the host.
+    let target: EventTarget | null = (e.composedPath && e.composedPath()[0]) || e.target;
     // Keyboard activation only: Enter or Space on the focused element.
     if (type === 'keydown') {
       const k = e as KeyboardEvent;
       if ((k.key !== 'Enter' && k.key !== ' ') || k.repeat || k.isComposing) return;
       // In a text field these keys are typing (counted as `input`), not activation.
-      if (isTextEntry(e.target)) return;
+      if (isTextEntry(target)) return;
     }
     // A submit credits the button that submitted the form (also when submitted with Enter).
     if (type === 'submit') target = (e as SubmitEvent).submitter ?? null;
@@ -391,6 +490,15 @@ export function tracker(args: TrackerArgs): void {
   const listened = new Set<string>([...globalEvents, ...allowedRules.flatMap((r) => [...r.events])]);
   // Capture phase: sees events the page stops, and non-bubbling ones (focus, blur, scroll).
   for (const type of listened) addEventListener(type, record, true);
+  // Events that aren't composed (change, submit, scroll…) stay inside their
+  // shadow root, so each open root gets listeners too; composed events reach `window`.
+  const recordInRoot = (e: Event) => {
+    if (!e.composed) record(e);
+  };
+  onShadowRoot = (root) => {
+    for (const type of listened) root.addEventListener(type, recordInRoot, true);
+  };
+  shadowRoots.forEach(onShadowRoot);
 
   const isVisible = (el: Element) => {
     const anyEl = el as any;
@@ -404,11 +512,14 @@ export function tracker(args: TrackerArgs): void {
   const EXTRA = args.extraCandidates || '';
   /** Visible interactive elements and visible extra candidates, flagged, in document order. */
   w.__uicovInventory = (): RawInventory => {
-    const interactive = interactiveElements();
+    const all = walk();
+    const interactive = interactiveElements(all);
     const flagged = new Set(interactive);
-    const all = EXTRA ? new Set([...interactive, ...Array.from(document.querySelectorAll(EXTRA))]) : flagged;
-    const ordered = all === flagged ? interactive : Array.from(all).sort((a, b) =>
-      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    let ordered = interactive;
+    if (EXTRA) {
+      const extra = new Set(queryComposed(document, EXTRA));
+      ordered = all.filter((el) => flagged.has(el) || extra.has(el));
+    }
     const { nodes, add } = nodeTable();
     const elements = ordered.filter(isVisible).map((el) => {
       const r = el.getBoundingClientRect();
@@ -421,6 +532,35 @@ export function tracker(args: TrackerArgs): void {
         h: Math.round(r.height),
       };
     });
-    return { url: location.href, dpr: window.devicePixelRatio || 1, nodes, elements };
+    return {
+      url: location.href,
+      dpr: window.devicePixelRatio || 1,
+      nodes,
+      elements,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
+  };
+
+  /** Node chain and content box of a frame element in this document (the recorder maps child frames with it). */
+  w.__uicovFrameHost = (el: Element): RawFrameHost => {
+    const { nodes, add } = nodeTable();
+    const node = add(el);
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    const px = (v: string) => parseFloat(v) || 0;
+    const [pl, pt, pr, pb] = [s.paddingLeft, s.paddingTop, s.paddingRight, s.paddingBottom].map(px);
+    return {
+      nodes,
+      node,
+      x: r.left + el.clientLeft + pl + window.scrollX,
+      y: r.top + el.clientTop + pt + window.scrollY,
+      w: Math.max(0, el.clientWidth - pl - pr),
+      h: Math.max(0, el.clientHeight - pt - pb),
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+    };
   };
 }

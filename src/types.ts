@@ -10,6 +10,8 @@ export interface InventoryElement {
    * Stable identity used to match interactions to elements across tests,
    * from attributes (`[data-testid="x"]`, `#id`, `[name="email"]`) or the
    * element's position (`main > form > button`). Never from visible text.
+   * Inside a frame or shadow root, prefixed by the host's key and ` >> `
+   * (`iframe[data-testid="pay"] >> #card`, `my-widget >> button`).
    */
   key: string;
   /** Human-readable label (role + accessible name). Display only. */
@@ -26,6 +28,11 @@ export interface InventoryElement {
    * attribute, which is not an accessible name). '' if there is no name.
    */
   nameFrom?: string;
+  /**
+   * Keys of the `<iframe>` elements the element is inside, outermost first
+   * (each is a prefix of `key`). Absent in the top document.
+   */
+  frames?: string[];
   tag: string;
   /** Document coordinates in CSS pixels (match a fullPage screenshot). */
   x: number;
@@ -49,6 +56,7 @@ export interface Interaction {
   role?: string;
   name?: string;
   nameFrom?: string;
+  frames?: string[];
   event: string;
   url: string;
 }

@@ -83,7 +83,11 @@ export interface ViewCoverage {
  * runs, as long as the identity rules don't change.
  */
 export interface ElementCoverage {
-  /** Identity: a structural selector, unique within the view. */
+  /**
+   * Identity: a structural selector, unique within the view. Inside an iframe
+   * or open shadow root, prefixed by the host's key and ` >> `
+   * (`iframe[data-testid="pay"] >> #card`, `my-widget >> button`).
+   */
   key: string;
   /** Human-readable `role "name"`; `(+N variants)` when instances sharing the key had different labels. */
   label: string;
@@ -109,6 +113,8 @@ export interface ElementCoverage {
   nameFrom?: string;
   /** Identifying attributes (id, name, role, type, aria-label, href, data-*, …). */
   attrs?: Record<string, string>;
+  /** Keys of the `<iframe>` elements the element is inside, outermost first (each a prefix of `key`). Absent in the top document. */
+  frames?: string[];
   /** One line of Playwright code that interacts with the element. Heuristic: the text may change between versions. */
   suggestedLocator?: string;
   /** Informational accessibility hints; absent when there are none. Messages may change between versions. */
@@ -313,6 +319,7 @@ function element(e: InternalElement): ElementCoverage {
   if (e.name !== undefined) out.name = e.name;
   if (e.nameFrom !== undefined) out.nameFrom = e.nameFrom;
   if (e.attrs !== undefined) out.attrs = e.attrs;
+  if (e.frames?.length) out.frames = [...e.frames];
   if (e.suggestedLocator !== undefined) out.suggestedLocator = e.suggestedLocator;
   if (e.a11yHints?.length) out.a11yHints = e.a11yHints.map(({ rule, message }) => ({ rule, message }));
   return out;
