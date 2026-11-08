@@ -1,0 +1,17 @@
+/* Screenshot below the features on the home page. */
+.home-shot {
+  max-width: 1152px;
+  margin: 48px auto 0;
+}
+.home-shot img {
+  width: 100%;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  box-shadow: var(--vp-shadow-3);
+}
+
+/* Report screenshots in pages: a frame, so white screenshots stand out in light mode. */
+.vp-doc img[src*='report-'] {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+}

@@ -23,7 +23,7 @@ export interface ElementCoverage {
   /** Max number of instances seen at once (e.g. a "Delete" button per row). */
   instances: number;
   /**
-   * Set when this element stands for several: a group (README "Element
+   * Set when this element stands for several: a group (docs "Element
    * grouping") or instances sharing a key. Absent for a single element.
    */
   group?: ElementGroup;

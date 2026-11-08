@@ -2,7 +2,7 @@
  * Element facts derived from recorded nodes (no DOM needed).
  *
  * Which elements are interactive is decided in the browser (`tracker.ts`,
- * README "Which elements count") and recorded per element, because the rules
+ * docs "Which elements count") and recorded per element, because the rules
  * need live DOM state. The tracker additionally records the visible elements
  * matching `RECORDED_CANDIDATES`, flagged as not interactive, so later
  * report-time rules can use them without re-recording.

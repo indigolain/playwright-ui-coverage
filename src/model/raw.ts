@@ -65,7 +65,7 @@ export interface RawElementRef {
 export interface RawElement extends RawElementRef {
   /**
    * Recorded as a candidate only (`RECORDED_CANDIDATES`): not interactive by
-   * the in-browser rules (README "Which elements count"), which include markup
+   * the in-browser rules (docs "Which elements count"), which include markup
    * directives and the recording-time `ignoreSelectors`. Absent: interactive.
    */
   candidateOnly?: true;

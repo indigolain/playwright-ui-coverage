@@ -1,0 +1,59 @@
+name: Docs
+
+# Builds the documentation site (docs/, VitePress) and deploys it to GitHub
+# Pages: https://indigolain.github.io/playwright-ui-coverage/
+#
+# GitHub Pages sites are public even for private repositories, so the deploy
+# job only runs once the repository is public. Until then this workflow only
+# builds the site (CI's checks job builds it on every PR too). To launch:
+# make the repository public, set Settings → Pages → Source to "GitHub
+# Actions", then run this workflow (Actions → Docs → Run workflow) or push to main.
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', 'scripts/docs.mjs', '.github/workflows/docs.yml']
+  pull_request:
+    paths: ['docs/**', 'scripts/docs.mjs', '.github/workflows/docs.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # "Last updated" dates come from git history
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm run docs:build
+      - uses: actions/upload-pages-artifact@v4
+        if: ${{ !github.event.repository.private && github.event_name != 'pull_request' }}
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    # Never publish while the repository is private, and never from a PR.
+    if: ${{ !github.event.repository.private && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -29,7 +29,7 @@ export interface ReportOptions extends UiCoverageRules {
   /** Where to write the report. Default: "ui-coverage-report". */
   outputFolder?: string;
   /**
-   * URL patterns that name views (README "Views"): `'/users/:username'`, or
+   * URL patterns that name views (docs "Views"): `'/users/:username'`, or
    * `{ pattern, groupBy }` to split one pattern into a view per parameter
    * value. The first matching pattern wins; URLs no pattern matches go to
    * `normalizeUrl`, else the automatic rules. Not used with `viewBy: 'file'`.
@@ -91,7 +91,7 @@ export interface ReportOptions extends UiCoverageRules {
    * Compare untested elements with a committed baseline file and fail only on
    * new ones (ratchet). `'ui-coverage-baseline.json'` (a file name) or `true`
    * is `{ file, mode: 'check' }`. The current state is always written to
-   * `<file>.next.json` (check mode). See README "Baseline".
+   * `<file>.next.json` (check mode). See docs "Baseline".
    */
   baseline?: BaselineOption;
   /**

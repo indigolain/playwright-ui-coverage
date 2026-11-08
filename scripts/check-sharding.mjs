@@ -127,7 +127,7 @@ try {
   const [got, want] = [countShots(result), countShots(baseline)];
   if (got === 0 && want > 0) errors.push('merged report has no screenshots');
   else if (got !== want) {
-    // Short-lived UI states can miss a screenshot in either run (see README "Known limitations").
+    // Short-lived UI states can miss a screenshot in either run (see docs "Known limitations").
     console.warn(`warning: ${got} screenshots in merged report, ${want} in unsharded report`);
   }
 
