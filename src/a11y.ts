@@ -8,7 +8,7 @@
  * `data-uicov-interactive` is never inventoried), and names browsers compute
  * differently from the tracker's approximation.
  */
-import type { CoverageSummary, ElementCoverage } from './aggregate';
+import { allElements, type CoverageSummary, type ElementCoverage } from './aggregate';
 import { hasAccessibleName } from './locators';
 
 export type A11yRule = 'no-name' | 'placeholder-only' | 'duplicate-name' | 'not-focusable' | 'no-role';
@@ -112,9 +112,11 @@ export function duplicateNameHints<T extends A11yInput>(elements: T[]): Map<T, A
 export function addA11yHints(summary: CoverageSummary): void {
   let total = 0;
   for (const r of summary.routes) {
-    const dupes = duplicateNameHints(r.elements);
+    // The <a> elements of link units too: duplicate names are about links.
+    const elements = allElements(r);
+    const dupes = duplicateNameHints(elements);
     let count = 0;
-    for (const e of r.elements) {
+    for (const e of elements) {
       const hints = [...elementHints(e), ...(dupes.get(e) ?? [])];
       if (hints.length) e.a11yHints = hints;
       else delete e.a11yHints;

@@ -12,6 +12,7 @@ const routes = [
   [/^\/users\/?$/, 'users.html'],
   [/^\/users\/\d+\/?$/, 'user.html'],
   [/^\/settings\/?$/, 'settings.html'],
+  [/^\/settings\/audit\/?$/, 'audit.html'],
   [/^\/widgets\/?$/, 'widgets.html'],
   // /embedded loads /frames/card from the other host name (localhost ↔ 127.0.0.1): a cross-origin frame.
   [/^\/embedded\/?$/, 'embedded.html'],

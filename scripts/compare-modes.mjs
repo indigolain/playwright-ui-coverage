@@ -57,7 +57,11 @@ function normalize(report) {
           interactionCounts: e.interactionCounts && Object.keys(e.interactionCounts).sort(),
         }))
         .sort((a, b) => a.key.localeCompare(b.key)),
+      links: (v.links ?? [])
+        .map((l) => ({ key: l.key, tested: l.tested, destinations: l.destinations, referrers: l.referrers.map((e) => e.key).sort() }))
+        .sort((a, b) => a.key.localeCompare(b.key)),
     })),
+    untestedViews: (report.untestedViews ?? []).map((v) => v.name),
   };
 }
 

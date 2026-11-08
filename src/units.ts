@@ -6,7 +6,7 @@ import type { CoverageReport, ViewCoverage } from './coverage-report';
 
 export type UnitKind = 'element' | 'link';
 
-/** A coverage unit of a view: an interactive element, or (once tracked) a link. */
+/** A coverage unit of a view: an interactive element, or a link unit (key: the destination view). */
 export interface Unit {
   kind: UnitKind;
   key: string;
@@ -15,8 +15,8 @@ export interface Unit {
 }
 
 /**
- * Units of a view. Links are read from `view.links` when a report has them
- * (`{ key, tested, label? }` entries); until link tracking lands there are none.
+ * Units of a view: its elements and its link units (`view.links`, `{ key,
+ * tested, label? }` entries; reports written before link units have none).
  */
 export function unitsOf(view: ViewCoverage): Unit[] {
   const out: Unit[] = view.elements.map((e) => ({ kind: 'element', key: e.key, label: e.label, tested: e.tested }));
@@ -29,6 +29,19 @@ export function unitsOf(view: ViewCoverage): Unit[] {
   }
   return out;
 }
+
+/**
+ * "untested element" / "untested link" / "untested element or link", for
+ * messages about a list of units.
+ */
+export function unitNoun(units: { kind: UnitKind }[]): string {
+  const kinds = new Set(units.map((u) => u.kind));
+  return kinds.size === 2 ? 'untested element or link' : kinds.has('link') ? 'untested link' : 'untested element';
+}
+
+/** A unit for display: the label, and for a link its destination view (its key). */
+export const unitText = (u: { kind: UnitKind; label: string; key: string }) =>
+  u.kind === 'link' ? `${u.label} → ${u.key}` : u.label;
 
 /** `kind` + key: element and link keys may coincide. */
 export const unitId = (kind: UnitKind, key: string) => `${kind}\u0000${key}`;

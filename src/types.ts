@@ -33,6 +33,12 @@ export interface InventoryElement {
    * (each is a prefix of `key`). Absent in the top document.
    */
   frames?: string[];
+  /**
+   * For `<a href>` / `<area href>`: the destination as the browser resolved it,
+   * set only when a `<base>` element made it differ from the `href` attribute
+   * resolved against the page URL. Absent otherwise (read `attrs.href`).
+   */
+  href?: string;
   tag: string;
   /** Document coordinates in CSS pixels (match a fullPage screenshot). */
   x: number;
@@ -57,6 +63,8 @@ export interface Interaction {
   name?: string;
   nameFrom?: string;
   frames?: string[];
+  /** Same as `InventoryElement.href`. */
+  href?: string;
   event: string;
   url: string;
 }

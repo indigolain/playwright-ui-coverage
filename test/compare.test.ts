@@ -104,7 +104,7 @@ describe('markdown', () => {
 
   it('says so when nothing changed', () => {
     const md = comparisonMarkdown(compareReports(base, base));
-    expect(md).toContain('no new untested elements · 0 resolved');
+    expect(md).toContain('no new untested elements or links · 0 resolved');
     expect(md).toContain('All 4 views unchanged.');
     expect(md).not.toContain('<details>');
   });

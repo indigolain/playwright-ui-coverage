@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { BaselineCheck, BaselineGap, BaselineResolved, CoverageReport, ViewRename } from './coverage-report';
-import { byString, matchRenames, unitId, unitsOf, type Unit, type UnitKind } from './units';
+import { byString, matchRenames, unitId, unitNoun, unitsOf, unitText, type Unit, type UnitKind } from './units';
 
 export const BASELINE_VERSION = 1;
 export const DEFAULT_BASELINE_FILE = 'ui-coverage-baseline.json';
@@ -196,7 +196,8 @@ export function formatBaselineCheck(check: BaselineCheck, maxItems = 20): { info
     for (const x of items.slice(0, maxItems)) out.push(`    ${line(x)}`);
     if (items.length > maxItems) out.push(`    … and ${items.length - maxItems} more (see coverage.json "baseline")`);
   };
-  const gap = (g: BaselineGap) => `${g.view}  ${g.label}  ${g.key}${g.newView ? '  (new view)' : ''}`;
+  const gap = (g: BaselineGap) =>
+    g.kind === 'link' ? `${g.view}  ${unitText(g)}${g.newView ? '  (new view)' : ''}` : `${g.view}  ${g.label}  ${g.key}${g.newView ? '  (new view)' : ''}`;
   for (const r of check.renamedViews) info.push(`  view renamed?  ${r.from} → ${r.to} (compared with its old entry)`);
   if (check.addedViews.length)
     info.push(`  view(s) added: ${check.addedViews.join(', ')}${check.allowNewViews ? ' (allowed by allowNewViews)' : ''}`);
@@ -204,15 +205,19 @@ export function formatBaselineCheck(check: BaselineCheck, maxItems = 20): { info
   const tested = check.resolved.filter((r) => r.reason === 'tested');
   const gone = check.resolved.length - tested.length;
   if (check.resolved.length) {
-    info.push(`  ${tested.length} gap(s) now tested${gone ? `, ${gone} untested element(s) gone` : ''}:`);
-    list(check.resolved, (r) => `${r.view}  ${r.label ?? '(removed)'}  ${r.key}`, info);
+    info.push(`  ${tested.length} gap(s) now tested${gone ? `, ${gone} untested unit(s) gone` : ''}:`);
+    list(
+      check.resolved,
+      (r) => (r.kind === 'link' ? `${r.view}  ${r.label ?? '(removed) link'} → ${r.key}` : `${r.view}  ${r.label ?? '(removed)'}  ${r.key}`),
+      info,
+    );
   }
 
   const errors: string[] = [];
   if (check.status === 'updated') {
     const header = [`UI coverage baseline updated: ${check.file}`];
     if (check.newGaps.length) {
-      header.push(`  ${check.newGaps.length} untested element(s) added to the baseline:`);
+      header.push(`  ${check.newGaps.length} ${unitNoun(check.newGaps)}(s) added to the baseline:`);
       list(check.newGaps, gap, header);
     }
     return { info: [...header, ...info], errors };
@@ -229,9 +234,9 @@ export function formatBaselineCheck(check: BaselineCheck, maxItems = 20): { info
   const next = check.nextFile ? ` Current state: ${check.nextFile}` : '';
   if (check.status === 'passed') {
     const improved = check.resolved.length || check.removedViews.length ? ` Commit it as ${check.file} to ratchet.` : '';
-    return { info: [`UI coverage baseline: no new untested elements (${check.file}).${next ? next + '.' : ''}${improved}`, ...info], errors };
+    return { info: [`UI coverage baseline: no new untested elements or links (${check.file}).${next ? next + '.' : ''}${improved}`, ...info], errors };
   }
-  errors.push(`UI coverage baseline: ${check.newGaps.length} new untested element(s) not in ${check.file}:`);
+  errors.push(`UI coverage baseline: ${check.newGaps.length} new ${unitNoun(check.newGaps)}(s) not in ${check.file}:`);
   list(check.newGaps, gap, errors);
   errors.push(
     `  Test them, or accept them by committing ${check.nextFile ?? 'the new state'} as ${check.file}` +

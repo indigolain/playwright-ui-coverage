@@ -61,11 +61,14 @@ exports[`aggregate > matches the snapshot 1`] = `
         },
       ],
       "failingOnly": 0,
+      "links": [],
       "percent": 33.3,
       "route": "/app/#/items/:id",
       "screenshots": [],
       "tested": 1,
+      "testedLinks": 0,
       "total": 3,
+      "totalLinks": 0,
     },
     {
       "elements": [
@@ -256,6 +259,7 @@ exports[`aggregate > matches the snapshot 1`] = `
         },
       ],
       "failingOnly": 0,
+      "links": [],
       "percent": 60,
       "route": "/users",
       "screenshots": [
@@ -338,7 +342,9 @@ exports[`aggregate > matches the snapshot 1`] = `
         },
       ],
       "tested": 6,
+      "testedLinks": 0,
       "total": 10,
+      "totalLinks": 0,
     },
     {
       "elements": [
@@ -364,14 +370,20 @@ exports[`aggregate > matches the snapshot 1`] = `
         },
       ],
       "failingOnly": 0,
+      "links": [],
       "percent": 100,
       "route": "/users/:id",
       "screenshots": [],
       "tested": 1,
+      "testedLinks": 0,
       "total": 1,
+      "totalLinks": 0,
     },
   ],
   "tested": 8,
+  "testedLinks": 0,
   "total": 14,
+  "totalLinks": 0,
+  "untestedViews": [],
 }
 `;

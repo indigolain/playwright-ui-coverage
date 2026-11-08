@@ -8,7 +8,7 @@
  * Elements whose name varied between runs/instances ("(+N variants)") use the
  * key, and repeated elements get `.first()` with a comment.
  */
-import type { CoverageSummary, ElementCoverage } from './aggregate';
+import { allElements, type CoverageSummary, type ElementCoverage } from './aggregate';
 import { splitHostChain } from './model/selector';
 
 export interface LocatorOptions {
@@ -251,9 +251,10 @@ export function testSkeleton(route: string, lines: string[]): string {
   ].join('\n');
 }
 
-/** Sets `suggestedLocator` on every element of `summary` (in place). */
+/** Sets `suggestedLocator` on every element of `summary`, the `<a>` elements of link units included (in place). */
 export function addSuggestedLocators(summary: CoverageSummary, opts?: LocatorOptions): void {
   for (const r of summary.routes) {
+    const elements = allElements(r);
     // Locators search one frame, so names clash only within the same frame.
     const byFrame = new Map<string, Map<string, string[]>>();
     const namesIn = (e: ElementCoverage) => {
@@ -261,13 +262,13 @@ export function addSuggestedLocators(summary: CoverageSummary, opts?: LocatorOpt
       if (!byFrame.has(f)) byFrame.set(f, new Map());
       return byFrame.get(f)!;
     };
-    for (const e of r.elements) {
+    for (const e of elements) {
       const role = playwrightRole(e);
       if (!role || !hasAccessibleName(e)) continue;
       const namesByRole = namesIn(e);
       if (!namesByRole.has(role)) namesByRole.set(role, []);
       namesByRole.get(role)!.push(e.name!.toLowerCase());
     }
-    for (const e of r.elements) e.suggestedLocator = suggestedLocator(e, opts, { namesByRole: namesIn(e) });
+    for (const e of elements) e.suggestedLocator = suggestedLocator(e, opts, { namesByRole: namesIn(e) });
   }
 }
