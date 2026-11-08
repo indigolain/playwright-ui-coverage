@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import type { UiCoverageOptions } from './src';
+import { DEFAULT_INTERACTIONS, type UiCoverageOptions } from './src';
 
 // Config for the bundled demo. In your own project, use
 // `import 'playwright-ui-coverage/register'` and
@@ -43,6 +43,8 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
       ...(process.env.UICOV_FORMAT === 'jpeg' ? { format: 'jpeg' as const } : {}),
       // On /widgets, "Double-click to rename" only counts when double-clicked.
       allowedInteractions: [{ selector: '[data-testid="rename"]', events: ['dblclick'] }],
+      // scroll is opt-in; the demo turns it on to show the scrollable log on /widgets.
+      interactions: [...DEFAULT_INTERACTIONS, 'scroll'],
     },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],

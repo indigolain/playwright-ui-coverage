@@ -10,7 +10,7 @@ import { chromium } from '@playwright/test';
 const require = createRequire(import.meta.url);
 const { tracker } = require('../dist/tracker.js');
 const { identityArgs } = require('../dist/identity.js');
-const { interactionArgs } = require('../dist/interactions.js');
+const { interactionArgs, DEFAULT_INTERACTIONS } = require('../dist/interactions.js');
 
 const PAGE = `<!doctype html><html><body>
   <a id="link" href="/x">Link</a>
@@ -70,7 +70,11 @@ const EXPECTED_INVENTORY = [
 const options = {
   ignoreSelectors: ['.banner', '!!invalid'],
   ...identityArgs({}),
-  ...interactionArgs({ allowedInteractions: [{ selector: '#dbl-only', events: ['dblclick'] }] }),
+  // scroll is opt-in; turn it on so scroll containers are inventoried and credited.
+  ...interactionArgs({
+    interactions: [...DEFAULT_INTERACTIONS, 'scroll'],
+    allowedInteractions: [{ selector: '#dbl-only', events: ['dblclick'] }],
+  }),
 };
 
 const browser = await chromium.launch();

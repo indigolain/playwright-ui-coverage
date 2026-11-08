@@ -81,7 +81,7 @@ UI coverage: 38.9% (14/36 elements)
 
 ## How it works
 
-1. **Tracker** (`addInitScript`): capture-phase listeners record every interaction (`click`, `input`, `change`, `submit`, `dblclick`, `contextmenu`, keyboard activation, `scroll`, drag and drop, see [Interaction types](#interaction-types)) on an [interactive element](#which-elements-count), whichever Playwright API (or a real user) caused it.
+1. **Tracker** (`addInitScript`): capture-phase listeners record every interaction (`click`, `input`, `change`, `submit`, `dblclick`, `contextmenu`, keyboard activation, drag and drop, opt-in `scroll`/`focus`/`blur`, see [Interaction types](#interaction-types)) on an [interactive element](#which-elements-count), whichever Playwright API (or a real user) caused it.
 2. **Inventory + screenshot**: when a page loads and shortly after interactions, the recorder lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear.
 3. **Reporter**: merges data from all workers, groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it, and renders the HTML report and `coverage.json`.
 
@@ -182,7 +182,7 @@ Anything inside an element with `data-uicov-ignore` (or `data-uicov-interactive=
 | `input`, `change` | text is typed, an option picked, a checkbox toggled, a file selected | on |
 | `submit` | a form is submitted; credited to its submit button (`SubmitEvent.submitter`), also when submitted with Enter | on |
 | `keydown` | **Enter** or **Space** is pressed on a focused element (keyboard activation). Typing in a text field doesn't count here (that's `input`) | on |
-| `scroll` | a scroll container is scrolled. A burst of scroll events (less than 500 ms apart) counts once | on |
+| `scroll` | a scroll container is scrolled. A burst of scroll events (less than 500 ms apart) counts once | **off**: Playwright scrolls elements into view before acting on them, which would mark scroll containers tested |
 | `dragstart`, `drop` | an element is dragged; an element receives a drop. Mark a plain `<div>` drop zone with `data-uicov-interactive="include"` so it counts | on |
 | `focus`, `blur` | the element gains or loses focus | **off**: tabbing through a form would mark every field tested |
 
@@ -278,7 +278,7 @@ Each screenshot is a file attachment named `ui-coverage-screenshot-<n>`, next to
 - UI states that last shorter than `snapshotDelay` (e.g. a modal a test opens and closes instantly) still count their elements, but may not get a screenshot.
 - Inventory covers the main frame only. Iframes and shadow DOM aren't inventoried yet.
 - Hover-only interactions aren't counted.
-- Playwright scrolls elements into view before acting on them. When that scrolls a scroll container, it counts as a `scroll` of that container. Leave `scroll` out of `interactions` if that's not what you want.
+- With `scroll` enabled, Playwright's automatic scrolling-into-view before actions also counts as a `scroll` of the container. That's why `scroll` is off by default.
 - Elements with `position: fixed` may be offset in full-page screenshots.
 
 ## Development

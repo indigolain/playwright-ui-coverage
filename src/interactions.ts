@@ -33,8 +33,11 @@ export const INTERACTION_TYPES = [
 export type InteractionType = (typeof INTERACTION_TYPES)[number];
 
 /** Everything except `focus` and `blur`. */
+// Off by default: focus/blur (tabbing through a form would mark every field
+// tested) and scroll (Playwright scrolls elements into view before acting, which
+// would mark scroll containers tested without the test meaning to scroll them).
 export const DEFAULT_INTERACTIONS: InteractionType[] = INTERACTION_TYPES.filter(
-  (t) => t !== 'focus' && t !== 'blur',
+  (t) => t !== 'focus' && t !== 'blur' && t !== 'scroll',
 );
 
 /** Restricts which events count for the elements matching `selector`. */
