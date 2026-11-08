@@ -94,7 +94,7 @@ export function aggregate(
   opts: { normalizeUrl: NormalizeUrl; maxScreenshotsPerRoute: number },
 ): CoverageSummary {
   type RouteAcc = {
-    elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string> }>;
+    elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string>; labels: Set<string> }>;
     snapshots: { snap: TestCoverageData['snapshots'][number]; test: string }[];
   };
   const routes = new Map<string, RouteAcc>();
@@ -114,8 +114,10 @@ export function aggregate(
       for (const el of snap.elements) {
         const existing = acc.elements.get(el.key);
         const n = counts.get(el.key)!;
-        if (existing) existing.instances = Math.max(existing.instances, n);
-        else
+        if (existing) {
+          existing.instances = Math.max(existing.instances, n);
+          existing.labels.add(el.label);
+        } else
           acc.elements.set(el.key, {
             key: el.key,
             label: el.label,
@@ -126,6 +128,7 @@ export function aggregate(
             testedByFailing: [],
             testedBySet: new Set(),
             failingSet: new Set(),
+            labels: new Set([el.label]),
           });
       }
     }
@@ -141,7 +144,7 @@ export function aggregate(
         // Interacted with but never captured in an inventory (transient element).
         el = {
           key: i.key, label: i.label, tag: '?', instances: 1, tested: false,
-          testedBy: [], testedByFailing: [], testedBySet: new Set(), failingSet: new Set(),
+          testedBy: [], testedByFailing: [], testedBySet: new Set(), failingSet: new Set(), labels: new Set([i.label]),
         };
         acc.elements.set(i.key, el);
       }
@@ -156,11 +159,17 @@ export function aggregate(
 
   const result: RouteCoverage[] = [];
   for (const [route, acc] of routes) {
-    const elements = [...acc.elements.values()].map(({ testedBySet, failingSet, ...e }) => ({
-      ...e,
-      testedBy: [...testedBySet],
-      testedByFailing: [...failingSet].filter((t) => !testedBySet.has(t)),
-    }));
+    const elements = [...acc.elements.values()].map(({ testedBySet, failingSet, labels, ...e }) => {
+      // Elements sharing a key (e.g. a link on every table row) can have different
+      // labels; pick one independent of test order so reports are reproducible.
+      const sorted = [...labels].sort();
+      return {
+        ...e,
+        label: sorted.length > 1 ? `${sorted[0]} (+${sorted.length - 1} variants)` : sorted[0],
+        testedBy: [...testedBySet].sort(),
+        testedByFailing: [...failingSet].filter((t) => !testedBySet.has(t)).sort(),
+      };
+    });
     if (elements.length === 0) continue;
 
     // Greedy set cover: pick screenshots that show the most not-yet-shown elements.

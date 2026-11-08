@@ -44,8 +44,9 @@ const ID_OR_NAME = 'id|name';
  */
 export const BUILTIN_ATTRIBUTE_FILTERS: AttributeFilter[] = [
   // React useId: ":r1:", ":R2kq:" (React 18), "«r1»" (React 19), also as part of a longer id.
-  { attribute: ANY, value: '.*:[rR][0-9a-zA-Z]*:.*' },
-  { attribute: ANY, value: '.*«[rR][0-9a-zA-Z]*».*' },
+  // Only id/name: hand-written test ids like "perm:read:toggle" would otherwise match.
+  { attribute: ID_OR_NAME, value: '.*:[rR][0-9a-zA-Z]*:.*' },
+  { attribute: ID_OR_NAME, value: '.*«[rR][0-9a-zA-Z]*».*' },
   // UUIDs and long hex strings (hashes, object ids).
   { attribute: ANY, value: '.*[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}.*' },
   { attribute: ANY, value: '.*[0-9a-fA-F]{16,}.*' },
