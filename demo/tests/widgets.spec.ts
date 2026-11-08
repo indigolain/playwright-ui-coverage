@@ -24,13 +24,9 @@ test('double-click, scroll and drag and drop', async ({ page }) => {
   await rename.dblclick();
   await expect(rename).toHaveText('Renamed');
 
-  // Retried: a wheel event can get lost while a full-page screenshot resizes the
-  // viewport (seen with Chromium in Playwright 1.50).
-  await expect(async () => {
-    await page.getByTestId('log').hover();
-    await page.mouse.wheel(0, 60);
-    expect(await page.getByTestId('log').evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-  }).toPass({ timeout: 10_000 });
+  await page.getByTestId('log').hover();
+  await page.mouse.wheel(0, 60); // doesn't wait for the scroll
+  await expect.poll(() => page.getByTestId('log').evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 
   await page.getByTestId('chip').dragTo(page.getByTestId('drop-zone'));
   await expect(page.getByTestId('drop-zone')).toHaveText('Dropped!');

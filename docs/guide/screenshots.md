@@ -38,6 +38,8 @@ The reporter option `maxScreenshotsPerRoute` (default `3`) picks the screenshots
 
 When a page loads and shortly after interactions (`snapshotDelay`), the recorder takes an inventory of the visible interactive elements and a full-page screenshot, but only when the page shows elements no screenshot has shown yet.
 
+In Chromium, full-page captures and the test's input calls take turns, because input sent while a full-page capture resizes the viewport can get lost. See [How it works](./how-it-works.md#1-recording-in-the-browser).
+
 ## Short-lived states
 
 A modal that a test opens, fills and saves within `snapshotDelay` would never be photographed if the recorder only waited. With `captureTransientStates` (default on), when an interaction changes the page so that the viewport shows elements no screenshot has shown yet, the page sends an inventory as soon as its handlers have run, and the recorder takes a **viewport** screenshot immediately. The report captions these "viewport, right after an interaction".
