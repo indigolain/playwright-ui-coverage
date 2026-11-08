@@ -88,7 +88,7 @@ describe('validateConfig', () => {
     validateConfig(
       defineUiCoverageConfig({
         comment: 'top level',
-        ignoreSelectors: ['.cookie-banner', 'footer *'],
+        ignoreSelectors: ['.cookie-banner', 'footer *', 'iframe#pay >> button', { selector: 'button', documentScope: 'my-widget', comment: 'x' }],
         significantAttributes: ['data-component'],
         attributeFilters: [{ attribute: 'id', value: 'tmp-.*', include: false, comment: 'temp ids' }],
         outputFolder: 'out',
@@ -100,6 +100,8 @@ describe('validateConfig', () => {
         htmlReport: false,
         testIdAttribute: 'data-test',
         saveData: false,
+        baseline: { file: 'b.json', mode: 'check', allowNewViews: true },
+        githubSummary: true,
         recording: {
           enabled: true,
           snapshotDelay: 100,
@@ -138,6 +140,22 @@ describe('validateConfig', () => {
     assert.match(p[0], /^ignoreSelectors\[0\]: "a:has\(b\)": .*:has/);
     assert.match(p[1], /^attributeFilters\[0\]\.attribute: invalid regular expression/);
     assert.match(p[2], /^recording\.interactions\[0\]: .*did you mean "click"/);
+  });
+
+  it('checks scoped selectors and the baseline option', () => {
+    validateConfig({ baseline: true });
+    validateConfig({ baseline: 'b.json' });
+    const p = problems(() =>
+      validateConfig({
+        ignoreSelectors: [{ documentScope: 'x' }, { selector: 'a', documentScope: 'x:has(y)' }, { selector: 'a', scope: 'x' }],
+        baseline: { mode: 'chek' },
+      }),
+    );
+    assert.equal(p.length, 4, p.join('\n'));
+    assert.match(p[0], /^ignoreSelectors\[0\]\.selector: is required/);
+    assert.match(p[1], /^ignoreSelectors\[1\]: .*:has/);
+    assert.match(p[2], /^ignoreSelectors\[2\]\.scope: unknown key/);
+    assert.match(p[3], /^baseline\.mode: .*did you mean "check"/);
   });
 
   it('requires profile names and config, and unique names', () => {

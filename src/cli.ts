@@ -217,6 +217,7 @@ export async function main(argv: string[]): Promise<number> {
       options: {
         data: { type: 'string' },
         config: { type: 'string' },
+        profile: { type: 'string' },
         out: { type: 'string' },
         report: { type: 'string' },
         file: { type: 'string' },
