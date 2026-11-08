@@ -5,7 +5,7 @@ import { s, type SchemaFields } from './schema';
 /**
  * Recording options (`recording` in the config file, or `use.uiCoverage`),
  * read by both the fixture and register mode. Rules that can change after
- * recording (`ignoreSelectors`, `significantAttributes`, `attributeFilters`)
+ * recording (`elementFilters`, `significantAttributes`, `attributeFilters`)
  * belong at the top level of the config (`UiCoverageRules`); in
  * `use.uiCoverage` they are deprecated but still honored.
  */
@@ -13,8 +13,8 @@ export interface UiCoverageOptions {
   /** Turn recording off (e.g. `enabled: !!process.env.UI_COVERAGE`). Default: true. */
   enabled: boolean;
   /**
-   * @deprecated Set `ignoreSelectors` in the config file (top level) instead, so it can
-   * change without re-running tests. Still honored: applied while recording
+   * @deprecated Set `elementFilters` (`{ selector, include: false }`) in the config file
+   * (top level) instead, so it can change without re-running tests. Still honored: applied while recording
    * (like `data-uicov-interactive="exclude-all"`), so it can't be undone at report time.
    */
   ignoreSelectors: string[];

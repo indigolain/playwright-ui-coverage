@@ -1,17 +1,25 @@
 /**
  * Turns raw recordings into coverage data: report-time filtering
- * (`ignoreSelectors`) and element identity. Pure: no I/O, no browser. Used by
+ * (`elementFilters`, the deprecated `ignoreSelectors`), named elements
+ * (`elements`) and element identity. Pure: no I/O, no browser. Used by
  * the reporter, the `report` CLI and (with recording-time rules) the
  * recorder's screenshot de-duplication.
  *
- * Identity, in order: `data-uicov-id` → identity attributes
+ * Identity, in order: a matching `elements` rule → `data-uicov-id` → identity attributes
  * (`significantAttributes`, then built-in test ids) → `id` → `name` →
  * structural `tag:nth-of-type(n)` path up to the nearest identified ancestor.
  * Elements in frames and shadow trees are prefixed by their host's key and `>>`.
  */
 import type { Interaction, InventoryElement, Snapshot, TestCoverageData } from '../types';
 import { inputType, roleOf } from './elements';
-import { READABLE_RECORDING_FORMAT_VERSIONS, type RawCoverageData, type RawElementRef, type RawNode } from './raw';
+import {
+  READABLE_RECORDING_FORMAT_VERSIONS,
+  type RawCoverageData,
+  type RawElement,
+  type RawElementRef,
+  type RawInteraction,
+  type RawNode,
+} from './raw';
 import {
   compileAttributeFilters,
   compileRuleSelector,
@@ -33,6 +41,11 @@ export function isRawData(data: unknown): data is RawCoverageData {
 export interface CompiledRules {
   identityAttributes: string[];
   filters: CompiledAttributeFilter[];
+  /** `elementFilters`, in order. */
+  elementFilters: { selector: CompiledSelector; include: boolean }[];
+  /** `elements` rules, in order (the last applicable one wins). */
+  named: { selector: CompiledSelector; key: string; label?: string }[];
+  /** `[data-uicov-ignore]` and `ignoreSelectors`, checked on the element and its ancestors. */
   ignore: CompiledSelector[];
 }
 
@@ -40,6 +53,18 @@ export function compileRules(rules: UiCoverageRules): CompiledRules {
   return {
     identityAttributes: identityAttributes(rules),
     filters: compileAttributeFilters(rules),
+    elementFilters: (rules.elementFilters ?? []).map((f) => ({
+      selector: compileRuleSelector({ selector: f.selector, documentScope: f.documentScope }),
+      include: !!f.include,
+    })),
+    named: (rules.elements ?? []).map((e) => {
+      const name = e.name?.trim();
+      return {
+        selector: compileRuleSelector({ selector: e.selector, documentScope: e.documentScope }),
+        key: name || (e.documentScope ? `${e.documentScope} >> ${e.selector}` : e.selector),
+        ...(name ? { label: name } : {}),
+      };
+    }),
     // data-uicov-ignore is an alias too; the browser already applied it, this keeps both consistent.
     ignore: ['[data-uicov-ignore]', ...uniqueBy(rules.ignoreSelectors ?? [], (s) => JSON.stringify(s))].map(
       compileRuleSelector,
@@ -72,6 +97,9 @@ export class Resolver {
   private nodes: Node[] = [];
   private keys = new Map<Node, string>();
   private ignored = new Map<Node, boolean>();
+  private excluded = new Map<Node, boolean>();
+  /** Elements pinned by an `elements` rule (see `pinNamedElements`). */
+  private pins = new Map<Node, { key: string; label?: string }>();
 
   /**
    * `data.nodes` may grow after construction (the recorder appends to it);
@@ -91,6 +119,50 @@ export class Resolver {
       this.nodes.push(node);
     }
     return this.nodes[ref.node];
+  }
+
+  /**
+   * Excluded at report time? The first `elementFilters` rule whose selector
+   * matches the element itself decides; without one, `isIgnored` (the
+   * deprecated `ignoreSelectors` and `data-uicov-ignore`).
+   */
+  isExcluded(node: Node): boolean {
+    let r = this.excluded.get(node);
+    if (r !== undefined) return r;
+    const f = this.rules.elementFilters.find((f) => f.selector.matches(node));
+    r = f ? !f.include : this.isIgnored(node);
+    this.excluded.set(node, r);
+    return r;
+  }
+
+  /**
+   * Applies the `elements` rules to one recording. A rule pins an element
+   * when its selector matches it and, in every snapshot showing it, no other
+   * counted element; an element only seen in interactions is pinned when the
+   * selector matches it. When several rules pin an element, the last one wins.
+   */
+  pinNamedElements(snapshots: { elements: RawElement[] }[], interactions: RawInteraction[]): void {
+    if (!this.rules.named.length) return;
+    const counted = (el: RawElement) => {
+      const node = this.node(el);
+      return node && !el.candidateOnly && !this.isExcluded(node) ? node : undefined;
+    };
+    const shown = snapshots.map((snap) => snap.elements.map(counted).filter((n): n is Node => !!n));
+    const inSnapshots = new Set(shown.flat());
+    for (const rule of this.rules.named) {
+      const ok = new Set<Node>();
+      const ambiguous = new Set<Node>();
+      for (const nodes of shown) {
+        const matches = nodes.filter((n) => rule.selector.matches(n));
+        if (matches.length === 1) ok.add(matches[0]);
+        else matches.forEach((n) => ambiguous.add(n));
+      }
+      for (const i of interactions) {
+        const node = this.node(i.element);
+        if (node && !inSnapshots.has(node) && rule.selector.matches(node)) ok.add(node);
+      }
+      for (const node of ok) if (!ambiguous.has(node)) this.pins.set(node, { key: rule.key, label: rule.label });
+    }
   }
 
   /**
@@ -229,14 +301,16 @@ export class Resolver {
     if (node.tag === 'input' && (type === 'radio' || type === 'checkbox') && node.attrs.value !== undefined)
       attrs.value = node.attrs.value.slice(0, 200);
     const frames = this.frames(node);
+    const pin = this.pins.get(node);
     return {
-      key: this.key(node),
-      label: this.label(ref, node),
+      key: pin?.key ?? this.key(node),
+      label: pin?.label ?? this.label(ref, node),
       attrs,
       role: roleOf(node),
       name: ref.name ?? '',
       nameFrom: ref.nameFrom ?? '',
       ...(frames.length ? { frames } : {}),
+      ...(pin ? { autoKey: this.key(node) } : {}),
     };
   }
 }
@@ -263,12 +337,13 @@ export function resolveCoverageData(
     cache?.set(cacheKey, compiledRules);
   }
   const r = new Resolver(data, compiledRules);
+  r.pinNamedElements(data.snapshots, data.interactions);
 
   const snapshots: Snapshot[] = data.snapshots.map((snap) => {
     const elements: InventoryElement[] = [];
     for (const el of snap.elements) {
       const node = r.node(el);
-      if (!node || el.candidateOnly || r.isIgnored(node)) continue;
+      if (!node || el.candidateOnly || r.isExcluded(node)) continue;
       elements.push({
         ...r.describe(el, node),
         tag: node.tag,
@@ -289,7 +364,7 @@ export function resolveCoverageData(
   const interactions: Interaction[] = [];
   for (const i of data.interactions) {
     const node = r.node(i.element);
-    if (!node || r.isIgnored(node)) continue;
+    if (!node || r.isExcluded(node)) continue;
     interactions.push({ ...r.describe(i.element, node), event: i.event, url: i.url });
   }
   return { interactions, snapshots, ...(data.componentTest ? { componentTest: true } : {}) };

@@ -4,13 +4,14 @@ import type { InventoryElement, TestCoverageData } from './types';
 import { boxInImage, intersects } from './model/geometry';
 
 /** Recorded role, accessible name and attributes of an element (see `InventoryElement`). */
-type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames'>;
+type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames' | 'autoKey'>;
 const details = (e: ElementDetails): ElementDetails => ({
   role: e.role,
   name: e.name,
   nameFrom: e.nameFrom,
   attrs: e.attrs,
   ...(e.frames ? { frames: e.frames } : {}),
+  ...(e.autoKey ? { autoKey: e.autoKey } : {}),
 });
 
 export interface ElementCoverage {
@@ -46,6 +47,8 @@ export interface ElementCoverage {
   attrs?: Record<string, string>;
   /** Keys of the `<iframe>` elements the element is inside, outermost first (see `InventoryElement.frames`). */
   frames?: string[];
+  /** Set for an element named by an `elements` rule: its key by the identity rules (for locators). */
+  autoKey?: string;
   /** A Playwright line that interacts with this element (see `locators.ts`). */
   suggestedLocator?: string;
   /** Informational accessibility hints (see `a11y.ts`). Don't affect coverage. */
@@ -104,28 +107,8 @@ export interface CoverageSummary {
   mostRepeated?: RepeatedElement[];
 }
 
-export type NormalizeUrl = (url: string) => string;
-
-const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})$/i;
-
-/** `/users/42?tab=x` → `/users/:id`. Hash routes (`#/foo/1`) are kept and normalized too. */
-export const defaultNormalizeUrl: NormalizeUrl = (url) => {
-  let u: URL;
-  try {
-    u = new URL(url);
-  } catch {
-    return url;
-  }
-  const norm = (p: string) =>
-    p
-      .split('/')
-      .map((seg) => (ID_SEGMENT.test(seg) ? ':id' : seg))
-      .join('/')
-      .replace(/\/index\.html?$/, '/');
-  let route = norm(u.pathname) || '/';
-  if (u.hash.startsWith('#/')) route += '#' + norm(u.hash.slice(1).split('?')[0]);
-  return route;
-};
+export { defaultNormalizeUrl, type NormalizeUrl } from './model/views';
+import { defaultNormalizeUrl, type NormalizeUrl } from './model/views';
 
 /**
  * How an entry's interactions count: `tested` marks elements tested, `failing`
@@ -147,7 +130,16 @@ const percent = (tested: number, total: number) =>
 
 export function aggregate(
   tests: TestEntry[],
-  opts: { normalizeUrl: NormalizeUrl; maxScreenshotsPerRoute: number },
+  opts: {
+    /**
+     * Maps a URL to its view; `null` drops the snapshot or interaction (excluded
+     * by `viewFilters`). Usually `createViewMapper(options).view` (`model/views.ts`).
+     */
+    view?: (url: string) => string | null;
+    /** Used when `view` isn't given. */
+    normalizeUrl?: NormalizeUrl;
+    maxScreenshotsPerRoute: number;
+  },
 ): CoverageSummary {
   type RouteAcc = {
     elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string>; labels: Map<string, ElementDetails>; idSet: Set<string>; failingIdSet: Set<string> }>;
@@ -155,8 +147,10 @@ export function aggregate(
   };
   const routes = new Map<string, RouteAcc>();
   /** `view` (set for `viewBy: 'file'`) puts all of an entry's data in one view, whatever the URL. */
+  const viewOf = opts.view ?? opts.normalizeUrl ?? defaultNormalizeUrl;
   const routeFor = (url: string, view?: string) => {
-    const r = view ?? opts.normalizeUrl(url);
+    const r = view ?? viewOf(url);
+    if (r === null) return undefined;
     if (!routes.has(r)) routes.set(r, { elements: new Map(), snapshots: [] });
     return routes.get(r)!;
   };
@@ -165,6 +159,7 @@ export function aggregate(
   for (const { title, testId, data } of tests) {
     for (const snap of data.snapshots) {
       const acc = routeFor(snap.url, data.view);
+      if (!acc) continue;
       acc.snapshots.push({ snap, test: title, testId });
       const counts = new Map<string, number>();
       for (const el of snap.elements) counts.set(el.key, (counts.get(el.key) ?? 0) + 1);
@@ -199,6 +194,7 @@ export function aggregate(
     if (use === 'ignore') continue;
     for (const i of data.interactions) {
       const acc = routeFor(i.url, data.view);
+      if (!acc) continue;
       let el = acc.elements.get(i.key);
       if (!el) {
         // Interacted with but never captured in an inventory (transient element).

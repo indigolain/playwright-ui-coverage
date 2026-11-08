@@ -2,7 +2,9 @@
 // from ui-coverage-report/data/, and that report-time rules work:
 //
 //   1. the CLI with the same options gives exactly the reporter's coverage.json;
-//   2. changing a filter in the CLI config changes the report (no test run);
+//   2. changing a filter in the CLI config changes the report (no test run),
+//      also views (a pattern with groupBy, a viewFilter), elementFilters and
+//      named elements;
 //   3. a failing threshold makes the CLI exit with code 1;
 //   4. rules set the deprecated way (use.uiCoverage) give the same report, are
 //      recorded with the data, and can be overridden by the CLI config;
@@ -139,6 +141,56 @@ try {
     else console.log(`filter check: ${total(baseline)} → ${total(filtered)} elements`);
   }
 
+  // 2b. Views and element rules, changed in the CLI config (no test run):
+  //  - views: '/users/:id' grouped by id → '/users/1'; viewFilters: '/widgets' dropped;
+  //  - elementFilters: only the "Home" nav link is kept (an include protects it from
+  //    the `nav *` exclude), and without the demo's `footer *` rule the two footer links count;
+  //  - elements: the named star button gets another name.
+  const navLink = /(^| )nav > a:nth-of-type\((\d)\)$/;
+  const viewsConfig = writeConfig(
+    'views.config.mjs',
+    `export default ${JSON.stringify({
+      ...rules,
+      views: [{ pattern: '/users/:id', groupBy: ['id'] }],
+      viewFilters: [...(rules.viewFilters ?? []), { pattern: '/widgets', include: false }],
+      elementFilters: [
+        { selector: 'nav a[href="/"]', include: true },
+        { selector: 'nav *', include: false },
+      ],
+      elements: [{ selector: 'main > div:nth-of-type(2) > button', name: 'Favorite' }],
+    })};\n`,
+  );
+  const viewsOut = path.join(tmp, 'views');
+  if (runCli(['report', '--data', data, '--config', viewsConfig, '--out', viewsOut]) !== 0) {
+    errors.push('CLI rebuild with views and element rules failed');
+  } else {
+    const changed = read(viewsOut);
+    const rename = { '/users/:id': '/users/1' };
+    const expectedViews = baseline.views
+      .map((v) => rename[v.name] ?? v.name)
+      .filter((n) => n !== '/widgets')
+      .sort();
+    const gotViews = changed.views.map((v) => v.name).sort();
+    if (exact(gotViews) !== exact(expectedViews)) errors.push(`views: got ${gotViews.join(', ')}, expected ${expectedViews.join(', ')}`);
+    const star = 'Star user (icon button)';
+    if (!keys(baseline).includes(`/users/:id ${star}`)) errors.push('named element check is vacuous: no named star button in the baseline');
+    for (const v of baseline.views) {
+      const name = rename[v.name] ?? v.name;
+      const got = changed.views.find((x) => x.name === name);
+      if (name === '/widgets') continue;
+      if (!got) continue; // reported above
+      const expected = v.elements
+        .map((e) => (e.key === star ? 'Favorite' : e.key))
+        .filter((k) => !navLink.test(k) || navLink.exec(k)[2] === '1');
+      if (name === '/') expected.push('footer > a:nth-of-type(1)', 'footer > a:nth-of-type(2)');
+      const gotKeys = got.elements.map((e) => e.key).sort();
+      if (exact(gotKeys) !== exact(expected.sort()))
+        errors.push(`${name}: keys ${gotKeys.join(', ')}; expected ${expected.join(', ')}`);
+    }
+    const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
+    console.log(`views and element rules check: ${baseline.views.length} → ${changed.views.length} views, ${total(baseline)} → ${total(changed)} elements`);
+  }
+
   // 3. Thresholds (.cjs config): exit code 1 when not met.
   const thresholdConfig = writeConfig('threshold.config.cjs', `module.exports = ${JSON.stringify({ ...rules, threshold: 99 })};\n`);
   const status = runCli(['report', '--data', data, '--config', thresholdConfig, '--out', path.join(tmp, 'threshold')]);
@@ -150,8 +202,12 @@ try {
   if (comparable(legacy) !== comparable(baseline)) errors.push('use.uiCoverage rules give a different report than reporter rules');
   if (legacy.config?.source?.file !== null) errors.push('legacy run (configFile: false) still used a config file');
   const legacyOut = path.join(tmp, 'legacy');
-  // UI_COVERAGE_CONFIG to an empty config: the CLI would otherwise find ui-coverage.config.ts.
-  const empty = writeConfig('empty.config.json', '{}');
+  // UI_COVERAGE_CONFIG to a config with only the rules the legacy run passed inline (they
+  // can't be set in use.uiCoverage): the CLI would otherwise find ui-coverage.config.ts.
+  const inlineOnly = Object.fromEntries(
+    ['views', 'viewFilters', 'elementFilters', 'elements'].filter((k) => rules[k] !== undefined).map((k) => [k, rules[k]]),
+  );
+  const empty = writeConfig('legacy-inline.config.json', JSON.stringify(inlineOnly));
   const legacyRebuild = { ...legacy, config: { ...legacy.config, source: { file: traceFile(empty), inline: [] } } };
   if (runCli(['report', '--data', data, '--out', legacyOut], { UI_COVERAGE_CONFIG: empty }) !== 0)
     errors.push('CLI rebuild of legacy data failed');

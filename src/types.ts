@@ -33,6 +33,11 @@ export interface InventoryElement {
    * (each is a prefix of `key`). Absent in the top document.
    */
   frames?: string[];
+  /**
+   * Set when an `elements` rule named the element (and so replaced `key`):
+   * the key the identity rules give it. Suggested locators use it.
+   */
+  autoKey?: string;
   tag: string;
   /** Document coordinates in CSS pixels (match a fullPage screenshot). */
   x: number;
@@ -59,6 +64,8 @@ export interface Interaction {
   name?: string;
   nameFrom?: string;
   frames?: string[];
+  /** Same as `InventoryElement.autoKey`. */
+  autoKey?: string;
   event: string;
   url: string;
 }

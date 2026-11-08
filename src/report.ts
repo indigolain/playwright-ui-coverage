@@ -5,7 +5,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { aggregate, defaultNormalizeUrl, type CoverageSummary, type NormalizeUrl } from './aggregate';
+import { aggregate, type CoverageSummary } from './aggregate';
+import { createViewMapper, type NormalizeUrl, type ViewFilter, type ViewPattern } from './model/views';
 import { addA11yHints } from './a11y';
 import { toCoverageReport, type CoverageReport } from './coverage-report';
 import { selectAttempts } from './attempts';
@@ -27,7 +28,24 @@ import { evaluateThresholds, formatThresholdResults, type ThresholdOption, type 
 export interface ReportOptions extends UiCoverageRules {
   /** Where to write the report. Default: "ui-coverage-report". */
   outputFolder?: string;
-  /** Map a URL to a route/view name. Default strips query and replaces id-like segments with ":id". */
+  /**
+   * URL patterns that name views (README "Views"): `'/users/:username'`, or
+   * `{ pattern, groupBy }` to split one pattern into a view per parameter
+   * value. The first matching pattern wins; URLs no pattern matches go to
+   * `normalizeUrl`, else the automatic rules. Not used with `viewBy: 'file'`.
+   */
+  views?: (string | ViewPattern)[];
+  /**
+   * URLs to leave out entirely, applied before views are built: the first
+   * matching `{ pattern, include }` decides (`include: true` protects a URL
+   * from later excludes). Patterns without protocol and host match any origin.
+   */
+  viewFilters?: ViewFilter[];
+  /**
+   * Map a URL to a view name, for URLs no `views` pattern matches (the escape
+   * hatch; runs last). Default (the automatic rules): strips the query and
+   * replaces id-like segments with ":id".
+   */
   normalizeUrl?: NormalizeUrl;
   /** Max screenshots shown per route. Default: 3. */
   maxScreenshotsPerRoute?: number;
@@ -205,7 +223,7 @@ export function buildReport(
   }
   const entries = selectAttempts(resolved, { countFailedTests: options.countFailedTests ?? false });
   const summary = aggregate(entries, {
-    normalizeUrl: options.normalizeUrl ?? defaultNormalizeUrl,
+    view: createViewMapper(options).view,
     maxScreenshotsPerRoute: options.maxScreenshotsPerRoute ?? 3,
   });
   summary.tests = indexTests(resolved);

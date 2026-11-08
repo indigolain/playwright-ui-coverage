@@ -22,6 +22,7 @@ import { RULES_SCHEMA, type UiCoverageRules } from './model/rules';
 import { RECORDING_SCHEMA, resolveOptions, type UiCoverageOptions, type UiCoverageRecordingConfig } from './options';
 import type { ReportOptions } from './report';
 import { s, validate, type Schema, type SchemaFields } from './schema';
+import { VIEWS_SCHEMA } from './model/views';
 
 export type { ConfigTrace } from './model/raw';
 export type { UiCoverageRecordingConfig } from './options';
@@ -86,6 +87,7 @@ export function defineUiCoverageConfig(config: UiCoverageConfig): UiCoverageConf
 
 const REPORT_SETTINGS_SCHEMA = {
   outputFolder: s.string(),
+  ...VIEWS_SCHEMA,
   normalizeUrl: s.func(),
   maxScreenshotsPerRoute: s.number({ min: 0, integer: true }),
   threshold: s.union(

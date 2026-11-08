@@ -51,13 +51,56 @@ export interface ScopedSelector {
 /** A report-time selector: a string (it may contain a `>>` host chain) or a `ScopedSelector`. */
 export type RuleSelector = string | ScopedSelector;
 
+/**
+ * An `elementFilters` entry: whether the interactive elements `selector`
+ * matches count. The selector matches the element itself: `footer *` is
+ * everything inside a `<footer>`, `footer` only the footer element.
+ */
+export interface ElementFilter extends ScopedSelector {
+  /**
+   * `false`: matching elements are excluded. `true`: they count, whatever
+   * later filters (and `ignoreSelectors`) say. The first matching filter decides.
+   */
+  include: boolean;
+  /** Free text, ignored. */
+  comment?: string;
+}
+
+/**
+ * An `elements` entry: pins the identity (and display name) of one element.
+ * Applies where `selector` matches exactly one recorded element (see README
+ * "Named elements"). Its key becomes `name` (or, without one, the selector).
+ */
+export interface NamedElement extends ScopedSelector {
+  /** Key and label in the report. Unique among `elements`. Default: the selector (key only). */
+  name?: string;
+  /** Free text, ignored. */
+  comment?: string;
+}
+
 /** Rules applied when the report is built (by the reporter or the `report` CLI). */
 export interface UiCoverageRules {
   /**
-   * Elements matching one of these selectors, or inside an element that does
-   * (also across frame and shadow boundaries), are excluded. Elements inside
-   * `[data-uicov-ignore]` are always excluded. Evaluated on the recorded DOM
+   * Which interactive elements count: `{ selector, include, documentScope? }`
+   * rules, the first matching one decides. The selector matches the element
+   * itself (`footer *`, not `footer`). `include: true` protects elements from
+   * later excludes, including `ignoreSelectors`. Evaluated on the recorded DOM
    * structure, see README "Report-time selectors".
+   */
+  elementFilters?: ElementFilter[];
+  /**
+   * Pin the identity and display name of single elements:
+   * `{ selector, name?, documentScope? }`. A rule applies to an element when
+   * its selector matches that element and no other in the snapshots that
+   * show it; when several rules apply, the last one wins.
+   */
+  elements?: NamedElement[];
+  /**
+   * @deprecated Use `elementFilters` (`{ selector, include: false }`). Still
+   * supported, with the same behavior: elements matching one of these
+   * selectors, or inside an element that does (also across frame and shadow
+   * boundaries), are excluded, after `elementFilters` have been checked.
+   * Elements inside `[data-uicov-ignore]` are always excluded.
    */
   ignoreSelectors?: RuleSelector[];
   /**
@@ -115,12 +158,66 @@ export const reportSelector = (): Schema => {
   };
 };
 
+/** Adds the report-time selector check of `{ selector, documentScope }` to an object schema. */
+const withSelector = (shape: Schema): Schema => ({
+  ...shape,
+  check(value, path, errors) {
+    const before = errors.length;
+    shape.check(value, path, errors);
+    if (errors.length > before) return;
+    const { selector, documentScope } = value as ScopedSelector;
+    const problem = selectorProblem({ selector, documentScope });
+    if (problem) errors.push(`${path}.selector: ${problem}`);
+  },
+});
+
+/** `elements`: every `name` used once. */
+const uniqueNames = (shape: Schema): Schema => ({
+  ...shape,
+  check(value, path, errors) {
+    const before = errors.length;
+    shape.check(value, path, errors);
+    if (errors.length > before) return;
+    const seen = new Map<string, number>();
+    (value as NamedElement[]).forEach((e, i) => {
+      if (e.name === undefined) return;
+      const first = seen.get(e.name);
+      if (first !== undefined) errors.push(`${path}[${i}].name: "${e.name}" is already used by ${path}[${first}]; names must be unique`);
+      else seen.set(e.name, i);
+    });
+  },
+});
+
 /**
  * Schema of the report-time rules: one entry per `UiCoverageRules` key (the
  * compiler checks both lists match). These keys are accepted at the top level
  * of the config file, in the reporter options and in profiles.
  */
 export const RULES_SCHEMA = {
+  elementFilters: s.array(
+    withSelector(
+      s.rule(
+        { selector: s.required(s.string()), documentScope: s.string(), include: s.required(s.boolean()) },
+        'an object { selector, include, documentScope? }',
+      ),
+    ),
+    'an array of { selector, include, documentScope? } rules',
+  ),
+  elements: uniqueNames(
+    s.array(
+      withSelector(
+        s.rule(
+          {
+            selector: s.required(s.string()),
+            documentScope: s.string(),
+            name: s.string((v) => (v.trim() ? undefined : 'must not be empty')),
+          },
+          'an object { selector, name?, documentScope? }',
+        ),
+      ),
+      'an array of { selector, name?, documentScope? } rules',
+    ),
+  ),
   ignoreSelectors: s.array(reportSelector(), 'an array of selectors'),
   significantAttributes: s.array(s.string(), 'an array of attribute names'),
   attributeFilters: s.array(
