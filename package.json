@@ -20,10 +20,13 @@
     "./register": {
       "types": "./dist/register.d.ts",
       "default": "./dist/register.js"
-    }
+    },
+    "./coverage.schema.json": "./schema/coverage.schema.json",
+    "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "schema"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

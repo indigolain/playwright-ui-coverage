@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { aggregate, defaultNormalizeUrl, type CoverageSummary, type NormalizeUrl } from './aggregate';
 import { addA11yHints } from './a11y';
+import { toCoverageReport, type CoverageReport } from './coverage-report';
 import { selectAttempts } from './attempts';
 import { addSuggestedLocators } from './locators';
 import { indexTests, mostRepeated } from './insights';
@@ -132,6 +133,9 @@ export function readData(dataDir: string): ReportInput {
 }
 
 export interface ReportResult {
+  /** What coverage.json contains. */
+  report: CoverageReport;
+  /** Internal model the HTML report is rendered from. */
   summary: CoverageSummary;
   thresholds: ThresholdResult[];
   /** True when a threshold wasn't met. */
@@ -196,8 +200,8 @@ export function buildReport(input: ReportInput, options: UiCoverageReporterOptio
   }
 
   const thresholds = evaluateThresholds(summary, options.threshold);
-  const json = options.threshold === undefined ? summary : { ...summary, thresholds };
-  fs.writeFileSync(path.join(outDir, 'coverage.json'), JSON.stringify(json, null, 2));
+  const report = toCoverageReport(summary, thresholds);
+  fs.writeFileSync(path.join(outDir, 'coverage.json'), JSON.stringify(report, null, 2));
   fs.writeFileSync(path.join(outDir, 'index.html'), renderHtml(summary));
 
   const pad = (s: string, n: number) => s.padEnd(n);
@@ -219,5 +223,5 @@ export function buildReport(input: ReportInput, options: UiCoverageReporterOptio
   const { warnings, errors } = formatThresholdResults(thresholds, summary.routes.map((r) => r.route));
   warnings.forEach((w) => console.warn(w));
   if (errors.length) console.error(errors.join('\n') + '\n');
-  return { summary, thresholds, failed: errors.length > 0 };
+  return { report, summary, thresholds, failed: errors.length > 0 };
 }

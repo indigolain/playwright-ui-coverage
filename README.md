@@ -246,13 +246,7 @@ Screenshot options:
 | `quality` | `80` | JPEG quality (ignored for PNG). |
 | `maxScreenshotHeight` | `8000` | Full-page screenshots of taller pages are cropped to this height. Elements below the crop are still counted, just not drawn on the image. `0` disables the cap. |
 
-In `coverage.json`, each element has `interactionCounts`: the interactions that counted as tested, by type (`{ "click": 3, "input": 1 }`). The report shows them as the tooltip of the *tested* label and of the Interactions cell. Each element also has:
-
-- `interactionTotal`: the sum of `interactionCounts`;
-- `testCount`: the number of distinct tests whose interactions counted;
-- `testIds` / `failingTestIds`: the Playwright test ids (`TestCase.id`) behind `testedBy` / `testedByFailing`.
-
-The summary has `tests` (one entry per test: `id`, `title`, `project`, `run`, the attempt the report links to, and `trace`, see below), `mostRepeated` (up to 10 elements used by 2 or more tests, most first, with `route`, `key`, `label`, `tests`, `interactions` and `share`, the percent of all tests) and, when Playwright's HTML report is linked, `htmlReport`.
+In `coverage.json`, each element has `interactionCounts`: the interactions that counted as tested, by type (`{ "click": 3, "input": 1 }`). The report shows them as the tooltip of the *tested* label and of the Interactions cell. Each element also lists `testIds` / `failingTestIds`, the Playwright test ids (`TestCase.id`) of the tests that touched it, which point into the top-level `tests` array (see [coverage.json](#coveragejson)).
 
 ### Reporter
 
@@ -327,7 +321,7 @@ Suggestions are a starting point. Elements inside a closed dialog or menu need t
 
 ### Accessibility hints
 
-Informational only: they don't change the coverage score or fail a run. The report shows them in blue under the element, with a count per route; `coverage.json` has `a11yHints: [{ rule, message }]` on elements that have any, and an `a11yHints` count per route and in total.
+Informational only: they don't change the coverage score or fail a run. The report shows them in blue under the element, with a count per route; `coverage.json` has `a11yHints: [{ rule, message }]` on elements that have any, and an `a11yHintsCount` per view and in total.
 
 | Rule | When |
 |---|---|
@@ -357,13 +351,13 @@ What it can't see: elements that are clickable only through a JS handler and hav
 - **Precedence:** an exact key always wins over a pattern. Among patterns, the one with more literal characters wins, then the one with fewer `**`, then the one listed first.
 - **Missing views:** a key or pattern that matches no view in the run prints a warning (with a "did you mean" hint for likely typos) and doesn't fail the run. A filtered run (`--grep`, one spec file) may not visit every view.
 
-When `threshold` is set, `coverage.json` gets a `thresholds` array for CI tooling:
+`coverage.json` has a `thresholds` array for CI tooling (empty when `threshold` isn't set):
 
 ```json
-{ "target": "/users/:id", "pattern": "/users/*", "required": 20, "actual": 16.7, "passed": false, "status": "failed" }
+{ "scope": "view", "view": "/users/:id", "pattern": "/users/*", "required": 20, "actual": 16.7, "status": "failed" }
 ```
 
-`target` is `overall` or a view name. `status` is `passed`, `failed` or `missing` (then `actual` is `null` and `passed` is `true`).
+`scope` is `overall` or `view` (then `view` is the view name, or the pattern when it matched no view). `status` is `passed`, `failed` or `missing` (then `actual` is `null`; missing views only warn).
 
 ### Retries and failed tests
 
@@ -372,10 +366,46 @@ Playwright runs a test again on retry, and every attempt records coverage. The r
 - **Element totals** use inventories from every attempt, passed or failed. A page a failing test reached still adds its elements to the total.
 - **Tested** comes from passing attempts only (by default). An attempt passes when its status is the one the test expects: `passed`, or `failed` for a `test.fail()` test. Skipped, timed-out and interrupted attempts don't pass.
 - **Retries:** if any attempt of a test passed, only the last passing attempt's interactions count. For a flaky test (fails, then passes on retry) that is the retry that passed. The earlier failed attempts add element totals only.
-- **Tests that never passed:** their interactions don't count as tested. Elements that only such tests touched are shown as **failing tests only** (amber) in the report. They count as untested in the percentage. In `coverage.json` these elements have `tested: false` and a non-empty `testedByFailing`, and each route and the summary have a `failingOnly` count.
+- **Tests that never passed:** their interactions don't count as tested. Elements that only such tests touched are shown as **failing tests only** (amber) in the report. They count as untested in the percentage. In `coverage.json` these elements have `tested: false` and a non-empty `failingTestIds`, and each view and the summary have a `failingOnlyElementsCount`.
 - **No duplicates:** a test is listed once under "Tested by", however many attempts it took.
 
 With `countFailedTests: true`, interactions from every attempt count as tested, whether it passed or not.
+
+## `coverage.json`
+
+Next to `index.html`, the report folder has `coverage.json`: a versioned, machine-readable summary for CI gates, dashboards and PR comments. Full reference: [docs/coverage-json.md](docs/coverage-json.md).
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-01-01T12:00:00.000Z",
+  "generator": { "name": "playwright-ui-coverage", "version": "0.1.0" },
+  "summary": {
+    "viewCount": 5, "coverage": 40.4,
+    "testedElementsCount": 23, "untestedElementsCount": 34,
+    "testedLinksCount": 0, "untestedLinksCount": 0,
+    "failingOnlyElementsCount": 0, "a11yHintsCount": 9
+  },
+  "views": [
+    { "name": "/users/:id", "reportUrl": "index.html#%2Fusers%2F%3Aid", "summary": { "coverage": 9.1, … }, "elements": [ … ], "screenshots": [ … ] }
+  ],
+  "tests": [ { "id": "…", "title": "users.spec.ts › add a user", "project": "chromium", "passed": true, "retry": 0 } ],
+  "thresholds": [],
+  "insights": { "mostRepeated": [] }
+}
+```
+
+- **Denominator:** `coverage` is tested units / all units, where units are interactive elements plus links: `(testedElementsCount + testedLinksCount) / (testedElementsCount + untestedElementsCount + testedLinksCount + untestedLinksCount)`, as a percent with one decimal (100 when there are none). Until links are tracked as their own units, the link counts are `0` and `<a>` elements count as elements.
+- **Identity:** an element is `(view name, key)`; tests are referenced by `TestCase.id`.
+- **Types:** `import type { CoverageReport } from 'playwright-ui-coverage'`. **JSON Schema:** `playwright-ui-coverage/coverage.schema.json` (`schema/coverage.schema.json` in the package).
+- **Compatibility:** `schemaVersion` changes only on breaking changes. Fields may be added at any time, so ignore fields you don't know. `views[].screenshots` is marked `x-internal` (for the HTML report; not covered by the version).
+
+```js
+// A custom gate: fail when any view under /admin is below 60%.
+const report = JSON.parse(fs.readFileSync('ui-coverage-report/coverage.json', 'utf8'));
+if (report.schemaVersion !== 1) throw new Error(`unsupported coverage.json schemaVersion ${report.schemaVersion}`);
+const low = report.views.filter((v) => v.name.startsWith('/admin') && v.summary.coverage < 60);
+```
 
 ## Sharding and `merge-reports`
 

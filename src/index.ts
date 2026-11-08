@@ -59,3 +59,16 @@ export type {
   StoredAttempt,
 } from './model/raw';
 export type { UiCoverageReporterOptions } from './report';
+export { COVERAGE_SCHEMA_VERSION } from './coverage-report';
+export type {
+  CoverageReport,
+  ReportSummary,
+  CoverageCounts,
+  ViewCoverage,
+  ElementCoverage,
+  A11yHint,
+  ViewScreenshot,
+  TestRef,
+  ThresholdCheck,
+  RepeatedElement,
+} from './coverage-report';
