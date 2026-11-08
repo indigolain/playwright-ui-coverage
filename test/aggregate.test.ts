@@ -83,7 +83,7 @@ describe('aggregate', () => {
 
   it('counts interactions on elements that were never inventoried', () => {
     const s = aggregate(tests(), opts);
-    expect(element(s, '/users', 'button "Dismiss"')).toEqual({
+    expect(element(s, '/users', 'button "Dismiss"')).toMatchObject({
       key: 'button "Dismiss"',
       label: 'button "Dismiss"',
       tag: '?',

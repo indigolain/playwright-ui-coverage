@@ -1,4 +1,5 @@
-import type { CoverageSummary } from './aggregate';
+import type { CoverageSummary, ElementCoverage } from './aggregate';
+import { mostRepeated } from './insights';
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -8,12 +9,17 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
  * 0.1 px. coverage.json keeps the full format.
  */
 function compact(summary: CoverageSummary) {
+  const tests = summary.tests ?? [];
+  const testIndex = new Map(tests.map((t, i) => [t.id, i]));
   return {
     ...summary,
+    tests,
+    mostRepeated: summary.mostRepeated ?? mostRepeated(summary),
     routes: summary.routes.map((r) => {
       const index = new Map(r.elements.map((e, i) => [e.key, i]));
       return {
         ...r,
+        elements: r.elements.map((e) => compactTestIds(e, testIndex)),
         screenshots: r.screenshots.map((s) => ({
           ...s,
           boxes: s.boxes.map((b) => {
@@ -24,6 +30,18 @@ function compact(summary: CoverageSummary) {
       };
     }),
   };
+}
+
+/**
+ * Test ids become `ti` / `tf`: indexes into `tests` (which is sorted by title),
+ * so "Tested by" lists them in title order.
+ */
+function compactTestIds(e: ElementCoverage, testIndex: Map<string, number>) {
+  const { testIds, failingTestIds, ...rest } = e;
+  if (!testIds) return rest;
+  const idx = (ids: string[] = []) =>
+    ids.map((id) => testIndex.get(id)).filter((i): i is number => i !== undefined).sort((a, b) => a - b);
+  return { ...rest, ti: idx(testIds), tf: idx(failingTestIds) };
 }
 
 /**
@@ -103,6 +121,7 @@ table { width: 100%; border-collapse: collapse; background: var(--panel); border
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { font-size: 12px; color: var(--muted); font-weight: 600; }
 tr.hl td { background: var(--bg); }
+tr.picked td { background: rgba(245,158,11,.12); }
 .pill { display: inline-block; white-space: nowrap; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .pill.ok { color: var(--ok); background: var(--ok-bg); }
 .pill.bad { color: var(--bad); background: var(--bad-bg); }
@@ -112,6 +131,21 @@ tr.hl td { background: var(--bg); }
 .table-wrap { overflow-x: auto; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 #navEmpty { padding: 8px 10px; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+th button { all: unset; cursor: pointer; border-radius: 4px; }
+th button:hover { color: var(--text); }
+th button:focus-visible { outline: 2px solid var(--accent); }
+th[aria-sort=descending] button { color: var(--text); }
+th[aria-sort=descending] button::after { content: ' \\2193'; }
+.tests a { color: inherit; }
+.tests a:hover { color: var(--accent); }
+.tests .trace { font-size: 12px; margin-left: 6px; color: var(--accent); }
+#insightsNav { all: unset; display: block; box-sizing: border-box; width: calc(100% - 16px); margin: 6px 8px 0; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+#insightsNav:hover { background: var(--bg); }
+#insightsNav:focus-visible { outline: 2px solid var(--accent); }
+#insightsNav[aria-current=true] { background: var(--bg); outline: 1px solid var(--border); }
+.hint { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 12px; margin: 0 0 16px; max-width: 80ch; }
+.hint a, .goto { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -134,6 +168,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
         </select></label>
       </div>
     </div>
+    <button id="insightsNav" aria-current="false"><div class="row"><span>Most repeated elements</span><span class="muted" id="insightsCount"></span></div>
+      <div class="sub muted" id="insightsSub"></div></button>
     <div id="navList"></div>
     <p class="muted" id="navEmpty" hidden>No routes match.</p>
   </nav>
@@ -246,10 +282,11 @@ function placeBoxes(el, r, s, tested) {
   el.classList.add('loaded');
 }
 
-function show(i, fromUser) {
+function show(i, fromUser, focusKey) {
   const r = data.routes[i];
   if (!r) { $('#main').innerHTML = '<p class="muted">No coverage data.</p>'; return; }
   try { history.replaceState(null, '', '#' + encodeURIComponent(r.route)); } catch {}
+  insightsNav.setAttribute('aria-current', 'false');
   if (buttons[current]) buttons[current].setAttribute('aria-current', 'false');
   current = i;
   buttons[i].setAttribute('aria-current', 'true');
@@ -259,13 +296,12 @@ function show(i, fromUser) {
   const shots = r.screenshots.map((s, si) =>
     '<figure><div class="shot" data-si="' + si + '"><img loading="lazy" decoding="async" src="' + esc(s.source) + '" alt="Screenshot of ' + esc(r.route) + '"></div>' +
     '<figcaption>from: ' + esc(s.test) + '</figcaption></figure>').join('');
-  // "click ×3, input ×1", shown as the tooltip of the "tested" pill.
-  const countsText = (e) => Object.entries(e.interactionCounts || {}).map(([t, n]) => t + ' ×' + n).join(', ');
-  const rows = r.elements.map(e =>
+  const rows = sortedElements(r.elements).map(e =>
     '<tr class="' + (e.tested ? 'ok' : 'bad') + '" data-key="' + esc(e.key) + '">' +
       '<td><span class="pill ' + (e.tested ? 'ok" title="' + esc(countsText(e)) + '">tested' : failingOnly(e) ? 'warn" title="Touched only by tests that did not pass; not counted as tested">failing tests only' : 'bad">untested') + '</span></td>' +
       '<td>' + esc(e.label) + (e.instances > 1 ? ' <span class="muted">×' + e.instances + '</span>' : '') + (e.key !== e.label ? '<br><code class="muted">' + esc(e.key) + '</code>' : '') + '</td>' +
-      '<td class="muted">' + (e.testedBy.map(esc).concat((e.testedByFailing || []).map(t => esc(t) + ' (failed)')).join('<br>') || '—') + '</td>' +
+      insightCells(e) +
+      '<td class="muted tests">' + testedByCell(e) + '</td>' +
     '</tr>').join('');
   const main = $('#main');
   litKey = null; lit = [];
@@ -275,7 +311,8 @@ function show(i, fromUser) {
     '<span class="muted">' + r.tested + '/' + r.total + ' tested (' + r.percent + '%)</span>' +
     '<label style="margin-left:auto"><input type="checkbox" id="only"' + (onlyUntested ? ' checked' : '') + '> Untested only</label></div>' +
     (shots ? '<div class="shots">' + shots + '</div>' : '') +
-    '<div class="table-wrap"><table><thead><tr><th>Status</th><th>Element</th><th>Tested by</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    '<div class="table-wrap"><table><thead><tr><th>Status</th><th>Element</th>' + insightHeaders() + '<th>Tested by</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  main.querySelectorAll('th[data-sort] button').forEach(b => b.onclick = () => setRowSort(r, b.parentNode.dataset.sort));
 
   $('#only').onchange = (e) => {
     onlyUntested = e.target.checked;
@@ -295,11 +332,111 @@ function show(i, fromUser) {
     }
   });
 
-  if (fromUser) {
+  const focusRow = focusKey != null && main.querySelector('tr[data-key="' + CSS.escape(focusKey) + '"]');
+  if (focusRow) { focusRow.classList.add('picked'); focusRow.scrollIntoView({ block: 'center' }); }
+  else if (fromUser) {
     const top = main.getBoundingClientRect().top;
     if (top < 0 || top > innerHeight * 0.6) main.scrollIntoView({ block: 'start' });
   }
 }
+
+// ---- Insights: interaction/test counts, "Tested by" links, most repeated elements.
+const tests = data.tests || [];
+const multiProject = new Set(tests.map(t => t.project)).size > 1;
+const sumCounts = (c) => Object.values(c || {}).reduce((s, n) => s + n, 0);
+const interactionsOf = (e) => e.interactionTotal != null ? e.interactionTotal : sumCounts(e.interactionCounts);
+const testsOf = (e) => e.testCount != null ? e.testCount : e.testedBy.length;
+// "click ×3, input ×1", shown as the tooltip of the "tested" pill and the Interactions cell.
+const countsText = (e) => Object.entries(e.interactionCounts || {}).map(([t, n]) => t + ' ×' + n).join(', ');
+const rowSorters = {
+  interactions: (a, b) => interactionsOf(b) - interactionsOf(a) || testsOf(b) - testsOf(a),
+  tests: (a, b) => testsOf(b) - testsOf(a) || interactionsOf(b) - interactionsOf(a),
+};
+let rowSort = rowSorters[store.get('rowSort')] ? store.get('rowSort') : '';
+// Stable sort: ties keep the default order (untested first, then by label).
+const sortedElements = (els) => rowSort ? els.slice().sort(rowSorters[rowSort]) : els;
+function insightHeaders() {
+  const th = (k, label, tip) => '<th class="num" data-sort="' + k + '"' + (rowSort === k ? ' aria-sort="descending"' : '') +
+    '><button title="' + tip + '">' + label + '</button></th>';
+  return th('interactions', 'Interactions', 'Counted interactions, all types. Click to sort, again to reset') +
+    th('tests', 'Tests', 'Distinct tests that interacted with it. Click to sort, again to reset');
+}
+function insightCells(e) {
+  if (!e.tested) return '<td class="num muted">—</td><td class="num muted">—</td>';
+  return '<td class="num" title="' + esc(countsText(e)) + '">' + interactionsOf(e) + '</td><td class="num">' + testsOf(e) + '</td>';
+}
+function setRowSort(r, key) {
+  rowSort = rowSort === key ? '' : key;
+  store.set('rowSort', rowSort);
+  const main = $('#main');
+  main.querySelectorAll('th[data-sort]').forEach(th => {
+    if (th.dataset.sort === rowSort) th.setAttribute('aria-sort', 'descending'); else th.removeAttribute('aria-sort');
+  });
+  const tbody = main.querySelector('tbody');
+  const byKey = new Map(Array.from(tbody.children, tr => [tr.dataset.key, tr]));
+  const frag = document.createDocumentFragment();
+  sortedElements(r.elements).forEach(e => frag.appendChild(byKey.get(e.key)));
+  tbody.appendChild(frag);
+}
+
+// Links into Playwright's HTML report. Relative, so both folders can be moved together.
+const pw = data.htmlReport;
+const testHref = (t) => pw.path + '/index.html#?' + new URLSearchParams({ testId: t.id, run: String(t.run) });
+function traceHref(t) {
+  const base = /^[a-z][a-z0-9+.-]*:/i.test(pw.attachmentsBaseURL) ? pw.attachmentsBaseURL : pw.path + '/' + pw.attachmentsBaseURL;
+  // Same as the HTML report's own trace links: its bundled trace viewer, given an absolute trace URL.
+  return pw.path + '/trace/index.html?trace=' + encodeURIComponent(new URL(base + t.trace, location.href).href);
+}
+function testItem(t, failed) {
+  const name = esc(t.title) + (multiProject && t.project ? ' <span class="muted">[' + esc(t.project) + ']</span>' : '');
+  if (!pw) return name + (failed ? ' (failed)' : '');
+  const run = t.run ? ' (retry #' + t.run + ')' : '';
+  return '<a href="' + esc(testHref(t)) + '" target="_blank" rel="noopener" title="Open in the Playwright HTML report' + run + '">' + name + '</a>' +
+    (failed ? ' (failed)' : '') +
+    (t.trace ? '<a class="trace" href="' + esc(traceHref(t)) + '" target="_blank" rel="noopener" title="Open the trace' + run + ' in the HTML report’s trace viewer">trace</a>' : '');
+}
+function testedByCell(e) {
+  if (!e.ti) return e.testedBy.map(esc).concat((e.testedByFailing || []).map(t => esc(t) + ' (failed)')).join('<br>') || '—';
+  return e.ti.map(i => testItem(tests[i], false)).concat((e.tf || []).map(i => testItem(tests[i], true))).join('<br>') || '—';
+}
+
+// "Most repeated": elements used by the most tests, often setup steps such as signing in.
+const repeated = data.mostRepeated || [];
+const routeIndex = new Map(data.routes.map((r, i) => [r.route, i]));
+const insightsNav = $('#insightsNav');
+$('#insightsCount').textContent = String(repeated.length);
+$('#insightsSub').textContent = repeated.length ? 'Up to ' + repeated[0].tests + ' tests per element' : 'None used by several tests';
+const REPEATED_HASH = '#/insights/repeated';
+function showRepeated() {
+  try { history.replaceState(null, '', REPEATED_HASH); } catch {}
+  if (buttons[current]) buttons[current].setAttribute('aria-current', 'false');
+  current = -1;
+  insightsNav.setAttribute('aria-current', 'true');
+  const rows = repeated.map(x =>
+    '<tr><td>' + esc(x.label) + (x.key !== x.label ? '<br><code class="muted">' + esc(x.key) + '</code>' : '') + '</td>' +
+    '<td><a class="goto route" href="#' + esc(encodeURIComponent(x.route)) + '" data-route="' + esc(x.route) + '" data-key="' + esc(x.key) + '">' + esc(x.route) + '</a></td>' +
+    '<td class="num">' + x.tests + ' <span class="muted">(' + x.share + '%)</span></td><td class="num">' + x.interactions + '</td></tr>').join('');
+  const main = $('#main');
+  litKey = null; lit = [];
+  main.className = '';
+  main.innerHTML =
+    '<div class="toolbar"><span class="big">Most repeated elements</span><span class="muted">' + (tests.length ? tests.length + ' tests in this report' : '') + '</span></div>' +
+    (repeated.length
+      ? '<p class="hint">Elements used by many tests are often setup steps, like signing in or creating data. ' +
+        'When a test isn’t about that step, doing it once can make the suite faster: ' +
+        '<a href="https://playwright.dev/docs/auth" target="_blank" rel="noopener">sign in once and reuse the <code>storageState</code></a> from a setup project, or ' +
+        '<a href="https://playwright.dev/docs/api-testing#using-request-context" target="_blank" rel="noopener">prepare data through the API</a>. ' +
+        'Keep one test that goes through the UI for the step itself.</p>' +
+        '<div class="table-wrap"><table><thead><tr><th>Element</th><th>Route</th><th class="num" title="Distinct tests (share of all tests)">Tests</th><th class="num">Interactions</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+      : '<p class="muted">No element is used by more than one test.</p>');
+  main.querySelectorAll('a.goto').forEach(a => a.onclick = (ev) => {
+    const i = routeIndex.get(a.dataset.route);
+    if (i === undefined) return;
+    ev.preventDefault();
+    show(i, true, a.dataset.key);
+  });
+}
+insightsNav.onclick = showRepeated;
 
 // ---- Hovering a row or box highlights every node with the same key.
 let lit = [];
@@ -317,10 +454,14 @@ $('#main').addEventListener('mouseover', e => {
 $('#main').addEventListener('mouseleave', () => { litKey = null; highlight(null); });
 
 const indexOfHash = () => data.routes.findIndex(r => '#' + encodeURIComponent(r.route) === location.hash);
-addEventListener('hashchange', () => { const i = indexOfHash(); if (i >= 0 && i !== current) show(i); });
+addEventListener('hashchange', () => {
+  if (location.hash === REPEATED_HASH) { if (current !== -1) showRepeated(); return; }
+  const i = indexOfHash(); if (i >= 0 && i !== current) show(i);
+});
 const fromHash = indexOfHash();
 const first = firstVisible();
-show(fromHash >= 0 ? fromHash : first ? +first.dataset.i : 0);
+if (location.hash === REPEATED_HASH) showRepeated();
+else show(fromHash >= 0 ? fromHash : first ? +first.dataset.i : 0);
 </script>
 </body>
 </html>
