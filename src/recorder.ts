@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { BrowserContext, Page, TestInfo } from '@playwright/test';
 import { tracker } from './tracker';
+import { identityArgs } from './identity';
 import type { UiCoverageOptions } from './options';
 import { ATTACHMENT_NAME, SCREENSHOT_ATTACHMENT_PREFIX, type Interaction, type Inventory, type Snapshot } from './types';
 
@@ -71,7 +72,10 @@ export class ContextRecorder {
           if (page) this.schedule(page);
         },
       );
-      await this.context.addInitScript(tracker, { ignoreSelectors: this.options.ignoreSelectors });
+      await this.context.addInitScript(tracker, {
+        ignoreSelectors: this.options.ignoreSelectors,
+        ...identityArgs(this.options),
+      });
     });
     this.context.on('page', (page) => this.watch(page));
     this.context.pages().forEach((page) => this.watch(page));

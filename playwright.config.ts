@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import type { UiCoverageOptions } from './src';
 
 // Config for the bundled demo. In your own project, use
 // `import 'playwright-ui-coverage/register'` and
@@ -11,7 +12,7 @@ if (process.env.UICOV_MODE === 'register') require('./src/register');
 // PORT lets several checkouts run the demo at the same time.
 const port = Number(process.env.PORT || 4173);
 
-export default defineConfig({
+export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
   testDir: 'demo/tests',
   fullyParallel: true,
   reporter: [
@@ -21,6 +22,11 @@ export default defineConfig({
   ],
   use: {
     baseURL: `http://localhost:${port}`,
+    // Recording options (read by both the fixture and register mode).
+    uiCoverage: {
+      // Delete buttons on /users carry data-action; use it as their identity.
+      significantAttributes: ['data-action'],
+    },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

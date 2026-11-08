@@ -1,9 +1,15 @@
 /** An interactive element found on the page during an inventory pass. */
 export interface InventoryElement {
-  /** Stable identity used to match interactions to elements across tests. */
+  /**
+   * Stable identity used to match interactions to elements across tests,
+   * from attributes (`[data-testid="x"]`, `#id`, `[name="email"]`) or the
+   * element's position (`main > form > button`). Never from visible text.
+   */
   key: string;
-  /** Human-readable label (role + accessible name). */
+  /** Human-readable label (role + accessible name). Display only. */
   label: string;
+  /** Raw identifying attributes (`id`, `name`, `data-*`, …), to recompute identity later. */
+  attrs?: Record<string, string>;
   tag: string;
   /** Document coordinates in CSS pixels (match a fullPage screenshot). */
   x: number;
@@ -22,6 +28,8 @@ export interface Inventory {
 export interface Interaction {
   key: string;
   label: string;
+  /** Same as `InventoryElement.attrs`. */
+  attrs?: Record<string, string>;
   event: string;
   url: string;
 }

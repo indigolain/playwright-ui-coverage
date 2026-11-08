@@ -39,7 +39,11 @@ const comparable = (summary) =>
       route: r.route,
       total: r.total,
       tested: r.tested,
-      elements: r.elements.map((e) => ({ ...e, testedBy: [...e.testedBy].sort() })),
+      // Compare identity and results, not display labels: labels may contain
+      // per-run text (counters, timestamps) by design.
+      elements: r.elements
+        .map((e) => ({ key: e.key, tested: e.tested, instances: e.instances, testedBy: [...e.testedBy].sort() }))
+        .sort((a, b) => a.key.localeCompare(b.key)),
     })),
   });
 

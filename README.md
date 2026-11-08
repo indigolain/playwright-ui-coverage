@@ -70,10 +70,10 @@ Either way, recording covers every page and popup in the test's browser context.
 **3. Run your tests** and open `ui-coverage-report/index.html`.
 
 ```
-UI coverage: 33.3% (12/36 elements)
-  /            42.9%  3/7
-  /settings    22.2%  2/9
-  /users       42.9%  6/14
+UI coverage: 38.9% (14/36 elements)
+  /              50%  4/8
+  /settings      30%  3/10
+  /users         50%  6/12
   /users/:id   16.7%  1/6
 ```
 
@@ -85,25 +85,55 @@ UI coverage: 33.3% (12/36 elements)
 
 ### Element identity
 
-Elements are matched across tests by, in order:
-`data-testid` → stable `id` → role + accessible name (e.g. `button "Save"`).
-Adding `data-testid`s makes matching the most reliable.
+Elements are matched across tests by **attributes and position, never by visible text**, so copy changes, translations and dynamic text (counters, user names, timestamps) don't turn one element into a new one. The first rule that applies gives the element's key:
+
+| # | Source | Key in the report |
+|---|---|---|
+| 1 | `data-uicov-id` (explicit override, never filtered) | `checkout-submit` (the value as-is) |
+| 2 | `significantAttributes` you configure, in order | `[data-component="avatar"]` |
+| 3 | `data-testid`, `data-test`, `data-test-id`, `data-cy`, `data-qa`, `row-id` | `[data-testid="save"]` |
+| 4 | `id` | `#email` |
+| 5 | `name` (radios/checkboxes add their `value`) | `[name="plan"][value="pro"]` |
+| 6 | Position: tag + index among same-tag siblings, up to the nearest ancestor that has a key from 1–5 (or `<body>`) | `#add > form > div > button:nth-of-type(2)` |
+
+Attribute values that look generated (rules 2–5) are skipped, see `attributeFilters` below. Visible text (role + accessible name, e.g. `button "Save"`) is shown in the report as the element's **label** only.
+
+Positional keys read like CSS selectors and only use an index when there are several siblings with the same tag. Table rows (`<tr>`, `role="row"`) never get an index, so a "Delete" button on every row is one element with several instances. Positional keys change when the markup around the element changes, so for anything that matters, add a `data-testid` (or a `data-uicov-id`).
 
 ## Options
 
 ### Recording (`use.uiCoverage`, works in both modes)
 
 ```ts
-use: {
-  uiCoverage: {
-    enabled: !!process.env.UI_COVERAGE, // default: true
-    ignoreSelectors: ['.cookie-banner'], // default: []
-    snapshotDelay: 250,                  // ms, default: 250
+import { defineConfig } from '@playwright/test';
+import type { UiCoverageOptions } from 'playwright-ui-coverage';
+
+export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
+  use: {
+    uiCoverage: {
+      enabled: !!process.env.UI_COVERAGE, // default: true
+      ignoreSelectors: ['.cookie-banner'], // default: []
+      snapshotDelay: 250,                  // ms, default: 250
+      significantAttributes: ['data-component'], // default: []
+      attributeFilters: [                  // default: []
+        { attribute: 'id', value: 'tmp-.*' },               // ignore id="tmp-…"
+        { attribute: 'id', value: 'mui-legacy', include: true }, // keep, despite the built-in rule
+      ],
+    },
   },
-},
+});
 ```
 
 Anything inside an element with `data-uicov-ignore` is always excluded.
+
+- **`significantAttributes`**: attributes that identify an element, checked after `data-uicov-id` and before the built-in test-id attributes, in the order given.
+- **`attributeFilters`**: `{ attribute, value?, include? }` rules deciding whether an attribute value may be used as a key. `attribute` and `value` are regular expressions, anchored automatically (`'id'` means `^(?:id)$`). Attribute names match case-insensitively, values case-sensitively. Without `value`, the rule matches any value. The first matching rule wins: `include: false` (default) skips the value, `include: true` keeps it. Your rules run before the built-in ones, which skip:
+  - React `useId` values (`:r1:`, `:R2kq:`, `«r1»`), UUIDs and hex strings of 16+ characters, in any attribute;
+  - in `id` and `name`: framework counters (`ember123`, `mui-12345`, `radix-…`, `headlessui-…`, `react-aria-…`, `downshift-…`, `react-select-…`, `mat-…-0`, `cdk-…-3`, `ui-id-4`, `ext-gen12`, `gwt-uid-3`, `yui_…`, `j_id…`), purely numeric values and values with 3+ consecutive digits.
+
+  The built-in lists are exported as `BUILTIN_IDENTITY_ATTRIBUTES` and `BUILTIN_ATTRIBUTE_FILTERS`.
+
+Each recorded element also keeps its raw identifying attributes (`attrs`: `id`, `name`, `role`, `type`, `aria-label`, `href`, `data-*` and your `significantAttributes`) in the test attachment.
 
 ### Reporter
 
