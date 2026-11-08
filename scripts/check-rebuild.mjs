@@ -153,7 +153,8 @@ try {
     const grouped = read(groupsOut);
     const navLinks = keys(baseline).filter((k) => / nav > a/.test(k)).length;
     const navGroups = grouped.views.filter((v) => v.elements.some((e) => e.key === 'nav' && e.group?.reason === 'config' && e.group.name === 'main navigation')).length;
-    if (navLinks === 0 || navGroups !== baseline.views.length) errors.push(`elementGroups: ${navGroups} nav groups in ${baseline.views.length} views`);
+    const navViews = baseline.views.filter((v) => v.elements.some((e) => /^nav > a/.test(e.key))).length;
+    if (navLinks === 0 || navGroups !== navViews) errors.push(`elementGroups: ${navGroups} nav groups in ${navViews} views with nav links`);
     else if (total(grouped) !== total(baseline) - navLinks + navGroups)
       errors.push(`elementGroups total ${total(grouped)}, expected ${total(baseline)} - ${navLinks} + ${navGroups}`);
     else console.log(`elementGroups check: ${total(baseline)} → ${total(grouped)} elements`);
