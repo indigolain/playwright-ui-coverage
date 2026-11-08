@@ -127,6 +127,30 @@ Playwright runs a test again on retry, and every attempt records coverage. The r
 
 With `countFailedTests: true`, interactions from every attempt count as tested, whether it passed or not.
 
+## Sharding and `merge-reports`
+
+Coverage data and screenshots are stored as test attachments, so they travel with Playwright's `blob` reporter. Run each shard with the blob reporter, then merge on any machine with the UI coverage reporter:
+
+```bash
+# on each CI job
+npx playwright test --shard=1/2 --reporter=blob
+npx playwright test --shard=2/2 --reporter=blob
+
+# after collecting every blob-report/*.zip into all-blob-reports/
+npx playwright merge-reports --reporter playwright-ui-coverage/reporter all-blob-reports
+```
+
+The merged report is the same as one from an unsharded run. To pass reporter options (e.g. `outputFolder`, `threshold`), use a config file with `npx playwright merge-reports --config merge.config.ts all-blob-reports`:
+
+```ts
+// merge.config.ts
+export default {
+  reporter: [['playwright-ui-coverage/reporter', { outputFolder: 'ui-coverage-report', threshold: 30 }]],
+};
+```
+
+Each screenshot is a file attachment named `ui-coverage-screenshot-<n>`, next to the `ui-coverage` JSON attachment, so you'll see them listed under the test's attachments in Playwright's own HTML report.
+
 ## Known limitations
 
 - UI states that last shorter than `snapshotDelay` (e.g. a modal a test opens and closes instantly) still count their elements, but may not get a screenshot.
@@ -142,6 +166,7 @@ npx playwright install chromium
 npm run demo          # fixture mode: runs demo/tests, writes ui-coverage-report/
 npm run demo:register # register mode: same tests, config-only recording
 UICOV_DEMO_FAIL=1 npx playwright test --retries=1  # adds a failing and a flaky test (demo/tests/failing.spec.ts)
+npm run demo:sharded  # runs 2 blob shards + merge-reports, checks it matches an unsharded run
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
 npm run typecheck
 npm run build         # compiles to dist/

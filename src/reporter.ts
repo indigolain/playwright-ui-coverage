@@ -23,6 +23,24 @@ export interface UiCoverageReporterOptions {
   countFailedTests?: boolean;
 }
 
+/**
+ * Replaces each snapshot's screenshot attachment name with the file's local
+ * path from `result.attachments`. merge-reports rewrites those paths to where
+ * it extracted the blob, so this works on any machine. Values that are already
+ * absolute paths (data from older versions) are kept as they are.
+ */
+function resolveScreenshots(data: TestCoverageData, result: TestResult): TestCoverageData {
+  const paths = new Map<string, string>();
+  for (const a of result.attachments) if (a.path) paths.set(a.name, a.path);
+  for (const snap of data.snapshots ?? []) {
+    if (!snap.screenshot) continue;
+    const file = paths.get(snap.screenshot) ?? (path.isAbsolute(snap.screenshot) ? snap.screenshot : undefined);
+    if (file) snap.screenshot = file;
+    else delete snap.screenshot;
+  }
+  return data;
+}
+
 class UiCoverageReporter implements Reporter {
   /** One entry per attachment per attempt; retries are resolved in onEnd. */
   private tests: AttemptEntry[] = [];
@@ -45,7 +63,7 @@ class UiCoverageReporter implements Reporter {
           retry: result.retry,
           passed: isPassingResult(test, result),
           title: test.titlePath().filter(Boolean).slice(1).join(' › '),
-          data: JSON.parse(a.body.toString('utf8')) as TestCoverageData,
+          data: resolveScreenshots(JSON.parse(a.body.toString('utf8')) as TestCoverageData, result),
         });
       } catch {
         /* malformed attachment */

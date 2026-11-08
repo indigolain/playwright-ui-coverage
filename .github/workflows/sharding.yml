@@ -1,0 +1,30 @@
+name: Sharding
+
+# Runs the demo unsharded and as 2 blob-reporter shards, merges the shards with
+# `merge-reports` after deleting test-results/, and checks that the UI coverage
+# report (numbers and screenshots) matches. See scripts/check-sharding.mjs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  merge-reports:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [fixture, register]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run demo:sharded
+        env:
+          CI: true
+          UICOV_MODE: ${{ matrix.mode }}

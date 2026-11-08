@@ -28,8 +28,11 @@ export interface Interaction {
 
 export interface Snapshot extends Inventory {
   /**
-   * Absolute path to the fullPage screenshot for this state. Absent for
-   * inventories captured at interaction time (page may be navigating).
+   * Name of the test attachment that holds the fullPage screenshot for this
+   * state (e.g. "ui-coverage-screenshot-0"). The reporter resolves it to a
+   * local file via `result.attachments`, which also works after
+   * `merge-reports`. Absent for inventories captured at interaction time
+   * (page may be navigating).
    */
   screenshot?: string;
 }
@@ -41,3 +44,5 @@ export interface TestCoverageData {
 }
 
 export const ATTACHMENT_NAME = 'ui-coverage';
+/** Screenshot attachments are named `${SCREENSHOT_ATTACHMENT_PREFIX}${n}`. */
+export const SCREENSHOT_ATTACHMENT_PREFIX = 'ui-coverage-screenshot-';

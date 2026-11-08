@@ -28,7 +28,8 @@
     "demo": "playwright test",
     "demo:serve": "node demo/server.mjs",
     "docs:screenshots": "node scripts/screenshots.mjs",
-    "demo:register": "UICOV_MODE=register playwright test"
+    "demo:register": "UICOV_MODE=register playwright test",
+    "demo:sharded": "node scripts/check-sharding.mjs"
   },
   "keywords": [
     "playwright",
