@@ -45,7 +45,11 @@ const comparable = (summary) =>
       elements: r.elements
         .map((e) => ({ key: e.key, tested: e.tested, instances: e.instances, testIds: [...e.testIds].sort() }))
         .sort((a, b) => a.key.localeCompare(b.key)),
+      links: (r.links ?? [])
+        .map((l) => ({ key: l.key, tested: l.tested, destinations: l.destinations, referrers: l.referrers.map((e) => e.key).sort() }))
+        .sort((a, b) => a.key.localeCompare(b.key)),
     })),
+    untestedViews: summary.untestedViews,
   });
 
 const countShots = (report) => report.views.reduce((n, v) => n + v.screenshots.length, 0);

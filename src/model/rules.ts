@@ -71,6 +71,28 @@ export interface UiCoverageRules {
    * evaluated before the built-in rules for generated values.
    */
   attributeFilters?: AttributeFilter[];
+  /**
+   * How `<a href>` elements count (README "Links and untested views"). By
+   * default a link to another view is a *link unit*, tested when any counted
+   * test visited its destination view, instead of an interactive element.
+   * Same-view links (`#x`, `#`, a link to the page itself), `javascript:` and
+   * empty hrefs, links inside iframes and, in component tests, every link
+   * stay interactive elements. `false`: every link is an interactive element
+   * (tested when clicked), as before link units existed.
+   */
+  links?: false | LinkRules;
+}
+
+/** The `links` rule. */
+export interface LinkRules {
+  /**
+   * Links to an origin no test visited (another site):
+   * - `'element'` (default): an interactive element, tested when clicked.
+   * - `'ignore'`: not counted at all.
+   */
+  external?: 'element' | 'ignore';
+  /** Free text, ignored. */
+  comment?: string;
 }
 
 const regexProblem = (src: string): string | undefined => {
@@ -127,6 +149,7 @@ export const RULES_SCHEMA = {
     s.rule({ attribute: s.required(s.string(regexProblem)), value: s.string(regexProblem), include: s.boolean() }),
     'an array of { attribute, value?, include? } rules',
   ),
+  links: s.union(s.oneOf(false), s.rule({ external: s.oneOf('element', 'ignore') }, 'an object { external? }')),
 } satisfies SchemaFields<UiCoverageRules>;
 
 /** The keys of `UiCoverageRules`, e.g. to pick them out of a larger options object. */

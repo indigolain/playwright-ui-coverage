@@ -39,6 +39,7 @@ export {
   BUILTIN_ATTRIBUTE_FILTERS,
   BUILTIN_IDENTITY_ATTRIBUTES,
   type AttributeFilter,
+  type LinkRules,
   type UiCoverageRules,
 } from './model/rules';
 export { RECORDED_CANDIDATES } from './model/elements';
@@ -77,6 +78,9 @@ export type {
   CoverageCounts,
   ViewCoverage,
   ElementCoverage,
+  LinkCoverage,
+  UntestedView,
+  UntestedViewReferrer,
   A11yHint,
   ViewScreenshot,
   TestRef,

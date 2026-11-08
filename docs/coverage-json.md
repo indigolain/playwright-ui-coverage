@@ -20,7 +20,7 @@ The reporter and the `playwright-ui-coverage report` CLI write `coverage.json` n
 
 ## What is counted (the denominator)
 
-Coverage is measured in **units**: interactive elements and links.
+Coverage is measured in **units**: interactive elements and link units.
 
 ```
 coverage = (testedElementsCount + testedLinksCount)
@@ -31,7 +31,9 @@ rounded to one decimal; `100` when there are no units.
 
 - An **element** is an interactive element of a view (see "Which elements count" in the README), identified by its `key` within the view. Elements sharing a key (a "Delete" button on every row) are one unit, whatever `instances` says.
 - An element is **tested** when a counted test interacted with it in that view. By default only each test's last passing attempt counts (`countFailedTests: true` counts every attempt). Elements touched only by attempts that didn't pass are untested and also counted in `failingOnlyElementsCount`.
-- **Links:** `testedLinksCount` / `untestedLinksCount` are reserved for link tracking, where a link is a unit tested when its destination view was visited. Until then both are `0` and `<a>` elements are counted as ordinary elements. When link tracking arrives, links get their own counts (and `<a>` elements stop being counted as elements) without a schema version change, since the formula above already includes them.
+- A **link unit** is the set of `<a href>` elements of a view that lead to one other view (destination URLs mapped to views by the same function as page URLs, `normalizeUrl`), identified by the destination view's name (`key`). It is **tested** when a counted test visited the destination view, by any path. An `<a>` in a link unit is not also counted as an element.
+- Links that stay **elements** (tested when clicked): links within the same view (`#fragment`, `#`, the page itself or another page of the same view), `javascript:` and empty hrefs, links inside iframes, all links in component tests (`viewBy: 'file'`), and links to other origins (unless `links: { external: 'ignore' }`, which drops them). `links: false` makes every link an element, as in reports written before link units.
+- **Untested views** (`untestedViews`): destination views of untested links that no recorded test visited. They are not in `views` and don't add units of their own; their incoming links are the untested link units.
 - `a11yHintsCount` is informational and never affects `coverage`.
 - The overall summary sums the views' counts; `coverage` is computed from the sums (not an average of the views' percents).
 
@@ -44,6 +46,7 @@ rounded to one decimal; `100` when there are no units.
 | `generator` | `{ name, version }` | `name` is `"playwright-ui-coverage"`, `version` the package version that wrote the file. |
 | `summary` | [`ReportSummary`](#summary-reportsummary--coveragecounts) | Overall counts. |
 | `views` | [`ViewCoverage`](#views-viewcoverage)`[]` | One per view, sorted by name. |
+| `untestedViews` | [`UntestedView`](#untestedviews-untestedview)`[]` | Destination views of untested links that no recorded test visited, sorted by name. |
 | `tests` | [`TestRef`](#tests-testref)`[]` | Every test with recorded data, sorted by title. |
 | `thresholds` | [`ThresholdCheck`](#thresholds-thresholdcheck)`[]` | Results of the `threshold` option; empty when it isn't set. |
 | `insights` | `{ mostRepeated }` | See [Insights](#insights). |
@@ -53,16 +56,17 @@ rounded to one decimal; `100` when there are no units.
 
 ## `summary`: `ReportSummary` / `CoverageCounts`
 
-`views[].summary` is a `CoverageCounts`; the top-level `summary` is a `ReportSummary`, the same plus `viewCount`.
+`views[].summary` is a `CoverageCounts`; the top-level `summary` is a `ReportSummary`, the same plus `viewCount` and `untestedViewCount`.
 
 | Field | Type | |
 |---|---|---|
 | `viewCount` | integer | Top level only: number of entries in `views`. |
+| `untestedViewCount` | integer | Top level only: number of entries in `untestedViews`. |
 | `coverage` | number | Percent, 0–100, one decimal. See [the denominator](#what-is-counted-the-denominator). |
 | `testedElementsCount` | integer | |
 | `untestedElementsCount` | integer | Includes `failingOnlyElementsCount`. |
-| `testedLinksCount` | integer | `0` until link tracking. |
-| `untestedLinksCount` | integer | `0` until link tracking. |
+| `testedLinksCount` | integer | Link units whose destination view a counted test visited. |
+| `untestedLinksCount` | integer | Link units whose destination view no counted test visited. |
 | `failingOnlyElementsCount` | integer | Untested elements that only attempts that didn't pass touched. |
 | `a11yHintsCount` | integer | Accessibility hints on these elements. |
 
@@ -75,7 +79,8 @@ A view is a page URL normalized by `normalizeUrl` (`/users/42?tab=x` → `/users
 | `name` | string | As shown in the report and matched by `threshold.views`. |
 | `reportUrl` | string | This view in the HTML report, relative to the folder of `coverage.json`: `index.html#` + `encodeURIComponent(name)`. |
 | `summary` | `CoverageCounts` | |
-| `elements` | [`ElementCoverage`](#viewselements-elementcoverage)`[]` | Untested first, then by label. |
+| `elements` | [`ElementCoverage`](#viewselements-elementcoverage)`[]` | Interactive elements, not the `<a>` elements of `links`. Untested first, then by label. |
+| `links` | [`LinkCoverage`](#viewslinks-linkcoverage)`[]` | Link units: this view's links grouped by destination view. Untested first, then by key. |
 | `screenshots` | `ViewScreenshot[]` | **Internal.** The screenshots the HTML report shows: `{ file, dpr, testId?, boxes: [{ key, x, y, w, h }] }`, `file` relative to the folder of `coverage.json`, boxes in CSS pixels. Which screenshots are picked depends on timing. |
 
 ## `views[].elements[]`: `ElementCoverage`
@@ -101,6 +106,30 @@ A view is a page URL normalized by `normalizeUrl` (`/users/42?tab=x` → `/users
 | `a11yHints` | `{ rule, message }[]`, optional | Absent when there are none. `rule` is one of `no-name`, `placeholder-only`, `duplicate-name`, `not-focusable`, `no-role`; more may be added. |
 
 Optional fields are absent (not `null`) when unknown, e.g. for data recorded by older versions.
+
+## `views[].links[]`: `LinkCoverage`
+
+The links of a view that go to one other view: one unit. `(view name, key)` identifies it across runs (baselines list untested ones under `untestedLinks`).
+
+| Field | Type | |
+|---|---|---|
+| `key` | string | The destination view's name, e.g. `/users/:id`. Unique within the view. |
+| `label` | string | `link "name"` of the first referrer by label, with ` (+N more)` when several `<a>` elements go there. For display. |
+| `tested` | boolean | A counted test visited the destination view (not necessarily through these links). |
+| `destinations` | string[] | Distinct destination URLs, sorted, at most 20: path, query and hash when on the page's origin, else the full URL. |
+| `destinationCount` | integer | Number of distinct destination URLs (may exceed `destinations.length`). |
+| `referrers` | [`ElementCoverage`](#viewselements-elementcoverage)`[]` | The `<a>` elements of the view that link there, with `suggestedLocator` etc. Their `tested`/`testIds` say whether a test interacted with them: informational, not part of `coverage`. |
+
+## `untestedViews[]`: `UntestedView`
+
+| Field | Type | |
+|---|---|---|
+| `name` | string | View name, from the destination URL the same way page URLs are named. |
+| `destinations` | string[] | Distinct destination URLs, sorted, at most 20. |
+| `destinationCount` | integer | Number of distinct destination URLs. |
+| `referrers` | `{ view, label, keys }[]` | The views linking to it (`view`, a name in `views`), with their link unit's `label` and the `<a>` elements' `keys` (`views[].links[].referrers[].key`). |
+
+A view seen only in attempts that don't count (failing tests) is in `views`, so it isn't an untested view, but links to it are untested.
 
 ## `tests[]`: `TestRef`
 

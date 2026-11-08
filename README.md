@@ -80,20 +80,25 @@ Either way, recording covers every page and popup in the test's browser context.
 **3. Run your tests** and open `ui-coverage-report/index.html`.
 
 ```
-UI coverage: 40.4% (23/57 elements)
-  /              50%  4/8
-  /settings      30%  3/10
-  /users         50%  6/12
-  /users/:id    9.1%  1/11
-  /widgets     56.3%  9/16
+UI coverage: 57.3% (51/89: 33/70 elements, 18/19 links)
+  /              75%  6/8
+  /embedded    62.5%  10/16
+  /long        41.2%  7/17
+  /settings    45.5%  5/11
+  /users       66.7%  8/12
+  /users/:id     30%  3/10
+  /widgets       80%  12/15
+  1 untested view(s), only linked to: /settings/audit
   9 accessibility hint(s), informational (see the report)
 ```
+
+Coverage counts **units**: interactive elements plus [links](#links-and-untested-views), grouped by the view they lead to. In the demo, every view but `/settings/audit` is visited by some test, so 18 of the 19 link units are tested; the "View audit log" link on `/settings` is the untested one, and `/settings/audit` is listed as an untested view.
 
 ## How it works
 
 1. **Tracker** (`addInitScript`): capture-phase listeners record every interaction (`click`, `input`, `change`, `submit`, `dblclick`, `contextmenu`, keyboard activation, drag and drop, opt-in `scroll`/`focus`/`blur`, see [Interaction types](#interaction-types)) on an [interactive element](#which-elements-count), whichever Playwright API (or a real user) caused it.
 2. **Inventory + screenshot**: when a page loads and shortly after interactions, the recorder lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear. When an interaction makes new elements appear (a modal opens), the page sends an inventory as soon as its handlers have run, and the recorder takes a viewport screenshot right away, so states a test closes again within a few milliseconds get a screenshot too (`captureTransientStates`). It records **raw facts** (tag, attributes, position among siblings, ancestors, accessible name), not keys: identity and filtering are decided later.
-3. **Reporter**: merges data from all workers, applies the [report-time rules](#report-time-rules) (filters, identity), groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it, and renders the HTML report and `coverage.json`. It also saves the raw data in `ui-coverage-report/data/`, so you can [rebuild the report](#rebuilding-the-report-report-cli) with other rules without running the tests again.
+3. **Reporter**: merges data from all workers, applies the [report-time rules](#report-time-rules) (filters, identity), groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it and a link *tested* if any test visited the view it leads to, and renders the HTML report and `coverage.json`. It also saves the raw data in `ui-coverage-report/data/`, so you can [rebuild the report](#rebuilding-the-report-report-cli) with other rules without running the tests again.
 
 ### Which elements count
 
@@ -150,6 +155,28 @@ Elements inside **iframes** (same-origin and cross-origin) and **open shadow roo
 - **Closed shadow roots** can't be read from the page, so their content isn't recorded; the host counts if it is interactive itself (e.g. `role="button"`, `tabindex="0"`), and events inside are credited to it.
 - **Suggested locators** use `page.frameLocator('<frame key>')` for elements in frames. Playwright's locators already pierce open shadow roots.
 
+### Links and untested views
+
+A link matters because of **where it goes**, so links are counted by destination rather than by clicks:
+
+- **Link units.** Each `<a href>` (and `<area href>`) is resolved (against `<base>` too) and mapped to a view by the same function as page URLs (`normalizeUrl`). The links of a view that go to the same other view are **one unit**: on `/users`, the three user rows (`/users/1`, `/users/2`, `/users/3`) are one link to `/users/:id`, and the nav "Home" link and a "Back home" button-link are one link to `/`.
+- **Tested** when any counted test visited the destination view, by any path (a `goto`, a redirect, another link), not necessarily through that link. "Counted" is the same as for interactions: the last passing attempt of each test, see [Retries and failed tests](#retries-and-failed-tests).
+- **No double counting.** An `<a>` that belongs to a link unit is not also an interactive element. Its clicks are still recorded (shown with the link) but don't change coverage.
+- **Still elements** (tested when clicked, as before): links within the same view (`#section`, `#`, a link to the page itself or to another page of the same view, like `/users/2` on `/users/:id`), `javascript:` and empty hrefs, links inside iframes (they navigate the frame), and every link in [component tests](#component-testing). `tel:`, `mailto:` and `sms:` links never count.
+- **External links** (to an origin no test visited): interactive elements by default. `links: { external: 'ignore' }` leaves them out entirely. `links: false` turns link units off: every link is an element again.
+- **Untested views.** Destination views that no test visited at all appear separately: in the HTML report's sidebar ("Untested views", with the routes and links that point to them and the URLs), in `coverage.json` (`untestedViews`, with `referrers`), and in the console. Each view's page in the report has a **Links** table: destination view, *Referrers* (the `<a>` elements, with a suggested `page.getByRole('link', { name })…click()` line for untested ones) and *URLs*.
+
+![The Links table of /settings: an untested link to /settings/audit with its suggested locator, tested links to / and /users, and /settings/audit under "Untested views" in the sidebar](docs/report-links.png)
+
+```ts
+// ui-coverage.config.ts
+export default defineUiCoverageConfig({
+  links: { external: 'ignore' },  // default: {} (external links are elements); false: no link units
+});
+```
+
+**Denominator:** coverage is (tested elements + tested link units) / (elements + link units), overall and per view, and that is what thresholds, the baseline and `compare` use. Compared with counting `<a>` elements by clicks, it usually goes up (navigation is commonly covered by visiting pages) and a view's numbers include its outgoing links. A baseline written before link units lists `<a>` elements as untested elements: they show as resolved (`removed`) and the link units as new gaps, so run `baseline update` once after upgrading.
+
 ## Configuration
 
 All settings live in one file, `ui-coverage.config.ts` next to `playwright.config.ts`. The recorder (in both modes), the reporter and the [`report` CLI](#rebuilding-the-report-report-cli) all read it:
@@ -185,7 +212,7 @@ With the file in place the reporter needs no options: `['playwright-ui-coverage/
 
 | Key | Applied | |
 |---|---|---|
-| `ignoreSelectors`, `significantAttributes`, `attributeFilters` | report time | [Report-time rules](#report-time-rules) |
+| `ignoreSelectors`, `significantAttributes`, `attributeFilters`, `links` | report time | [Report-time rules](#report-time-rules), [Links](#links-and-untested-views) |
 | `outputFolder`, `normalizeUrl`, `maxScreenshotsPerRoute`, `threshold`, `countFailedTests`, `viewBy`, `htmlReport`, `testIdAttribute`, `saveData`, `baseline`, `githubSummary` | report time | [Reporter settings](#reporter-settings) |
 | `recording` | while tests run | [Recording options](#recording-options) |
 | `profiles` | | [Profiles](#profiles) |
@@ -391,7 +418,7 @@ Top-level keys of the config file (or reporter options):
 | Option | Default | Description |
 |---|---|---|
 | `outputFolder` | `ui-coverage-report` | Report location (relative to the config file). |
-| `normalizeUrl` | strips query, ids → `:id` | `(url) => routeName`, to group pages your own way. |
+| `normalizeUrl` | strips query, ids → `:id` | `(url) => routeName`, to group pages your own way. Link destinations go through it too. |
 | `maxScreenshotsPerRoute` | `3` | Screenshots chosen to cover the most elements. |
 | `threshold` | none | Fail the run if coverage % is below this: a number (overall), or `{ overall, views }` for per-view minimums. See below. |
 | `countFailedTests` | `false` | Let interactions from tests that didn't pass mark elements as tested. See below. |
@@ -402,6 +429,7 @@ Top-level keys of the config file (or reporter options):
 | `baseline` | none | Fail only on *new* untested elements, compared with a committed baseline file. See [Baseline](#baseline-fail-only-on-new-untested-elements). |
 | `githubSummary` | `false` | Append a markdown summary to `$GITHUB_STEP_SUMMARY` when it's set. See [Comparing runs](#comparing-runs-pr-comments-and-the-github-step-summary). |
 | `ignoreSelectors`, `significantAttributes`, `attributeFilters` | `[]` | [Report-time rules](#report-time-rules). |
+| `links` | `{}` | How `<a href>` counts: link units by destination view. `{ external: 'ignore' }` drops links to other sites; `false`: every link is an element. See [Links and untested views](#links-and-untested-views). |
 
 Reporter options only: `configFile` and `profile`, see [Where the config comes from](#where-the-config-comes-from) and [Profiles](#profiles).
 
@@ -526,23 +554,23 @@ npx playwright-ui-coverage baseline update       # writes ui-coverage-baseline.j
 | `mode` | `'check'` (default): fail on new gaps and write the current state to `<file>.next.json` (`ui-coverage-baseline.next.json`). `'update'`: rewrite `<file>` with the current state; never fails. `'off'`: nothing. |
 | `allowNewViews` | Default `false`: untested elements of a view the baseline doesn't have are new gaps (a new page needs tests, or a baseline update). `true`: new views are listed but don't fail. |
 
-**The file** lists, per view, the keys of its untested elements (sorted, one per line, so diffs review well). Views with nothing untested are kept with an empty list, so "fully tested" and "new view" stay different:
+**The file** lists, per view, the keys of its untested elements and the destination views of its untested links (sorted, one per line, so diffs review well). Views with nothing untested are kept with an empty list, so "fully tested" and "new view" stay different:
 
 ```json
 {
   "baselineVersion": 1,
   "views": {
-    "/settings": { "untestedElements": ["#bio", "#theme", "[data-testid=\"delete-account\"]"] },
+    "/settings": { "untestedElements": ["#bio", "#theme", "[data-testid=\"delete-account\"]"], "untestedLinks": ["/settings/audit"] },
     "/users": { "untestedElements": [] }
   }
 }
 ```
 
-Links get an `untestedLinks` list once they're tracked as their own units.
+`untestedLinks` is there only when the view has untested [link units](#links-and-untested-views).
 
 **What happens in check mode:**
 
-- A view in both: its untested elements not in the baseline are **new gaps** and fail the run (exit code 1, like a threshold). Elements the baseline lists that are now tested, or gone, are **resolved**.
+- A view in both: its untested elements and links not in the baseline are **new gaps** and fail the run (exit code 1, like a threshold). Elements the baseline lists that are now tested, or gone, are **resolved**.
 - **Ratchet:** `<file>.next.json` is always written with the current state. When elements got tested, the run says so; copy `.next.json` over the baseline (or run `baseline update`) and commit. Add `*.next.json` to `.gitignore`.
 - **Renamed views** (a `normalizeUrl` change, a route moved): a view that disappeared and one that appeared with mostly the same untested keys (Jaccard index ≥ 0.5) are matched and compared as one, reported as `view renamed?`.
 - **Removed views** (in the baseline, not in the run) are reported and never fail; a filtered run (`--grep`) doesn't visit every view. Compare against full runs: in a filtered run, a view that *was* visited can have elements that other tests normally cover.
@@ -588,13 +616,17 @@ Next to `index.html`, the report folder has `coverage.json`: a versioned, machin
   "generatedAt": "2026-01-01T12:00:00.000Z",
   "generator": { "name": "playwright-ui-coverage", "version": "0.1.0" },
   "summary": {
-    "viewCount": 5, "coverage": 40.4,
-    "testedElementsCount": 23, "untestedElementsCount": 34,
-    "testedLinksCount": 0, "untestedLinksCount": 0,
+    "viewCount": 7, "untestedViewCount": 1, "coverage": 57.3,
+    "testedElementsCount": 33, "untestedElementsCount": 37,
+    "testedLinksCount": 18, "untestedLinksCount": 1,
     "failingOnlyElementsCount": 0, "a11yHintsCount": 9
   },
   "views": [
-    { "name": "/users/:id", "reportUrl": "index.html#%2Fusers%2F%3Aid", "summary": { "coverage": 9.1, … }, "elements": [ … ], "screenshots": [ … ] }
+    { "name": "/users/:id", "reportUrl": "index.html#%2Fusers%2F%3Aid", "summary": { "coverage": 30, … }, "elements": [ … ], "links": [ … ], "screenshots": [ … ] }
+  ],
+  "untestedViews": [
+    { "name": "/settings/audit", "destinations": ["/settings/audit"], "destinationCount": 1,
+      "referrers": [{ "view": "/settings", "label": "link \"View audit log\"", "keys": ["main > p:nth-of-type(2) > a"] }] }
   ],
   "tests": [ { "id": "…", "title": "users.spec.ts › add a user", "project": "chromium", "passed": true, "retry": 0 } ],
   "thresholds": [],
@@ -602,8 +634,8 @@ Next to `index.html`, the report folder has `coverage.json`: a versioned, machin
 }
 ```
 
-- **Denominator:** `coverage` is tested units / all units, where units are interactive elements plus links: `(testedElementsCount + testedLinksCount) / (testedElementsCount + untestedElementsCount + testedLinksCount + untestedLinksCount)`, as a percent with one decimal (100 when there are none). Until links are tracked as their own units, the link counts are `0` and `<a>` elements count as elements.
-- **Identity:** an element is `(view name, key)`; tests are referenced by `TestCase.id`.
+- **Denominator:** `coverage` is tested units / all units, where units are interactive elements plus link units: `(testedElementsCount + testedLinksCount) / (testedElementsCount + untestedElementsCount + testedLinksCount + untestedLinksCount)`, as a percent with one decimal (100 when there are none). An `<a>` in a link unit (`views[].links[].referrers`) is not also an element. See [Links and untested views](#links-and-untested-views).
+- **Identity:** an element is `(view name, key)`, a link unit `(view name, destination view)`; tests are referenced by `TestCase.id`.
 - **Types:** `import type { CoverageReport } from 'playwright-ui-coverage'`. **JSON Schema:** `playwright-ui-coverage/coverage.schema.json` (`schema/coverage.schema.json` in the package).
 - **Compatibility:** `schemaVersion` changes only on breaking changes. Fields may be added at any time, so ignore fields you don't know. `views[].screenshots` is marked `x-internal` (for the HTML report; not covered by the version).
 
@@ -622,26 +654,26 @@ const low = report.views.filter((v) => v.name.startsWith('/admin') && v.summary.
 npx playwright-ui-coverage compare base/coverage.json ui-coverage-report/coverage.json [--format markdown|json] [--out file] [--report-url <url>] [--title <text>]
 ```
 
-It reports the overall and per-view coverage delta, **new untested elements** (with why: `was tested`, `new element`, `new view`), **resolved** gaps (untested in base, tested now), added, removed and renamed views (matched by similar keys, like the baseline), and threshold checks whose status changed. Elements are matched by `(view, key)`.
+It reports the overall and per-view coverage delta, **new untested elements and links** (with why: `was tested`, `new element`/`new link`, `new view`), **resolved** gaps (untested in base, tested now), added, removed and renamed views (matched by similar keys, like the baseline), and threshold checks whose status changed. Elements are matched by `(view, key)`, link units by `(view, destination view)`.
 
 The markdown is meant for a sticky PR comment: it starts with `<!-- playwright-ui-coverage -->` (so a workflow can find and update its comment), lists only changed views, collapses long lists in `<details>` and truncates them at 50 entries, and is deterministic (no timestamps, stable order). For example:
 
 ```md
 <!-- playwright-ui-coverage -->
-### UI coverage: 38.6% (-1.8 pp)
+### UI coverage: 56.2% (-1.1 pp)
 
 | | Coverage | Tested | Views |
 |---|---:|---:|---:|
-| Base | 40.4% | 23/57 | 5 |
-| Head | **38.6%** | 22/57 | 5 |
+| Base | 57.3% | 51/89 | 7 |
+| Head | **56.2%** | 50/89 | 7 |
 
 **1 new untested element** · 0 resolved
 
-**Views changed (1), 4 unchanged**
+**Views changed (1), 6 unchanged**
 
 | View | Base | Head | Δ | New gaps | Resolved |
 |---|---:|---:|---:|---:|---:|
-| `/settings` | 30% (3/10) | 20% (2/10) | -10.0 pp | 1 | 0 |
+| `/settings` | 45.5% (5/11) | 36.4% (4/11) | -9.1 pp | 1 | 0 |
 
 **New untested elements (1)**
 

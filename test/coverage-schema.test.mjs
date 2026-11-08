@@ -88,17 +88,30 @@ function summaryFixture() {
   });
   return {
     generatedAt: new Date(0).toISOString(),
-    total: 3, tested: 1, percent: 33.3, failingOnly: 1, a11yHints: 1,
+    total: 5, tested: 2, percent: 40, totalLinks: 2, testedLinks: 1, failingOnly: 1, a11yHints: 1,
     routes: [
       {
-        route: '/users/:id', total: 3, tested: 1, percent: 33.3, failingOnly: 1, a11yHints: 1,
+        route: '/users/:id', total: 5, tested: 2, percent: 40, totalLinks: 2, testedLinks: 1, failingOnly: 1, a11yHints: 1,
         elements: [
           el({ key: 'a', a11yHints: [{ rule: 'no-name', message: 'No accessible name' }] }),
           el({ key: 'b', testedByFailing: ['f › t2'], failingTestIds: ['t2'] }),
           el({ key: 'c', tested: true, testedBy: ['f › t1'], testIds: ['t1'], interactionCounts: { click: 2 }, interactionTotal: 2, testCount: 1 }),
         ],
+        links: [
+          {
+            key: '/orders', label: 'link "Orders"', tested: false, destinations: ['/orders'], destinationCount: 1,
+            referrers: [el({ key: 'nav > a', label: 'link "Orders"', tag: 'a', role: 'link', name: 'Orders', attrs: { href: '/orders' } })],
+          },
+          {
+            key: '/users', label: 'link "Users" (+1 more)', tested: true, destinations: ['/users', '/users?page=2'], destinationCount: 2,
+            referrers: [el({ key: 'nav > a:nth-of-type(2)', label: 'link "Users"', tag: 'a' }), el({ key: '#next', label: 'link "Next"', tag: 'a' })],
+          },
+        ],
         screenshots: [{ source: 'screens/0.png', dpr: 2, test: 'f › t1', testId: 't1', boxes: [{ key: 'c', x: 1, y: 2, w: 3, h: 4 }] }],
       },
+    ],
+    untestedViews: [
+      { view: '/orders', destinations: ['/orders'], destinationCount: 1, referrers: [{ route: '/users/:id', label: 'link "Orders"', keys: ['nav > a'] }] },
     ],
     tests: [
       { id: 't1', title: 'f › t1', project: 'chromium', run: 0, passed: true, trace: 'abc.zip' },
@@ -117,9 +130,13 @@ describe('coverage.json', () => {
     assertValid(report);
     assert.equal(report.schemaVersion, COVERAGE_SCHEMA_VERSION);
     assert.deepEqual(report.summary, {
-      viewCount: 1, coverage: 33.3, testedElementsCount: 1, untestedElementsCount: 2,
-      testedLinksCount: 0, untestedLinksCount: 0, failingOnlyElementsCount: 1, a11yHintsCount: 1,
+      viewCount: 1, untestedViewCount: 1, coverage: 40, testedElementsCount: 1, untestedElementsCount: 2,
+      testedLinksCount: 1, untestedLinksCount: 1, failingOnlyElementsCount: 1, a11yHintsCount: 1,
     });
+    assert.deepEqual(report.views[0].links.map((l) => [l.key, l.tested, l.referrers.length]), [['/orders', false, 1], ['/users', true, 2]]);
+    assert.deepEqual(report.untestedViews, [
+      { name: '/orders', destinations: ['/orders'], destinationCount: 1, referrers: [{ view: '/users/:id', label: 'link "Orders"', keys: ['nav > a'] }] },
+    ]);
     assert.equal(report.views[0].reportUrl, 'index.html#%2Fusers%2F%3Aid');
     assert.deepEqual(report.views[0].elements[1].failingTestIds, ['t2']);
     assert.deepEqual(
@@ -172,8 +189,13 @@ describe('coverage.json', () => {
     const s = report.summary;
     assert.equal(s.viewCount, report.views.length);
     const sum = (k) => report.views.reduce((n, v) => n + v.summary[k], 0);
-    for (const k of ['testedElementsCount', 'untestedElementsCount', 'failingOnlyElementsCount', 'a11yHintsCount'])
+    for (const k of ['testedElementsCount', 'untestedElementsCount', 'testedLinksCount', 'untestedLinksCount', 'failingOnlyElementsCount', 'a11yHintsCount'])
       assert.equal(s[k], sum(k), k);
+    assert.equal(s.untestedViewCount, report.untestedViews.length);
+    for (const v of report.views) {
+      assert.equal(v.summary.testedLinksCount, v.links.filter((l) => l.tested).length, v.name);
+      assert.equal(v.summary.untestedLinksCount, v.links.filter((l) => !l.tested).length, v.name);
+    }
     const ids = new Set(report.tests.map((x) => x.id));
     for (const v of report.views)
       for (const e of v.elements) for (const id of [...e.testIds, ...e.failingTestIds]) assert.ok(ids.has(id), `unknown test id ${id}`);

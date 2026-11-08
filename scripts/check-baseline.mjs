@@ -63,9 +63,11 @@ try {
   fs.copyFileSync(report, path.join(tmp, 'base.json'));
   expect(base.baseline?.status === 'updated', `update run: baseline.status ${base.baseline?.status}, expected updated`);
   const baseline = readJson(baselineFile);
-  const untested = base.summary.untestedElementsCount;
-  const listed = Object.values(baseline.views).reduce((n, v) => n + v.untestedElements.length, 0);
-  expect(listed === untested, `baseline lists ${listed} untested elements, coverage.json has ${untested}`);
+  const untested = base.summary.untestedElementsCount + base.summary.untestedLinksCount;
+  const listed = Object.values(baseline.views).reduce((n, v) => n + v.untestedElements.length + (v.untestedLinks ?? []).length, 0);
+  expect(listed === untested, `baseline lists ${listed} untested elements and links, coverage.json has ${untested}`);
+  // The demo's untested link: /settings → /settings/audit (no test opens it).
+  expect(baseline.views['/settings']?.untestedLinks?.includes('/settings/audit'), 'baseline lacks the untested link /settings → /settings/audit');
 
   // 2. Same tests, check mode: passes, writes .next.json equal to the baseline.
   expect(runTests({ UICOV_DEMO_BASELINE: 'check' }) === 0, 'check run without changes failed');
