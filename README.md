@@ -80,9 +80,10 @@ Either way, recording covers every page and popup in the test's browser context.
 **3. Run your tests** and open `ui-coverage-report/index.html`.
 
 ```
-UI coverage: 61.1% (44/72: 28/55 elements, 16/17 links)
+UI coverage: 57.3% (51/89: 33/70 elements, 18/19 links)
   /              75%  6/8
   /embedded    62.5%  10/16
+  /long        41.2%  7/17
   /settings    45.5%  5/11
   /users       66.7%  8/12
   /users/:id     30%  3/10
@@ -91,7 +92,7 @@ UI coverage: 61.1% (44/72: 28/55 elements, 16/17 links)
   9 accessibility hint(s), informational (see the report)
 ```
 
-Coverage counts **units**: interactive elements plus [links](#links-and-untested-views), grouped by the view they lead to. In the demo, every view but `/settings/audit` is visited by some test, so 16 of the 17 link units are tested; the "View audit log" link on `/settings` is the untested one, and `/settings/audit` is listed as an untested view.
+Coverage counts **units**: interactive elements plus [links](#links-and-untested-views), grouped by the view they lead to. In the demo, every view but `/settings/audit` is visited by some test, so 18 of the 19 link units are tested; the "View audit log" link on `/settings` is the untested one, and `/settings/audit` is listed as an untested view.
 
 ## How it works
 
@@ -615,9 +616,9 @@ Next to `index.html`, the report folder has `coverage.json`: a versioned, machin
   "generatedAt": "2026-01-01T12:00:00.000Z",
   "generator": { "name": "playwright-ui-coverage", "version": "0.1.0" },
   "summary": {
-    "viewCount": 6, "untestedViewCount": 1, "coverage": 61.1,
-    "testedElementsCount": 28, "untestedElementsCount": 27,
-    "testedLinksCount": 16, "untestedLinksCount": 1,
+    "viewCount": 7, "untestedViewCount": 1, "coverage": 57.3,
+    "testedElementsCount": 33, "untestedElementsCount": 37,
+    "testedLinksCount": 18, "untestedLinksCount": 1,
     "failingOnlyElementsCount": 0, "a11yHintsCount": 9
   },
   "views": [
@@ -659,16 +660,16 @@ The markdown is meant for a sticky PR comment: it starts with `<!-- playwright-u
 
 ```md
 <!-- playwright-ui-coverage -->
-### UI coverage: 59.7% (-1.4 pp)
+### UI coverage: 56.2% (-1.1 pp)
 
 | | Coverage | Tested | Views |
 |---|---:|---:|---:|
-| Base | 61.1% | 44/72 | 6 |
-| Head | **59.7%** | 43/72 | 6 |
+| Base | 57.3% | 51/89 | 7 |
+| Head | **56.2%** | 50/89 | 7 |
 
 **1 new untested element** · 0 resolved
 
-**Views changed (1), 5 unchanged**
+**Views changed (1), 6 unchanged**
 
 | View | Base | Head | Δ | New gaps | Resolved |
 |---|---:|---:|---:|---:|---:|
