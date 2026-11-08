@@ -25,7 +25,7 @@ await open('/users');
 await page.screenshot({ path: path.join(out, 'report-overview.png') });
 
 // 2. Hovering a table row highlights the element on the screenshot.
-await page.locator('tr[data-key="button \\"Delete\\""]').hover();
+await page.locator('tr[data-key="[data-action=\\"delete-user\\"]"]').hover();
 await page.screenshot({ path: path.join(out, 'report-hover.png'), fullPage: true });
 
 // 3. "Untested only" on the settings page.

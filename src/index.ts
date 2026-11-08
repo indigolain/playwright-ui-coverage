@@ -33,4 +33,9 @@ export const test = uiCoverage;
 
 export { expect };
 export { defaultUiCoverageOptions, type UiCoverageOptions } from './options';
+export {
+  BUILTIN_ATTRIBUTE_FILTERS,
+  BUILTIN_IDENTITY_ATTRIBUTES,
+  type AttributeFilter,
+} from './identity';
 export type { TestCoverageData, Interaction, Snapshot, InventoryElement } from './types';
