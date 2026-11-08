@@ -130,7 +130,9 @@ try {
         if (el) el.hidden = false;
       }
     });
-    for (const e of r.elements) {
+    // Elements, and the <a> elements of link units (once each).
+    const linkEls = [...new Map((r.links ?? []).flatMap((l) => l.referrers).map((e) => [e.key, e])).values()];
+    for (const e of [...r.elements, ...linkEls]) {
       const expr = e.suggestedLocator.replace(/^await /, '').replace(/\.(click|fill|check|selectOption|setInputFiles|press)\(.*$/, '');
       const n = await new Function('page', `return ${expr}`)(page).count();
       const ok = expr.endsWith('.first()') ? n >= 1 : n === 1;
@@ -151,4 +153,4 @@ if (bad) {
   console.error(`${bad} suggested locator(s) didn't resolve`);
   process.exit(1);
 }
-console.log(`demo report: all suggested locators resolve (${report.views.reduce((n, r) => n + r.elements.length, 0)} elements)`);
+console.log(`demo report: all suggested locators resolve (${report.views.reduce((n, r) => n + r.elements.length, 0)} elements and their links' <a> elements)`);

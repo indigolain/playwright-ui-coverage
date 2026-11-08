@@ -237,6 +237,7 @@ export class Resolver {
       name: ref.name ?? '',
       nameFrom: ref.nameFrom ?? '',
       ...(frames.length ? { frames } : {}),
+      ...(ref.href ? { href: ref.href } : {}),
     };
   }
 }

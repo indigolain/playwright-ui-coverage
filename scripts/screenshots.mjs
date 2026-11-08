@@ -39,9 +39,15 @@ await page.getByLabel('Untested only').check();
 await page.mouse.move(0, 0);
 // The sticky header would cover the top of an element screenshot.
 await page.locator('header').evaluate((h) => (h.style.position = 'static'));
-await page.locator('.table-wrap').screenshot({ path: path.join(out, 'report-locators.png') });
+await page.locator('.table-wrap').first().screenshot({ path: path.join(out, 'report-locators.png') });
 
-// 5. Dark mode.
+// 5. Links of /settings by destination, with the untested view in the sidebar.
+await open('/settings');
+await page.mouse.move(0, 0);
+await page.locator('h2.section').evaluate((h) => h.scrollIntoView({ block: 'start' }));
+await page.screenshot({ path: path.join(out, 'report-links.png') });
+
+// 6. Dark mode.
 await page.emulateMedia({ colorScheme: 'dark' });
 await open('/');
 await page.screenshot({ path: path.join(out, 'report-dark.png') });
