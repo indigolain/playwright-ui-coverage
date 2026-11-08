@@ -15,6 +15,8 @@ import { renderHtml } from './html';
 import { DATA_FILE, DATA_FORMAT_VERSION, type StoredData } from './model/raw';
 import { resolveCoverageData, type CompiledRules, type RecordedCoverageData } from './model/resolve';
 import { pickRules, validateRules, type UiCoverageRules } from './model/rules';
+import { forDisplay, formatBaselineCheck, resolveBaselineOption, runBaseline, type BaselineOption } from './baseline';
+import { reportMarkdown } from './markdown';
 import { evaluateThresholds, formatThresholdResults, type ThresholdOption, type ThresholdResult } from './thresholds';
 
 export interface UiCoverageReporterOptions extends UiCoverageRules {
@@ -62,6 +64,19 @@ export interface UiCoverageReporterOptions extends UiCoverageRules {
    * the report can be rebuilt with `playwright-ui-coverage report`. Default: true.
    */
   saveData?: boolean;
+  /**
+   * Compare untested elements with a committed baseline file and fail only on
+   * new ones (ratchet). `'ui-coverage-baseline.json'` (a file name) or `true`
+   * is `{ file, mode: 'check' }`. The current state is always written to
+   * `<file>.next.json` (check mode). See README "Baseline".
+   */
+  baseline?: BaselineOption;
+  /**
+   * Append a markdown summary (coverage per view, thresholds, baseline) to
+   * the file in `$GITHUB_STEP_SUMMARY` when that variable is set (GitHub
+   * Actions). Default: false.
+   */
+  githubSummary?: boolean;
 }
 
 export const DATA_DIR = 'data';
@@ -132,13 +147,19 @@ export function readData(dataDir: string): ReportInput {
   return parsed;
 }
 
+/** Where relative paths in the options (`baseline.file`) are resolved from. */
+export interface ReportContext {
+  /** The Playwright config file's folder (reporter) or `--config`'s folder (CLI). Default: cwd. */
+  baseDir?: string;
+}
+
 export interface ReportResult {
   /** What coverage.json contains. */
   report: CoverageReport;
   /** Internal model the HTML report is rendered from. */
   summary: CoverageSummary;
   thresholds: ThresholdResult[];
-  /** True when a threshold wasn't met. */
+  /** True when a threshold wasn't met or the baseline check found new gaps. */
   failed: boolean;
 }
 
@@ -146,7 +167,13 @@ export interface ReportResult {
  * Applies the rules in `options` to `attempts` and writes `index.html`,
  * `coverage.json` and `screens/` into `outDir` (other files there are kept).
  */
-export function buildReport(input: ReportInput, options: UiCoverageReporterOptions, outDir: string): ReportResult {
+export function buildReport(
+  input: ReportInput,
+  options: UiCoverageReporterOptions,
+  outDir: string,
+  context: ReportContext = {},
+): ReportResult {
+  const baselineOption = resolveBaselineOption(options.baseline, context.baseDir ?? process.cwd());
   const rules = pickRules(options as Record<string, unknown>);
   validateRules(rules, 'reporter options');
   const cache = new Map<string, CompiledRules>();
@@ -201,6 +228,7 @@ export function buildReport(input: ReportInput, options: UiCoverageReporterOptio
 
   const thresholds = evaluateThresholds(summary, options.threshold);
   const report = toCoverageReport(summary, thresholds);
+  if (baselineOption) report.baseline = runBaseline(report, baselineOption, outDir);
   fs.writeFileSync(path.join(outDir, 'coverage.json'), JSON.stringify(report, null, 2));
   fs.writeFileSync(path.join(outDir, 'index.html'), renderHtml(summary));
 
@@ -223,5 +251,26 @@ export function buildReport(input: ReportInput, options: UiCoverageReporterOptio
   const { warnings, errors } = formatThresholdResults(thresholds, summary.routes.map((r) => r.route));
   warnings.forEach((w) => console.warn(w));
   if (errors.length) console.error(errors.join('\n') + '\n');
-  return { report, summary, thresholds, failed: errors.length > 0 };
+  let baselineFailed = false;
+  if (report.baseline) {
+    const lines = formatBaselineCheck(forDisplay(report.baseline, outDir));
+    if (lines.info.length) console.log(lines.info.join('\n') + (lines.errors.length ? '' : '\n'));
+    if (lines.errors.length) console.error(lines.errors.join('\n') + '\n');
+    baselineFailed = report.baseline.status === 'failed';
+  }
+  if (options.githubSummary) appendGithubSummary(report);
+  return { report, summary, thresholds, failed: errors.length > 0 || baselineFailed };
+}
+
+/** Appends `reportMarkdown` to `$GITHUB_STEP_SUMMARY`, when set. */
+export function appendGithubSummary(report: CoverageReport, env: NodeJS.ProcessEnv = process.env): boolean {
+  const file = env.GITHUB_STEP_SUMMARY;
+  if (!file) return false;
+  try {
+    fs.appendFileSync(file, reportMarkdown(report) + '\n');
+    return true;
+  } catch (e) {
+    console.warn(`UI coverage: can't write the GitHub step summary (${file}): ${(e as Error).message}`);
+    return false;
+  }
 }

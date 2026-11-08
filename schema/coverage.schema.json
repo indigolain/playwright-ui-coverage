@@ -44,7 +44,8 @@
       "type": "object",
       "description": "Reserved: the effective report configuration.",
       "additionalProperties": true
-    }
+    },
+    "baseline": { "$ref": "#/$defs/BaselineCheck", "description": "Result of the baseline option; absent when it isn't set." }
   },
   "$defs": {
     "CoverageCounts": {
@@ -201,6 +202,54 @@
         "testCount": { "type": "integer", "minimum": 0, "description": "Distinct tests whose interactions counted." },
         "interactionCount": { "type": "integer", "minimum": 0 },
         "testShare": { "type": "number", "description": "testCount as a percent of all tests." }
+      }
+    },
+    "BaselineCheck": {
+      "type": "object",
+      "description": "The baseline check: untested units compared with a committed baseline file. Only newGaps fail the run.",
+      "required": ["file", "mode", "status", "allowNewViews", "newGaps", "resolved", "addedViews", "removedViews", "renamedViews"],
+      "properties": {
+        "file": { "type": "string", "description": "Baseline file, relative to the folder of coverage.json ('/' separators)." },
+        "mode": { "enum": ["check", "update"] },
+        "status": { "enum": ["passed", "failed", "missing", "updated"], "description": "failed: there are newGaps. missing: no baseline file (only warns). updated: mode update rewrote the file." },
+        "nextFile": { "type": "string", "description": "Check mode: where the current state was written (<file>.next.json), relative like file." },
+        "allowNewViews": { "type": "boolean" },
+        "newGaps": { "type": "array", "items": { "$ref": "#/$defs/BaselineGap" }, "description": "Untested units not in the baseline. In update mode: what was added to the file." },
+        "resolved": { "type": "array", "items": { "$ref": "#/$defs/BaselineResolved" }, "description": "Units the baseline lists as untested that are now tested or gone." },
+        "addedViews": { "type": "array", "items": { "type": "string" }, "description": "Views not in the baseline (renames excluded)." },
+        "removedViews": { "type": "array", "items": { "type": "string" }, "description": "Baseline views not in this run (renames excluded); never fail." },
+        "renamedViews": { "type": "array", "items": { "$ref": "#/$defs/ViewRename" } }
+      }
+    },
+    "BaselineGap": {
+      "type": "object",
+      "required": ["view", "kind", "key", "label", "newView"],
+      "properties": {
+        "view": { "type": "string" },
+        "kind": { "enum": ["element", "link"] },
+        "key": { "type": "string" },
+        "label": { "type": "string" },
+        "newView": { "type": "boolean", "description": "The whole view is new (not in the baseline)." }
+      }
+    },
+    "BaselineResolved": {
+      "type": "object",
+      "required": ["view", "kind", "key", "reason"],
+      "properties": {
+        "view": { "type": "string" },
+        "kind": { "enum": ["element", "link"] },
+        "key": { "type": "string" },
+        "reason": { "enum": ["tested", "removed"] },
+        "label": { "type": "string", "description": "Present for reason tested." }
+      }
+    },
+    "ViewRename": {
+      "type": "object",
+      "description": "A view that disappeared and one that appeared with similar keys.",
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" }
       }
     }
   }

@@ -7,3 +7,5 @@ ui-coverage-report/
 .claude/
 perf-report/
 .ui-coverage-ci/
+demo/ui-coverage-baseline.json
+*.next.json

@@ -206,6 +206,65 @@ export interface CoverageReport {
   };
   /** Reserved: the effective report configuration. */
   config?: Record<string, unknown>;
+  /** Result of the `baseline` option; absent when it isn't set (or is `mode: 'off'`). */
+  baseline?: BaselineCheck;
+}
+
+/**
+ * The baseline check (`baseline` reporter option): untested units compared
+ * with a committed baseline file. Only a *new gap* (an untested unit the
+ * baseline doesn't list) fails the run.
+ */
+export interface BaselineCheck {
+  /** Baseline file, relative to the folder of coverage.json (`/` separators). */
+  file: string;
+  mode: 'check' | 'update';
+  /**
+   * `failed`: there are `newGaps`. `missing`: no baseline file yet (only warns).
+   * `updated`: `mode: 'update'` rewrote the file (never fails).
+   */
+  status: 'passed' | 'failed' | 'missing' | 'updated';
+  /** The current state, written in check mode (`<file>` with `.next.json`), relative like `file`. */
+  nextFile?: string;
+  /** Whether untested units of views the baseline doesn't have are allowed. */
+  allowNewViews: boolean;
+  /** Untested units not in the baseline, by view then key. In update mode: what was added to the file. */
+  newGaps: BaselineGap[];
+  /** Units the baseline lists as untested that are now tested or gone. */
+  resolved: BaselineResolved[];
+  /** Views in this run but not in the baseline (not counting renames). */
+  addedViews: string[];
+  /** Views in the baseline but not in this run (not counting renames). Never fail the run. */
+  removedViews: string[];
+  /** Views that look renamed (similar untested keys), compared with their old baseline entry. */
+  renamedViews: ViewRename[];
+}
+
+/** An untested unit the baseline doesn't list. */
+export interface BaselineGap {
+  view: string;
+  kind: 'element' | 'link';
+  key: string;
+  label: string;
+  /** True when the whole view is new (not in the baseline). */
+  newView: boolean;
+}
+
+/** A unit the baseline lists as untested that isn't any more. */
+export interface BaselineResolved {
+  view: string;
+  kind: 'element' | 'link';
+  key: string;
+  /** `tested`: now tested. `removed`: no longer in the view. */
+  reason: 'tested' | 'removed';
+  /** Present for `tested`. */
+  label?: string;
+}
+
+/** A view that disappeared and one that appeared with similar keys. */
+export interface ViewRename {
+  from: string;
+  to: string;
 }
 
 let cachedVersion: string | undefined;

@@ -13,6 +13,7 @@ import path from 'node:path';
 import { describe, it } from 'vitest';
 import { toCoverageReport, COVERAGE_SCHEMA_VERSION } from '../src/coverage-report';
 import { evaluateThresholds } from '../src/thresholds';
+import { checkBaseline } from '../src/baseline';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -147,6 +148,19 @@ describe('coverage.json', () => {
     assert.equal(errors.length, 4, errors.join('\n'));
     // Reserved for the effective configuration: any object.
     assertValid({ ...report, config: { viewBy: 'url', nested: { a: 1 } } });
+  });
+
+  it('a baseline check result matches the schema', () => {
+    const report = toCoverageReport(summaryFixture(), []);
+    const diff = checkBaseline(
+      { baselineVersion: 1, views: { '/users/:id': { untestedElements: ['c', 'gone'] }, '/old': { untestedElements: ['x'] } } },
+      report,
+    );
+    assert.ok(diff.newGaps.length && diff.resolved.length && diff.removedViews.length);
+    assertValid({
+      ...report,
+      baseline: { file: '../ui-coverage-baseline.json', mode: 'check', status: 'failed', nextFile: '../ui-coverage-baseline.next.json', allowNewViews: false, ...diff, renamedViews: [{ from: '/a', to: '/b' }] },
+    });
   });
 
   it('the demo report matches the schema', (ctx) => {

@@ -27,6 +27,15 @@ const demoThresholds =
 // of in the reporter options; the report must be the same (scripts/check-rebuild.mjs).
 const legacyRules = !!process.env.UICOV_DEMO_LEGACY;
 
+// UICOV_DEMO_BASELINE=check|update turns on baseline mode (scripts/check-baseline.mjs):
+// the baseline is UICOV_DEMO_BASELINE_FILE, default demo/ui-coverage-baseline.json (gitignored).
+const demoBaseline = process.env.UICOV_DEMO_BASELINE
+  ? {
+      file: process.env.UICOV_DEMO_BASELINE_FILE || 'demo/ui-coverage-baseline.json',
+      mode: process.env.UICOV_DEMO_BASELINE as 'check' | 'update',
+    }
+  : undefined;
+
 // BROWSER=firefox|webkit runs the demo in another engine (CI runs all three).
 const browser = process.env.BROWSER || 'chromium';
 const deviceFor: Record<string, string> = {
@@ -47,6 +56,9 @@ const reporter: ReporterDescription[] = [
     ...(legacyRules ? {} : uiCoverageRules),
     countFailedTests: !!process.env.UICOV_COUNT_FAILED,
     threshold: demoThresholds,
+    baseline: demoBaseline,
+    // UICOV_DEMO_SUMMARY=1 appends a markdown summary to $GITHUB_STEP_SUMMARY (when set).
+    githubSummary: !!process.env.UICOV_DEMO_SUMMARY,
   }],
 ];
 // CI checks that recording adds no steps to the user's report.

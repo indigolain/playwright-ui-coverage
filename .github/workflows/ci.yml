@@ -82,6 +82,12 @@ jobs:
         env:
           CI: true
           UICOV_MODE: register
+      # Baseline mode, compare and the step summary, end to end (scripts/check-baseline.mjs).
+      - name: check:baseline
+        if: matrix.browser == 'chromium'
+        run: npm run check:baseline
+        env:
+          CI: true
       - uses: actions/upload-artifact@v5
         if: failure()
         with:
