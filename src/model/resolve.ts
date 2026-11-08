@@ -7,19 +7,21 @@
  * Identity, in order: `data-uicov-id` → identity attributes
  * (`significantAttributes`, then built-in test ids) → `id` → `name` →
  * structural `tag:nth-of-type(n)` path up to the nearest identified ancestor.
+ * Elements in frames and shadow trees are prefixed by their host's key and `>>`.
  */
 import type { Interaction, InventoryElement, Snapshot, TestCoverageData } from '../types';
 import { inputType, roleOf } from './elements';
-import { RECORDING_FORMAT_VERSION, type RawCoverageData, type RawElementRef, type RawNode } from './raw';
+import { READABLE_RECORDING_FORMAT_VERSIONS, type RawCoverageData, type RawElementRef, type RawNode } from './raw';
 import {
   compileAttributeFilters,
+  compileRuleSelector,
   identityAttributes,
   mergeRules,
   UICOV_ID_ATTRIBUTE,
   type CompiledAttributeFilter,
   type UiCoverageRules,
 } from './rules';
-import { compileSelector, type CompiledSelector, type SelectorNode } from './selector';
+import { DOCUMENT_TAG, treeParent, type CompiledSelector, type SelectorNode } from './selector';
 
 /** What a `ui-coverage` attachment (or a stored attempt) may contain. */
 export type RecordedCoverageData = RawCoverageData | TestCoverageData;
@@ -39,8 +41,15 @@ export function compileRules(rules: UiCoverageRules): CompiledRules {
     identityAttributes: identityAttributes(rules),
     filters: compileAttributeFilters(rules),
     // data-uicov-ignore is an alias too; the browser already applied it, this keeps both consistent.
-    ignore: ['[data-uicov-ignore]', ...new Set(rules.ignoreSelectors ?? [])].map(compileSelector),
+    ignore: ['[data-uicov-ignore]', ...uniqueBy(rules.ignoreSelectors ?? [], (s) => JSON.stringify(s))].map(
+      compileRuleSelector,
+    ),
   };
+}
+
+function uniqueBy<T>(items: T[], id: (t: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((t) => !seen.has(id(t)) && !!seen.add(id(t)));
 }
 
 interface Node extends SelectorNode {
@@ -48,6 +57,12 @@ interface Node extends SelectorNode {
 }
 
 const quote = (v: string) => JSON.stringify(v);
+/** The top element of the node's tree: `<html>`, or a shadow root's top-level element. Its parent, if any, is a boundary. */
+const treeTop = (n: Node): Node => {
+  let top = n;
+  for (let p = treeParent(top); p; p = treeParent(top)) top = p;
+  return top;
+};
 const isRow = (n: Node) => n.tag === 'tr' || n.attrs.role === 'row';
 const DETAIL_ATTRS = new Set(['id', 'name', 'role', 'type', 'aria-label', 'href', 'tabindex', 'contenteditable']);
 const directive = (n: Node) => (n.attrs['data-uicov-interactive'] ?? '').trim().toLowerCase();
@@ -142,7 +157,8 @@ export class Resolver {
   /**
    * Structural fallback: `tag:nth-of-type(n)` steps (index only when there are
    * same-tag siblings) up to the nearest ancestor that has an identity, or up
-   * to <body>. Table rows are repeated data, so they get no index.
+   * to <body> (in a shadow tree: up to its top-level element). Table rows are
+   * repeated data, so they get no index.
    */
   private structuralKey(el: Node): string {
     const steps: string[] = [];
@@ -158,18 +174,38 @@ export class Resolver {
       let step = cur.tag;
       if (cur.parent && !isRow(cur) && cur.of > 1) step += `:nth-of-type(${cur.nth})`;
       steps.unshift(step);
-      cur = cur.parent;
+      cur = treeParent(cur);
     }
     return steps.join(' > ');
   }
 
+  /**
+   * The element's key: its identity (or structural key) in its own tree,
+   * prefixed by the key of the tree's host (`<iframe>` or shadow host) and
+   * ` >> `, recursively: `iframe[data-testid="pay"] >> [data-testid="card"]`.
+   * A `data-uicov-id` value is used as-is, without a prefix.
+   */
   key(node: Node): string {
     let k = this.keys.get(node);
     if (k === undefined) {
-      k = this.identityOf(node) || this.structuralKey(node);
+      const explicit = node.attrs[UICOV_ID_ATTRIBUTE]?.trim();
+      if (explicit) k = explicit;
+      else {
+        k = this.identityOf(node) || this.structuralKey(node);
+        const boundary = treeTop(node).parent;
+        if (boundary) k = `${boundary.parent ? this.key(boundary.parent) : boundary.tag} >> ${k}`;
+      }
       this.keys.set(node, k);
     }
     return k;
+  }
+
+  /** Keys of the `<iframe>`/`<frame>` elements the node is inside, outermost first. */
+  frames(node: Node): string[] {
+    const out: string[] = [];
+    for (let n = node.parent; n; n = n.parent)
+      if (n.tag === DOCUMENT_TAG && n.parent) out.unshift(this.key(n.parent));
+    return out;
   }
 
   /** `role "accessible name"`, display only. */
@@ -192,6 +228,7 @@ export class Resolver {
     const type = inputType(node.attrs);
     if (node.tag === 'input' && (type === 'radio' || type === 'checkbox') && node.attrs.value !== undefined)
       attrs.value = node.attrs.value.slice(0, 200);
+    const frames = this.frames(node);
     return {
       key: this.key(node),
       label: this.label(ref, node),
@@ -199,6 +236,7 @@ export class Resolver {
       role: roleOf(node),
       name: ref.name ?? '',
       nameFrom: ref.nameFrom ?? '',
+      ...(frames.length ? { frames } : {}),
     };
   }
 }
@@ -211,10 +249,10 @@ export function resolveCoverageData(
 ): TestCoverageData {
   // Pre-0.2 recordings already carry keys and labels computed in the browser.
   if (!isRawData(data)) return data;
-  if (data.formatVersion !== RECORDING_FORMAT_VERSION) {
+  if (!READABLE_RECORDING_FORMAT_VERSIONS.includes(data.formatVersion)) {
     throw new Error(
       `[playwright-ui-coverage] unsupported recording formatVersion ${data.formatVersion} ` +
-        `(this version reads ${RECORDING_FORMAT_VERSION}); update playwright-ui-coverage`,
+        `(this version reads ${READABLE_RECORDING_FORMAT_VERSIONS.join(', ')}); update playwright-ui-coverage`,
     );
   }
   const effective = mergeRules(rules, data.rules);

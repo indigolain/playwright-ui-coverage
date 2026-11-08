@@ -10,12 +10,66 @@
  *   - descendant (` `) and child (`>`) combinators, selector lists (`,`)
  *   - `:not()`, `:is()`, `:where()` (with selector lists),
  *     `:nth-of-type()`, `:nth-last-of-type()`, `:first-of-type`, `:last-of-type`, `:only-of-type`, `:root`
+ *   - host chains (`iframe#pay >> button`), see `compileSelector`
  *
  * Not supported (throws `SelectorError`): sibling combinators (`+`, `~`),
  * `:has()`, `:nth-child()` and friends, state pseudo-classes (`:checked`,
  * `:hover`, `:disabled`…), pseudo-elements. Those need parts of the DOM or
  * live state that aren't recorded.
  */
+
+/**
+ * Tree boundaries in the node table are pseudo-nodes: `#shadow-root` (parent:
+ * the shadow host) and `#document` (parent: the `<iframe>`/`<frame>` element).
+ * Combinators don't cross them, like CSS in the browser.
+ */
+export const SHADOW_ROOT_TAG = '#shadow-root';
+export const DOCUMENT_TAG = '#document';
+
+/** Is `node` a tree boundary pseudo-node (`#shadow-root`, `#document`)? */
+export const isBoundary = (node: { tag: string }) => node.tag.charCodeAt(0) === 35; // '#'
+
+/** Parent in the same tree (undefined at a tree's top). */
+export const treeParent = <T extends { tag: string; parent?: T }>(node: T): T | undefined =>
+  node.parent && !isBoundary(node.parent) ? node.parent : undefined;
+
+/**
+ * The hosts of the trees `node` is in: shadow hosts and frame elements,
+ * outermost first. Empty for an element of the top document.
+ */
+export function hostsOf<T extends { tag: string; parent?: T }>(node: T): T[] {
+  const out: T[] = [];
+  for (let n = node.parent; n; n = n.parent) if (isBoundary(n) && n.parent) out.unshift(n.parent);
+  return out;
+}
+
+/**
+ * Splits a host chain (`iframe#pay >> my-widget >> button`) at `>>` outside
+ * quotes, brackets and parentheses. Parts are trimmed.
+ */
+export function splitHostChain(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === '\\') i++;
+    else if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth--;
+    else if (c === '>' && s[i + 1] === '>' && depth === 0) {
+      out.push(s.slice(start, i).trim());
+      start = i + 2;
+      i++;
+    }
+  }
+  out.push(s.slice(start).trim());
+  return out;
+}
 
 /** What the engine needs to know about an element. */
 export interface SelectorNode {
@@ -48,7 +102,7 @@ export interface CompiledSelector {
   source: string;
   /** Does `node` itself match? */
   matches(node: SelectorNode): boolean;
-  /** Does `node` or one of its ancestors match (like `Element.closest`)? */
+  /** Does `node` or one of its ancestors in the same tree match (like `Element.closest`)? */
   closest(node: SelectorNode): boolean;
 }
 
@@ -321,7 +375,7 @@ function matchCompound(node: SelectorNode, c: Compound): boolean {
         if (!matchNth(node, s)) return false;
         break;
       case 'root':
-        if (node.parent || node.tag !== 'html') return false;
+        if (node.tag !== 'html' || (node.parent && node.parent.tag !== DOCUMENT_TAG)) return false;
         break;
       case 'not':
         if (s.list.some((x) => matchComplex(node, x, x.compounds.length - 1))) return false;
@@ -335,22 +389,53 @@ function matchCompound(node: SelectorNode, c: Compound): boolean {
 }
 
 function matchComplex(node: SelectorNode, sel: Complex, i: number): boolean {
-  if (!matchCompound(node, sel.compounds[i])) return false;
+  if (isBoundary(node) || !matchCompound(node, sel.compounds[i])) return false;
   if (i === 0) return true;
-  if (sel.combinators[i - 1] === '>') return !!node.parent && matchComplex(node.parent, sel, i - 1);
-  for (let a = node.parent; a; a = a.parent) if (matchComplex(a, sel, i - 1)) return true;
+  const parent = treeParent(node);
+  if (sel.combinators[i - 1] === '>') return !!parent && matchComplex(parent, sel, i - 1);
+  for (let a = parent; a; a = treeParent(a)) if (matchComplex(a, sel, i - 1)) return true;
   return false;
 }
 
-/** Parses `source`. Throws `SelectorError` for invalid or unsupported syntax. */
-export function compileSelector(source: string): CompiledSelector {
+const matchList = (node: SelectorNode, list: Complex[]) =>
+  list.some((c) => matchComplex(node, c, c.compounds.length - 1));
+
+function parseList(source: string): Complex[] {
+  if (!source) throw new SelectorError('empty selector in host chain');
+  return new Parser(source).list();
+}
+
+/**
+ * Parses `source`. Throws `SelectorError` for invalid or unsupported syntax.
+ *
+ * Selectors match within one tree (a document or a shadow root). A host chain
+ * restricts where: `iframe#pay >> button` (or `button` with `documentScope:
+ * 'iframe#pay'`) matches buttons in any tree inside an element matching
+ * `iframe#pay`. Each host selector matches the host in its own tree; the hosts
+ * must appear in that order in the element's host chain (outermost first), not
+ * necessarily directly nested. Without a host chain, a selector matches in every tree.
+ */
+export function compileSelector(source: string, documentScope?: string): CompiledSelector {
   if (typeof source !== 'string' || !source.trim()) throw new SelectorError('empty selector');
-  const list = new Parser(source).list();
+  if (documentScope !== undefined && (typeof documentScope !== 'string' || !documentScope.trim()))
+    throw new SelectorError('empty documentScope');
+  const parts = splitHostChain(source);
+  const scope = [...(documentScope === undefined ? [] : splitHostChain(documentScope)), ...parts.slice(0, -1)].map(
+    parseList,
+  );
+  const list = parseList(parts[parts.length - 1]);
+  /** Greedy: each scope selector takes the next host it matches, outermost first. */
+  const inScope = (node: SelectorNode): boolean => {
+    if (!scope.length) return true;
+    let i = 0;
+    for (const host of hostsOf(node)) if (i < scope.length && matchList(host, scope[i])) i++;
+    return i === scope.length;
+  };
   const memo = new WeakMap<SelectorNode, boolean>();
   const matches = (node: SelectorNode) => {
     let r = memo.get(node);
     if (r === undefined) {
-      r = list.some((c) => matchComplex(node, c, c.compounds.length - 1));
+      r = matchList(node, list) && inScope(node);
       memo.set(node, r);
     }
     return r;
@@ -359,7 +444,8 @@ export function compileSelector(source: string): CompiledSelector {
   const closest = (node: SelectorNode): boolean => {
     let r = closestMemo.get(node);
     if (r === undefined) {
-      r = matches(node) || (!!node.parent && closest(node.parent));
+      const parent = treeParent(node);
+      r = matches(node) || (!!parent && closest(parent));
       closestMemo.set(node, r);
     }
     return r;

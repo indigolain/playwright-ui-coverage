@@ -7,7 +7,7 @@
  * matching `RECORDED_CANDIDATES`, flagged as not interactive, so later
  * report-time rules can use them without re-recording.
  */
-import type { SelectorNode } from './selector';
+import { isBoundary, type SelectorNode } from './selector';
 
 /**
  * Recorded in addition to the interactive elements: things that are often
@@ -41,7 +41,8 @@ export const inputType = (attrs: Record<string, string>) => (attrs.type ?? '').t
 
 /** `HTMLElement.isContentEditable` from the `contenteditable` attributes on the node and its ancestors. */
 export function isContentEditable(node: SelectorNode | undefined): boolean {
-  for (let n = node; n; n = n.parent) {
+  // Editing hosts don't extend into shadow trees or frames.
+  for (let n = node; n && !isBoundary(n); n = n.parent) {
     const v = n.attrs.contenteditable;
     if (v === undefined) continue;
     const s = v.trim().toLowerCase();

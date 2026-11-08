@@ -115,7 +115,7 @@
       "description": "One interactive element. (view name, key) identifies it across runs while the identity rules don't change.",
       "required": ["key", "label", "tag", "instances", "tested", "testIds", "failingTestIds", "interactionCounts"],
       "properties": {
-        "key": { "type": "string", "description": "Identity: a structural selector, unique within the view." },
+        "key": { "type": "string", "description": "Identity: a structural selector, unique within the view. Inside an iframe or open shadow root, prefixed by the host's key and ' >> '." },
         "label": { "type": "string", "description": "role \"name\"; '(+N variants)' when instances sharing the key had different labels." },
         "tag": { "type": "string", "description": "Lowercase tag name; '?' for an element seen only in an interaction." },
         "instances": { "type": "integer", "minimum": 1, "description": "Max number of instances seen at once." },
@@ -131,6 +131,7 @@
         "name": { "type": "string", "description": "Recorded accessible name." },
         "nameFrom": { "type": "string", "description": "aria-labelledby, aria-label, label, placeholder, title, alt, value, text or name." },
         "attrs": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Identifying attributes." },
+        "frames": { "type": "array", "items": { "type": "string" }, "description": "Keys of the iframe elements the element is inside, outermost first (each a prefix of key). Absent in the top document." },
         "suggestedLocator": { "type": "string", "description": "One line of Playwright code that interacts with the element. Heuristic: the text may change between versions." },
         "a11yHints": { "type": "array", "items": { "$ref": "#/$defs/A11yHint" }, "description": "Absent when there are none." }
       }

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme — Embedded</title><link rel="stylesheet" href="/style.css">
+<style>
+  iframe { display: block; width: 100%; max-width: 560px; background: #fff; }
+  .help { height: 150px; border: 4px solid #d1d5db; padding: 6px; border-radius: 8px; }
+  .payments { height: 180px; border: 1px solid #d1d5db; border-radius: 8px; }
+  .muted { color: #6b7280; }
+  .spacer { height: 420px; }
+</style>
+</head>
+<body>
+<nav><a href="/">Home</a><a href="/users">Users</a><a href="/settings">Settings</a></nav>
+<main>
+  <h1>Embedded</h1>
+  <p class="muted">Elements inside a web component's shadow root and inside iframes (same-origin and cross-origin).</p>
+
+  <h2>Web component (open shadow root)</h2>
+  <!-- Its buttons, input and link are in the shadow root: keys start with `promo-banner >>`. -->
+  <promo-banner data-testid="promo"></promo-banner>
+
+  <h2>Cross-origin iframe</h2>
+  <!-- Served from the other host name (localhost ↔ 127.0.0.1), so it is a different origin (an
+       out-of-process frame: Chromium only paints it in screenshots while it is in the viewport). -->
+  <iframe class="payments" data-testid="payments" title="Payment"></iframe>
+
+  <h2>Closed shadow root</h2>
+  <!-- A closed root is opaque: only the host counts (it is a role=button itself). -->
+  <closed-toggle role="button" tabindex="0" aria-label="Closed toggle" data-testid="closed-toggle"></closed-toggle>
+
+  <div class="spacer"></div>
+
+  <h2>Same-origin iframe</h2>
+  <!-- Below the fold, with a border and padding: boxes inside are offset by the frame's content box
+       and the page's scroll position. Its last link is scrolled out of the frame. -->
+  <iframe class="help" data-testid="help" title="Help" src="/frames/help"></iframe>
+</main>
+<script>
+  customElements.define('promo-banner', class extends HTMLElement {
+    connectedCallback() {
+      if (this.shadowRoot) return;
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = `
+        <style>
+          .box { border: 1px solid #93c5fd; background: #eff6ff; border-radius: 8px; padding: 12px; }
+          button { margin-right: 6px; }
+        </style>
+        <div class="box">
+          <p>20% off this week. <a href="/users">See who's already in</a></p>
+          <button data-testid="claim">Claim offer</button>
+          <button>Dismiss</button>
+          <label>Email me <input type="email" name="email" placeholder="you@example.com"></label>
+          <p class="status" aria-live="polite"></p>
+        </div>`;
+      const status = root.querySelector('.status');
+      root.querySelector('[data-testid=claim]').addEventListener('click', () => (status.textContent = 'Claimed!'));
+      root.querySelector('input').addEventListener('change', (e) => (status.textContent = `We'll write to ${e.target.value}`));
+    }
+  });
+
+  customElements.define('closed-toggle', class extends HTMLElement {
+    connectedCallback() {
+      if (this.done) return;
+      this.done = true;
+      const root = this.attachShadow({ mode: 'closed' });
+      root.innerHTML = `<style>span { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #e5e7eb; cursor: pointer; }</style>
+        <span>Off</span>`;
+      const label = root.querySelector('span');
+      this.addEventListener('click', () => (label.textContent = label.textContent === 'Off' ? 'On' : 'Off'));
+    }
+  });
+
+  // Cross-origin: the same server under the other host name.
+  const other = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+  document.querySelector('[data-testid=payments]').src = `${location.protocol}//${other}:${location.port}/frames/card`;
+</script>
+</body>
+</html>

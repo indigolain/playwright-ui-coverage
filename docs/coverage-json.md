@@ -83,7 +83,7 @@ A view is a page URL normalized by `normalizeUrl` (`/users/42?tab=x` → `/users
 
 | Field | Type | |
 |---|---|---|
-| `key` | string | Structural selector, unique within the view. |
+| `key` | string | Structural selector, unique within the view. Inside an iframe or open shadow root, prefixed by the host's key and ` >> ` (`iframe[data-testid="payments"] >> [data-testid="card"]`, `promo-banner >> button:nth-of-type(2)`). |
 | `label` | string | `role "name"`, with ` (+N variants)` when instances sharing the key had different labels. For display. |
 | `tag` | string | Lowercase tag name; `?` for an element only seen in an interaction, never in an inventory. |
 | `instances` | integer | Max number of instances seen at once. |
@@ -95,6 +95,7 @@ A view is a page URL normalized by `normalizeUrl` (`/users/42?tab=x` → `/users
 | `name` | string, optional | Recorded accessible name. |
 | `nameFrom` | string, optional | Where `name` came from: `aria-labelledby`, `aria-label`, `label`, `placeholder`, `title`, `alt`, `value`, `text` or `name`. |
 | `attrs` | `Record<string, string>`, optional | Identifying attributes (`id`, `name`, `role`, `type`, `aria-label`, `href`, `tabindex`, `contenteditable`, `data-*`, your `significantAttributes`). |
+| `frames` | string[], optional | Keys of the `<iframe>` elements the element is inside, outermost first; each is a prefix of `key`. Absent in the top document. |
 | `suggestedLocator` | string, optional | One line of Playwright code that interacts with the element. Heuristic. |
 | `a11yHints` | `{ rule, message }[]`, optional | Absent when there are none. `rule` is one of `no-name`, `placeholder-only`, `duplicate-name`, `not-focusable`, `no-role`; more may be added. |
 
