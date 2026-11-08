@@ -222,27 +222,33 @@ export function tracker(args: TrackerArgs): void {
   const clean = (s: unknown): string =>
     typeof s === 'string' ? s.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
 
-  const nameOf = (el: Element): string => {
+  /** Accessible name and where it came from (`nameFrom`, used for locators and a11y hints). Display only. */
+  const nameOf = (el: Element): { name: string; nameFrom: string } => {
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
       const text = labelledBy
         .split(/\s+/)
         .map((id) => document.getElementById(id)?.textContent || '')
         .join(' ');
-      if (clean(text)) return clean(text);
+      if (clean(text)) return { name: clean(text), nameFrom: 'aria-labelledby' };
     }
     const input = el as HTMLInputElement;
     const isButtonInput = el.tagName === 'INPUT' && ['submit', 'button', 'reset'].includes(input.type);
-    return (
-      clean(el.getAttribute('aria-label')) ||
-      clean(input.labels?.[0]?.textContent) ||
-      clean(el.getAttribute('placeholder')) ||
-      clean(el.getAttribute('title')) ||
-      clean(el.getAttribute('alt')) ||
-      (isButtonInput ? clean(input.value) : '') ||
-      clean((el as HTMLElement).innerText) ||
-      clean(el.getAttribute('name'))
-    );
+    const sources: [string, () => unknown][] = [
+      ['aria-label', () => el.getAttribute('aria-label')],
+      ['label', () => input.labels?.[0]?.textContent],
+      ['placeholder', () => el.getAttribute('placeholder')],
+      ['title', () => el.getAttribute('title')],
+      ['alt', () => el.getAttribute('alt')],
+      ['value', () => (isButtonInput ? input.value : '')],
+      ['text', () => (el as HTMLElement).innerText],
+      ['name', () => el.getAttribute('name')], // not an accessible name; display only
+    ];
+    for (const [from, get] of sources) {
+      const v = clean(get());
+      if (v) return { name: v, nameFrom: from };
+    }
+    return { name: '', nameFrom: '' };
   };
 
   // ---- Raw element facts ------------------------------------------------
@@ -303,8 +309,11 @@ export function tracker(args: TrackerArgs): void {
 
   const ref = (el: Element, add: (el: Element) => number): RawElementRef => {
     const out: RawElementRef = { node: add(el) };
-    const name = nameOf(el);
-    if (name) out.name = name;
+    const { name, nameFrom } = nameOf(el);
+    if (name) {
+      out.name = name;
+      out.nameFrom = nameFrom;
+    }
     if ((el.tagName === 'A' || el.tagName === 'AREA') && el.hasAttribute('href')) {
       // Only when it can't be derived from the attribute and the page URL (a <base> element).
       const resolved = (el as HTMLAnchorElement).href;

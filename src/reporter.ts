@@ -58,6 +58,8 @@ class UiCoverageReporter implements Reporter {
   private outputFolder = 'ui-coverage-report';
   private componentTestConfig = false;
   private htmlReport: HtmlReportLink | undefined;
+  /** `use.testIdAttribute` of the first project that sets it. */
+  private configTestIdAttribute: string | undefined;
 
   constructor(private options: UiCoverageReporterOptions = {}) {
     // Fail fast on bad rules (invalid regex, unsupported selector syntax).
@@ -70,6 +72,7 @@ class UiCoverageReporter implements Reporter {
     this.outputFolder = path.resolve(configDir, this.options.outputFolder ?? 'ui-coverage-report');
     this.componentTestConfig = CT_CONFIG_KEY in config;
     this.htmlReport = resolveHtmlReport(config.reporter, configDir, this.outputFolder, this.options.htmlReport);
+    this.configTestIdAttribute = config.projects.map((p) => p.use?.testIdAttribute).find((a): a is string => !!a);
   }
 
   onTestEnd(test: TestCase, result: TestResult) {
@@ -102,6 +105,7 @@ class UiCoverageReporter implements Reporter {
       attempts: this.tests,
       componentTestConfig: this.componentTestConfig,
       ...(this.htmlReport ? { htmlReport: this.htmlReport } : {}),
+      ...(this.configTestIdAttribute ? { testIdAttribute: this.configTestIdAttribute } : {}),
     };
     if (this.options.saveData !== false) {
       // Build from what was written, so `playwright-ui-coverage report` on

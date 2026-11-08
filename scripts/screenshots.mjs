@@ -33,7 +33,15 @@ await open('/settings');
 await page.getByLabel('Untested only').check();
 await page.screenshot({ path: path.join(out, 'report-untested-only.png') });
 
-// 4. Dark mode.
+// 4. Suggested locators and accessibility hints in the table.
+await open('/users/:id');
+await page.getByLabel('Untested only').check();
+await page.mouse.move(0, 0);
+// The sticky header would cover the top of an element screenshot.
+await page.locator('header').evaluate((h) => (h.style.position = 'static'));
+await page.locator('.table-wrap').screenshot({ path: path.join(out, 'report-locators.png') });
+
+// 5. Dark mode.
 await page.emulateMedia({ colorScheme: 'dark' });
 await open('/');
 await page.screenshot({ path: path.join(out, 'report-dark.png') });

@@ -42,6 +42,11 @@ export interface RawElementRef {
   node: number;
   /** Accessible name (aria-labelledby, aria-label, label, placeholder, title, alt, text…), capped at 60 chars. */
   name?: string;
+  /**
+   * Where `name` came from: `aria-labelledby`, `aria-label`, `label`,
+   * `placeholder`, `title`, `alt`, `value`, `text` or `name` (the name attribute).
+   */
+  nameFrom?: string;
   /** Resolved destination of `<a href>` / `<area href>`, only when it differs from `new URL(href, snapshot url)` (a `<base>` element). */
   href?: string;
 }
@@ -152,5 +157,7 @@ export interface StoredData {
   componentTestConfig?: boolean;
   /** Playwright's HTML report, `path` relative to the report folder (the data folder's parent). */
   htmlReport?: HtmlReportLink;
+  /** `use.testIdAttribute` from the run's config, for suggested locators. */
+  testIdAttribute?: string;
   attempts: StoredAttempt[];
 }

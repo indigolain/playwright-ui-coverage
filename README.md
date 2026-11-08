@@ -22,7 +22,11 @@ See which buttons, links and inputs your Playwright E2E tests **actually touch**
 
 **Spot repeated setup.** The element table shows how many times each element was used (**Interactions**) and by how many tests (**Tests**); click either header to sort by it. **Most repeated elements** in the sidebar lists the elements used by the most tests across the report, such as a login form that every test fills in first.
 
-**Large suites.** Filter routes by name (press `/`), sort them by name, lowest coverage or most untested elements, and screenshots load lazily. A synthetic report with 300 routes × 80 elements opens in under 0.1 s and switching routes takes a few milliseconds (`npm run perf` to measure).
+**Write the missing tests faster.** Each untested element has a ready-to-paste Playwright line with a *Copy* button, and *Copy untested as test skeleton* gives you a whole test for the route. Click an element's box on the screenshot to jump to its row. Elements also get small, informational **accessibility hints** (no accessible name, links with the same name going to different places, controls keyboard users can't reach):
+
+<img src="docs/report-locators.png" alt="The /users/:id table: each untested element has a suggested locator such as await page.getByRole('button', { name: 'Edit' }).click(); with a Copy button, and blue accessibility hints such as 'No accessible name' under some elements" width="720">
+
+**Large suites.** Filter routes by name (press `/`), sort them by name, lowest coverage or most untested elements, and screenshots load lazily. A synthetic report with 300 routes × 80 elements opens in about 0.1 s and switching routes takes a few milliseconds (`npm run perf` to measure).
 
 **Dark mode** follows your system setting:
 
@@ -76,11 +80,13 @@ Either way, recording covers every page and popup in the test's browser context.
 **3. Run your tests** and open `ui-coverage-report/index.html`.
 
 ```
-UI coverage: 38.9% (14/36 elements)
+UI coverage: 40.4% (23/57 elements)
   /              50%  4/8
   /settings      30%  3/10
   /users         50%  6/12
-  /users/:id   16.7%  1/6
+  /users/:id    9.1%  1/11
+  /widgets     56.3%  9/16
+  9 accessibility hint(s), informational (see the report)
 ```
 
 ## How it works
@@ -229,6 +235,8 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
 
 Interaction types are recording options: events that aren't listened to can't be recovered later.
 
+Each element's `role`, accessible `name` and where the name came from (`nameFrom`: `aria-labelledby`, `aria-label`, `label`, `placeholder`, `title`, `alt`, `value`, `text`, or `name` for the name attribute) are recorded too, and `coverage.json` lists them with the element's identifying attributes (`attrs`: `id`, `name`, `role`, `type`, `aria-label`, `href`, `tabindex`, `contenteditable`, `data-*` and your `significantAttributes`). Suggested locators and accessibility hints are built from these.
+
 Screenshot options:
 
 | Option | Default | Description |
@@ -255,6 +263,7 @@ The summary has `tests` (one entry per test: `id`, `title`, `project`, `run`, th
 | `maxScreenshotsPerRoute` | `3` | Screenshots chosen to cover the most elements. |
 | `threshold` | none | Fail the run if coverage % is below this: a number (overall), or `{ overall, views }` for per-view minimums. See below. |
 | `countFailedTests` | `false` | Let interactions from tests that didn't pass mark elements as tested. See below. |
+| `testIdAttribute` | from config | Attribute for `getByTestId()` in suggested locators. Default: the `use.testIdAttribute` of the first project that sets one, else `data-testid`. See below. |
 | `viewBy` | `'auto'` | Group views by page URL (`'url'`) or by spec file (`'file'`). `'auto'` picks `'file'` for component tests. See [Component testing](#component-testing). |
 | `htmlReport` | detected | Folder of Playwright's HTML report (relative to the config file) that "Tested by" links to. Detected from the `html` reporter in the config; `false` turns the links off. See below. |
 | `saveData` | `true` | Keep the raw data and every screenshot in `<outputFolder>/data/` for the [`report` CLI](#rebuilding-the-report-report-cli). |
@@ -286,6 +295,49 @@ Each trace is identified by the file name the HTML reporter gives it (SHA-1 of i
 ### Most repeated elements
 
 Elements used by many tests are often setup steps (signing in, creating data) rather than what those tests check. **Most repeated elements** in the sidebar lists them with their number of tests and interactions; click a route to see the element on its page. If a step there isn't what most of those tests are about, you can do it once instead: [authenticate in a setup project and reuse the `storageState`](https://playwright.dev/docs/auth), or [prepare data through the API](https://playwright.dev/docs/api-testing#using-request-context), and keep one test that goes through the UI.
+
+### Suggested locators
+
+For every element, `coverage.json` has a `suggestedLocator`: one line of Playwright code that interacts with it. The report shows it (with a *Copy* button) for untested elements. It's built from the recorded data, deterministically, picking the first that applies:
+
+1. `page.getByTestId('…')` if the element has the test id attribute. That's `use.testIdAttribute` from your Playwright config (or the reporter's `testIdAttribute` option), default `data-testid`. An attribute that doesn't start with `data-` is only recorded if it's in `significantAttributes`.
+2. If the accessible name changed between runs or instances (the label shows `(+N variants)`), or another element with the same role has the same name on this view: `page.locator('<key>')`, the element's key as a CSS selector.
+3. `page.getByRole(role, { name })`. Names from attributes and `<label>`s match exactly (`exact: true`); names from text content match like Playwright's default (case-insensitive substring), or as `/^…$/i` when that would also match a longer name on the view ("Save" and "Save draft").
+4. `page.getByLabel(…)`, `page.getByPlaceholder(…)`, `page.getByTitle(…)`, `page.getByText(…)` when the name came from there and there's no usable role (a placeholder or title as the only name always uses these).
+5. `page.locator('<key>')` otherwise. Positional keys get a `body > ` prefix.
+
+The action follows the element: `click()` for buttons and links, `fill('…')` for text fields (with a sample value for `email`, `number`, `date`… inputs), `check()` for checkboxes, radios and switches, `selectOption('…')` for `<select>`, `setInputFiles('path/to/file')` for file inputs. Repeated elements (`×3`) get `.first()` and a comment on how to narrow it.
+
+*Copy untested as test skeleton* produces (shortened):
+
+```ts
+test('covers untested elements on /settings', async ({ page }) => {
+  await page.goto('/settings');
+  // TODO: a line that navigates away (link, submit) ends this page state: split into more tests or goto() again.
+  await page.getByTestId('delete-account').click();
+  // TODO: assert the result
+  await page.getByRole('textbox', { name: 'Bio', exact: true }).fill('…');
+  // TODO: assert the result
+});
+```
+
+If the browser blocks clipboard access (some do for `file://` pages), the text opens in a dialog, selected, to copy by hand.
+
+Suggestions are a starting point. Elements inside a closed dialog or menu need the steps that open it first, and a name with per-run text (a timestamp, a counter) that a run saw only once can't be detected as changing.
+
+### Accessibility hints
+
+Informational only: they don't change the coverage score or fail a run. The report shows them in blue under the element, with a count per route; `coverage.json` has `a11yHints: [{ rule, message }]` on elements that have any, and an `a11yHints` count per route and in total.
+
+| Rule | When |
+|---|---|
+| `no-name` | The control has no accessible name: no `<label>`, `aria-label(ledby)`, `title`, `alt` or (for buttons and links) text. A `name` attribute or a `<select>`'s options don't count. |
+| `placeholder-only` | A field is named only by its placeholder. |
+| `duplicate-name` | Links on the same view with the same name (case-insensitive) but different `href`s, e.g. several "Read more". |
+| `not-focusable` | An ARIA role on an element that isn't focusable (`<div role="button">` without `tabindex`). |
+| `no-role` | A plain element counted as interactive because of its `tabindex` or `data-uicov-interactive="include"`, with no role: screen readers don't announce it as a control. |
+
+What it can't see: elements that are clickable only through a JS handler and have no role, `tabindex` or `data-uicov-interactive` (they aren't recorded at all), instances that share a key (only one instance's `href` is recorded, so a "View" link on every table row isn't compared), and names the browser computes differently from the tracker's approximation. For a full audit, use a dedicated tool such as axe.
 
 ### Thresholds
 
@@ -451,6 +503,7 @@ UICOV_DEMO_THRESHOLDS=pass npm run demo  # per-view thresholds that pass
 UICOV_DEMO_FAIL=1 npx playwright test --retries=1  # adds a failing and a flaky test (demo/tests/failing.spec.ts)
 UICOV_TRACE=1 npm run demo  # records traces; "Tested by" links to them in playwright-report/
 npm run check:interactivity  # in-browser check of the interactivity rules and interaction types
+npm run check:locators       # checks suggested locators and a11y hints; with a demo report, that every locator resolves
 npm run example:ct    # component testing example (examples/ct-react): installs it, runs it, writes its report
 npm run demo:sharded  # runs 2 blob shards + merge-reports, checks it matches an unsharded run
 npm run check:rebuild # checks the report CLI rebuilds the same report from data/, and that changed rules apply

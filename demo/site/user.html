@@ -11,6 +11,18 @@
     <button onclick="document.getElementById('title').contentEditable = true">Edit</button>
     <button onclick="confirm('Really?')">Deactivate</button>
   </div>
+  <!-- Deliberate accessibility problems, shown as hints in the report:
+       an icon-only button with no name, a role="button" span that can't be focused,
+       a focusable div with no role,
+       and two "Details" links that go to different places. -->
+  <div class="row" style="margin-top:16px">
+    <button onclick="this.classList.toggle('on')"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1l2.2 4.6 5 .7-3.6 3.5.9 5L8 12.4 3.5 14.8l.9-5L.8 6.3l5-.7z"/></svg></button>
+    <span role="button" onclick="alert('shared')" style="cursor:pointer;text-decoration:underline">Share</span>
+    <div tabindex="0" onclick="this.textContent = 'Following'" style="cursor:pointer">Follow</div>
+  </div>
+  <h2>Recent activity</h2>
+  <p>Ordered a keyboard. <a href="#orders">Details</a></p>
+  <p>Paid an invoice. <a href="#invoices">Details</a></p>
 </main>
 <script>document.getElementById('title').textContent = 'User #' + location.pathname.split('/').pop();</script>
 </body>

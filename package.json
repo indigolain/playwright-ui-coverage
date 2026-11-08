@@ -36,6 +36,7 @@
     "check:rebuild": "npm run build && node scripts/check-rebuild.mjs",
     "perf": "npm run build && node scripts/perf-report.mjs",
     "check:interactivity": "npm run build && node scripts/check-interactivity.mjs",
+    "check:locators": "npm run build && node scripts/check-locators.mjs",
     "example:ct": "node scripts/example-ct.mjs",
     "example:ct:register": "node scripts/example-ct.mjs register"
   },

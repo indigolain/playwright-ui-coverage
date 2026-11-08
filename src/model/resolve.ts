@@ -49,6 +49,7 @@ interface Node extends SelectorNode {
 
 const quote = (v: string) => JSON.stringify(v);
 const isRow = (n: Node) => n.tag === 'tr' || n.attrs.role === 'row';
+const DETAIL_ATTRS = new Set(['id', 'name', 'role', 'type', 'aria-label', 'href', 'tabindex', 'contenteditable']);
 const directive = (n: Node) => (n.attrs['data-uicov-interactive'] ?? '').trim().toLowerCase();
 
 /** Resolves elements of one recording (shares its node table and memoizes keys). */
@@ -176,6 +177,30 @@ export class Resolver {
     const role = roleOf(node);
     return ref.name ? `${role} "${ref.name}"` : role;
   }
+
+  /**
+   * Label plus the details `coverage.json` lists per element: role, accessible
+   * name and its source, and the identifying attributes (`data-*`, a few
+   * common ones and the identity attributes; values capped at 200 chars).
+   */
+  describe(ref: RawElementRef, node: Node) {
+    const attrs: Record<string, string> = {};
+    for (const [name, value] of Object.entries(node.attrs)) {
+      if (name.startsWith('data-') || DETAIL_ATTRS.has(name) || this.rules.identityAttributes.includes(name))
+        attrs[name] = value.slice(0, 200);
+    }
+    const type = inputType(node.attrs);
+    if (node.tag === 'input' && (type === 'radio' || type === 'checkbox') && node.attrs.value !== undefined)
+      attrs.value = node.attrs.value.slice(0, 200);
+    return {
+      key: this.key(node),
+      label: this.label(ref, node),
+      attrs,
+      role: roleOf(node),
+      name: ref.name ?? '',
+      nameFrom: ref.nameFrom ?? '',
+    };
+  }
 }
 
 /** Applies `rules` (merged with the rules recorded in `data`) to one recording. */
@@ -206,7 +231,7 @@ export function resolveCoverageData(
     for (const el of snap.elements) {
       const node = r.node(el);
       if (!node || el.candidateOnly || r.isIgnored(node)) continue;
-      elements.push({ key: r.key(node), label: r.label(el, node), tag: node.tag, x: el.x, y: el.y, w: el.w, h: el.h });
+      elements.push({ ...r.describe(el, node), tag: node.tag, x: el.x, y: el.y, w: el.w, h: el.h });
     }
     const out: Snapshot = { url: snap.url, dpr: snap.dpr, elements };
     if (snap.screenshot) out.screenshot = snap.screenshot;
@@ -218,7 +243,7 @@ export function resolveCoverageData(
   for (const i of data.interactions) {
     const node = r.node(i.element);
     if (!node || r.isIgnored(node)) continue;
-    interactions.push({ key: r.key(node), label: r.label(i.element, node), event: i.event, url: i.url });
+    interactions.push({ ...r.describe(i.element, node), event: i.event, url: i.url });
   }
   return { interactions, snapshots, ...(data.componentTest ? { componentTest: true } : {}) };
 }

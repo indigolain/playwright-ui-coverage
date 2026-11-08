@@ -16,6 +16,16 @@ export interface InventoryElement {
   label: string;
   /** Raw identifying attributes. Only in pre-0.2 recordings. */
   attrs?: Record<string, string>;
+  /** Role as computed in the page (the first word of `label`). */
+  role?: string;
+  /** Accessible name as computed in the page ('' if none). */
+  name?: string;
+  /**
+   * Where `name` came from: `aria-labelledby`, `aria-label`, `label`,
+   * `placeholder`, `title`, `alt`, `value`, `text` or `name` (the name
+   * attribute, which is not an accessible name). '' if there is no name.
+   */
+  nameFrom?: string;
   tag: string;
   /** Document coordinates in CSS pixels (match a fullPage screenshot). */
   x: number;
@@ -36,6 +46,9 @@ export interface Interaction {
   label: string;
   /** Same as `InventoryElement.attrs`. */
   attrs?: Record<string, string>;
+  role?: string;
+  name?: string;
+  nameFrom?: string;
   event: string;
   url: string;
 }

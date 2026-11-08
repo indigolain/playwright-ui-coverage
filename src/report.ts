@@ -6,7 +6,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { aggregate, defaultNormalizeUrl, type CoverageSummary, type NormalizeUrl } from './aggregate';
+import { addA11yHints } from './a11y';
 import { selectAttempts } from './attempts';
+import { addSuggestedLocators } from './locators';
 import { indexTests, mostRepeated } from './insights';
 import { renderHtml } from './html';
 import { DATA_FILE, DATA_FORMAT_VERSION, type StoredData } from './model/raw';
@@ -50,6 +52,11 @@ export interface UiCoverageReporterOptions extends UiCoverageRules {
    */
   htmlReport?: string | false;
   /**
+   * Attribute used for `page.getByTestId()` in suggested locators. Default: the
+   * `use.testIdAttribute` of the first project that sets it, else `data-testid`.
+   */
+  testIdAttribute?: string;
+  /**
    * Keep the raw recordings and every screenshot in `<outputFolder>/data/`, so
    * the report can be rebuilt with `playwright-ui-coverage report`. Default: true.
    */
@@ -59,7 +66,7 @@ export interface UiCoverageReporterOptions extends UiCoverageRules {
 export const DATA_DIR = 'data';
 
 /** What a report is built from: the stored attempts and facts about the run. */
-export type ReportInput = Pick<StoredData, 'attempts' | 'componentTestConfig' | 'htmlReport'>;
+export type ReportInput = Pick<StoredData, 'attempts' | 'componentTestConfig' | 'htmlReport' | 'testIdAttribute'>;
 
 /** Snapshot screenshot references in a recording (raw and pre-0.2 data share this shape). */
 const snapshotsOf = (data: unknown): { screenshot?: string }[] =>
@@ -92,6 +99,7 @@ export function writeData(dataDir: string, input: ReportInput): void {
     generatedAt: new Date().toISOString(),
     ...(input.componentTestConfig ? { componentTestConfig: true } : {}),
     ...(input.htmlReport ? { htmlReport: input.htmlReport } : {}),
+    ...(input.testIdAttribute ? { testIdAttribute: input.testIdAttribute } : {}),
     attempts: out,
   };
   fs.writeFileSync(path.join(dataDir, DATA_FILE), JSON.stringify(file));
@@ -167,6 +175,8 @@ export function buildReport(input: ReportInput, options: UiCoverageReporterOptio
     summary.htmlReport = { ...link, path: rel };
   }
   summary.mostRepeated = mostRepeated(summary);
+  addSuggestedLocators(summary, { testIdAttribute: options.testIdAttribute ?? input.testIdAttribute ?? 'data-testid' });
+  addA11yHints(summary);
 
   const screensDir = path.join(outDir, 'screens');
   fs.rmSync(screensDir, { recursive: true, force: true });
@@ -198,6 +208,9 @@ export function buildReport(input: ReportInput, options: UiCoverageReporterOptio
   }
   if (summary.failingOnly > 0) {
     console.log(`  ${summary.failingOnly} more element(s) touched only by failing tests (not counted)`);
+  }
+  if (summary.a11yHints) {
+    console.log(`  ${summary.a11yHints} accessibility hint(s), informational (see the report)`);
   }
   const index = path.join(outDir, 'index.html');
   const rel = path.relative(process.cwd(), index);

@@ -1,5 +1,6 @@
 import type { CoverageSummary, ElementCoverage } from './aggregate';
 import { mostRepeated } from './insights';
+import { testSkeleton } from './locators';
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -19,7 +20,13 @@ function compact(summary: CoverageSummary) {
       const index = new Map(r.elements.map((e, i) => [e.key, i]));
       return {
         ...r,
-        elements: r.elements.map((e) => compactTestIds(e, testIndex)),
+        // The page needs neither the raw recorded data nor locators for tested elements.
+        // Hints become their messages.
+        elements: r.elements.map(({ role, name, nameFrom, attrs, suggestedLocator, a11yHints, ...e }) => ({
+          ...compactTestIds(e, testIndex),
+          ...(e.tested || !suggestedLocator ? {} : { suggestedLocator }),
+          ...(a11yHints?.length ? { a11yHints: a11yHints.map((h) => h.message) } : {}),
+        })),
         screenshots: r.screenshots.map((s) => ({
           ...s,
           boxes: s.boxes.map((b) => {
@@ -146,6 +153,34 @@ th[aria-sort=descending] button::after { content: ' \\2193'; }
 #insightsNav[aria-current=true] { background: var(--bg); outline: 1px solid var(--border); }
 .hint { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 12px; margin: 0 0 16px; max-width: 80ch; }
 .hint a, .goto { color: var(--accent); }
+.snip { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; }
+.snip code { flex: 1; min-width: 0; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+.btn { font: inherit; font-size: 12px; line-height: 1.4; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--bg); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn.done { color: var(--ok); border-color: var(--ok); }
+.a11y { margin-top: 4px; font-size: 12px; color: var(--accent); }
+.a11y::before { content: 'ⓘ '; }
+.a11y-count { color: var(--accent); }
+#copyDlg { width: min(720px, calc(100vw - 32px)); background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+#copyDlg::backdrop { background: rgba(0,0,0,.4); }
+#copyDlg textarea { width: 100%; max-height: 60vh; resize: vertical;font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+#copyDlg .row { align-items: center; margin-bottom: 8px; }
+@media (max-width: 760px) {
+  /* Stack each row so the element and its locator get the full width. */
+  table, tbody, tr, td { display: block; }
+  thead tr { display: flex; justify-content: flex-end; gap: 16px; }
+  thead th { border: 0; padding: 0; }
+  thead th:not([data-sort]) { display: none; }
+  tr { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { border: 0; padding: 2px 0; }
+  td.num { display: inline-block; margin-right: 16px; text-align: left; }
+  td.num:nth-child(3)::before { content: 'Interactions: '; }
+  td.num:nth-child(4)::before { content: 'Tests: '; }
+  td:last-child::before { content: 'Tested by: '; }
+}
+tr.flash td { animation: flash 1.2s ease-out; }
+@keyframes flash { from { background: rgba(245,158,11,.3); } to { background: transparent; } }
 </style>
 </head>
 <body>
@@ -175,8 +210,13 @@ th[aria-sort=descending] button::after { content: ' \\2193'; }
   </nav>
   <main id="main"></main>
 </div>
+<dialog id="copyDlg" aria-labelledby="copyDlgTitle">
+  <div class="row"><strong id="copyDlgTitle">Copy with Ctrl+C / ⌘C</strong><button class="btn" id="copyDlgClose">Close</button></div>
+  <textarea readonly spellcheck="false" aria-labelledby="copyDlgTitle"></textarea>
+</dialog>
 <script id="data" type="application/json">${data}</script>
 <script>
+const testSkeleton = ${testSkeleton.toString()};
 const data = JSON.parse(document.getElementById('data').textContent);
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -184,10 +224,12 @@ const store = {
   get(k) { try { return localStorage.getItem('uicov.' + k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem('uicov.' + k, v); } catch {} },
 };
+const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
 
 $('#total').textContent = data.percent + '%';
 $('#totalDetail').textContent = data.tested + ' of ' + data.total + ' interactive elements tested across ' + data.routes.length + ' routes' +
-  (data.failingOnly ? ' (' + data.failingOnly + ' touched only by failing tests)' : '');
+  (data.failingOnly ? ' (' + data.failingOnly + ' touched only by failing tests)' : '') +
+  (data.a11yHints ? ' · ' + plural(data.a11yHints, 'accessibility hint') : '');
 $('#generated').textContent = new Date(data.generatedAt).toLocaleString();
 
 // Keep the sticky sidebar below the header, whose height changes when it wraps.
@@ -209,7 +251,8 @@ navList.innerHTML = items.map(({ r, i, untested }) =>
     '<div class="row"><span class="route">' + esc(r.route) + '</span><span>' + r.percent + '%</span></div>' +
     '<div class="bar"><i style="width:' + r.percent + '%"></i></div>' +
     '<div class="sub muted">' + (untested ? untested + ' untested' : 'all tested') + ' · ' + r.total + ' elements' +
-      (r.failingOnly ? ' · <span class="warn-text">' + r.failingOnly + ' failing only</span>' : '') + '</div>' +
+      (r.failingOnly ? ' · <span class="warn-text">' + r.failingOnly + ' failing only</span>' : '') +
+      (r.a11yHints ? ' · <span class="a11y-count">' + r.a11yHints + ' a11y</span>' : '') + '</div>' +
   '</button>').join('');
 const buttons = Array.from(navList.children);
 navList.addEventListener('click', e => {
@@ -274,7 +317,8 @@ function placeBoxes(el, r, s, tested) {
     const d = document.createElement('div');
     d.className = 'box' + (info && info.tested ? ' ok' : info && failingOnly(info) ? ' warn' : '');
     d.dataset.key = b.key;
-    d.title = (info ? info.label : b.key) + (info && info.tested ? ' — tested' : info && failingOnly(info) ? ' — failing tests only' : ' — untested');
+    d.title = (info ? info.label : b.key) + (info && info.tested ? ' — tested' : info && failingOnly(info) ? ' — failing tests only' : ' — untested') +
+      (info && info.suggestedLocator ? '\\n' + info.suggestedLocator + '\\n(click to show it in the table)' : '');
     d.style.cssText = 'left:' + (b.x / cssW * 100) + '%;top:' + (b.y / cssH * 100) + '%;width:' + (w / cssW * 100) + '%;height:' + (h / cssH * 100) + '%';
     frag.appendChild(d);
   }
@@ -299,7 +343,10 @@ function show(i, fromUser, focusKey) {
   const rows = sortedElements(r.elements).map(e =>
     '<tr class="' + (e.tested ? 'ok' : 'bad') + '" data-key="' + esc(e.key) + '">' +
       '<td><span class="pill ' + (e.tested ? 'ok" title="' + esc(countsText(e)) + '">tested' : failingOnly(e) ? 'warn" title="Touched only by tests that did not pass; not counted as tested">failing tests only' : 'bad">untested') + '</span></td>' +
-      '<td>' + esc(e.label) + (e.instances > 1 ? ' <span class="muted">×' + e.instances + '</span>' : '') + (e.key !== e.label ? '<br><code class="muted">' + esc(e.key) + '</code>' : '') + '</td>' +
+      '<td>' + esc(e.label) + (e.instances > 1 ? ' <span class="muted">×' + e.instances + '</span>' : '') + (e.key !== e.label ? '<br><code class="muted">' + esc(e.key) + '</code>' : '') +
+        (e.a11yHints || []).map(h => '<div class="a11y" title="Accessibility hint (informational, not part of the coverage score)">' + esc(h) + '</div>').join('') +
+        (!e.tested && e.suggestedLocator ? '<div class="snip"><code>' + esc(e.suggestedLocator) + '</code><button class="btn" data-copy="' + esc(e.key) + '" title="Copy this line">Copy</button></div>' : '') +
+      '</td>' +
       insightCells(e) +
       '<td class="muted tests">' + testedByCell(e) + '</td>' +
     '</tr>').join('');
@@ -309,7 +356,10 @@ function show(i, fromUser, focusKey) {
   main.innerHTML =
     '<div class="toolbar"><span class="route big">' + esc(r.route) + '</span>' +
     '<span class="muted">' + r.tested + '/' + r.total + ' tested (' + r.percent + '%)</span>' +
-    '<label style="margin-left:auto"><input type="checkbox" id="only"' + (onlyUntested ? ' checked' : '') + '> Untested only</label></div>' +
+    (r.a11yHints ? '<span class="a11y-count" title="Informational; not part of the coverage score">' + plural(r.a11yHints, 'accessibility hint') + '</span>' : '') +
+    '<span style="margin-left:auto"></span>' +
+    (r.elements.some(e => !e.tested && e.suggestedLocator) ? '<button class="btn" data-copy="skeleton" title="A test that visits this route and touches each untested element">Copy untested as test skeleton</button>' : '') +
+    '<label><input type="checkbox" id="only"' + (onlyUntested ? ' checked' : '') + '> Untested only</label></div>' +
     (shots ? '<div class="shots">' + shots + '</div>' : '') +
     '<div class="table-wrap"><table><thead><tr><th>Status</th><th>Element</th>' + insightHeaders() + '<th>Tested by</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   main.querySelectorAll('th[data-sort] button').forEach(b => b.onclick = () => setRowSort(r, b.parentNode.dataset.sort));
@@ -452,6 +502,61 @@ $('#main').addEventListener('mouseover', e => {
   if (key !== litKey) { litKey = key; highlight(key); }
 });
 $('#main').addEventListener('mouseleave', () => { litKey = null; highlight(null); });
+
+// ---- Copy buttons. The Clipboard API can be missing (e.g. some browsers on file://):
+// fall back to execCommand, then to a dialog with the text selected.
+const copyDlg = $('#copyDlg');
+$('#copyDlgClose').onclick = () => copyDlg.close();
+async function copyText(text, btn) {
+  let ok = false;
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); ok = true; } } catch {}
+  if (!ok) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch {}
+    ta.remove();
+  }
+  if (ok) {
+    const label = btn.textContent;
+    btn.textContent = 'Copied';
+    btn.classList.add('done');
+    setTimeout(() => { btn.textContent = label; btn.classList.remove('done'); }, 1200);
+    return;
+  }
+  const area = copyDlg.querySelector('textarea');
+  area.value = text;
+  area.rows = Math.min(24, text.split('\\n').length + 1);
+  if (typeof copyDlg.showModal === 'function') copyDlg.showModal(); else copyDlg.setAttribute('open', '');
+  area.focus();
+  area.select();
+}
+$('#main').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-copy]');
+  if (btn) {
+    const r = data.routes[current];
+    const untested = r.elements.filter(x => !x.tested && x.suggestedLocator);
+    const text = btn.dataset.copy === 'skeleton'
+      ? testSkeleton(r.route, untested.map(x => x.suggestedLocator))
+      : r.elements.find(x => x.key === btn.dataset.copy).suggestedLocator;
+    copyText(text, btn);
+    return;
+  }
+  // Clicking a box on a screenshot scrolls to its row (where the copy button is).
+  const box = e.target.closest('.box');
+  if (box) {
+    const row = $('#main').querySelector('tr[data-key="' + CSS.escape(box.dataset.key) + '"]');
+    if (row) {
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      row.classList.remove('flash');
+      void row.offsetWidth;
+      row.classList.add('flash');
+    }
+  }
+});
 
 const indexOfHash = () => data.routes.findIndex(r => '#' + encodeURIComponent(r.route) === location.hash);
 addEventListener('hashchange', () => {
