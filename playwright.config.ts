@@ -26,6 +26,8 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
   fullyParallel: true,
   reporter: [
     ['list'],
+    // Playwright's HTML report: "Tested by" in the UI coverage report links to it.
+    ['html', { open: 'never' }],
     // UICOV_COUNT_FAILED=1 lets failed tests' interactions count (see demo/tests/failing.spec.ts).
     ['./src/reporter.ts', {
       outputFolder: 'ui-coverage-report',
@@ -35,6 +37,8 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
   ],
   use: {
     baseURL: `http://localhost:${port}`,
+    // UICOV_TRACE=1 records traces, which the UI coverage report links to.
+    trace: process.env.UICOV_TRACE ? 'on' : 'off',
     // Recording options (read by both the fixture and register mode).
     uiCoverage: {
       // Delete buttons on /users carry data-action; use it as their identity.
