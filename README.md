@@ -142,8 +142,34 @@ Each recorded element also keeps its raw identifying attributes (`attrs`: `id`, 
 | `outputFolder` | `ui-coverage-report` | Report location (relative to the config file). |
 | `normalizeUrl` | strips query, ids → `:id` | `(url) => routeName`, to group pages your own way. |
 | `maxScreenshotsPerRoute` | `3` | Screenshots chosen to cover the most elements. |
-| `threshold` | none | Fail the run if overall coverage % is below this. |
+| `threshold` | none | Fail the run if coverage % is below this: a number (overall), or `{ overall, views }` for per-view minimums. See below. |
 | `countFailedTests` | `false` | Let interactions from tests that didn't pass mark elements as tested. See below. |
+
+### Thresholds
+
+```ts
+['playwright-ui-coverage/reporter', {
+  threshold: {
+    overall: 70,
+    views: { '/checkout': 95, '/login': 95, '/admin/*': 50 },
+  },
+}],
+```
+
+`threshold: 70` is shorthand for `{ overall: 70 }`. If any threshold isn't met, the reporter prints each failing view with its actual and required % and the run fails (exit code 1).
+
+- **View keys** are route names as they appear in the report (`/checkout`, `/users/:id`, after `normalizeUrl`).
+- **Patterns:** `*` matches within one path segment, `**` matches across segments. A pattern applies to each matching view on its own (`/admin/*: 50` means every admin view needs 50%, not their average).
+- **Precedence:** an exact key always wins over a pattern. Among patterns, the one with more literal characters wins, then the one with fewer `**`, then the one listed first.
+- **Missing views:** a key or pattern that matches no view in the run prints a warning (with a "did you mean" hint for likely typos) and doesn't fail the run. A filtered run (`--grep`, one spec file) may not visit every view.
+
+When `threshold` is set, `coverage.json` gets a `thresholds` array for CI tooling:
+
+```json
+{ "target": "/users/:id", "pattern": "/users/*", "required": 20, "actual": 16.7, "passed": false, "status": "failed" }
+```
+
+`target` is `overall` or a view name. `status` is `passed`, `failed` or `missing` (then `actual` is `null` and `passed` is `true`).
 
 ### Retries and failed tests
 
@@ -195,6 +221,8 @@ npm install
 npx playwright install chromium
 npm run demo          # fixture mode: runs demo/tests, writes ui-coverage-report/
 npm run demo:register # register mode: same tests, config-only recording
+UICOV_DEMO_THRESHOLDS=1 npm run demo     # per-view thresholds that fail (exit code 1)
+UICOV_DEMO_THRESHOLDS=pass npm run demo  # per-view thresholds that pass
 UICOV_DEMO_FAIL=1 npx playwright test --retries=1  # adds a failing and a flaky test (demo/tests/failing.spec.ts)
 npm run demo:sharded  # runs 2 blob shards + merge-reports, checks it matches an unsharded run
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)

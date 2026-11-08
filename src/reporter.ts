@@ -4,6 +4,7 @@ import type { FullConfig, Reporter, TestCase, TestResult } from '@playwright/tes
 import { aggregate, defaultNormalizeUrl, type NormalizeUrl } from './aggregate';
 import { isPassingResult, selectAttempts, type AttemptEntry } from './attempts';
 import { renderHtml } from './html';
+import { evaluateThresholds, formatThresholdResults, type ThresholdOption } from './thresholds';
 import { ATTACHMENT_NAME, type TestCoverageData } from './types';
 
 export interface UiCoverageReporterOptions {
@@ -13,8 +14,12 @@ export interface UiCoverageReporterOptions {
   normalizeUrl?: NormalizeUrl;
   /** Max screenshots shown per route. Default: 3. */
   maxScreenshotsPerRoute?: number;
-  /** Fail the run (exit code 1) if overall coverage is below this percent. */
-  threshold?: number;
+  /**
+   * Fail the run (exit code 1) if coverage is below these percents. A number is
+   * shorthand for `{ overall }`. `views` keys are route names as shown in the
+   * report, or globs (`*` = one segment, `**` = any); an exact key beats a pattern.
+   */
+  threshold?: ThresholdOption;
   /**
    * Let interactions from attempts that didn't pass mark elements as tested.
    * Default: false (only the last passing attempt of each test counts; element
@@ -97,7 +102,9 @@ class UiCoverageReporter implements Reporter {
       route.screenshots = route.screenshots.filter((s) => s.source);
     }
 
-    fs.writeFileSync(path.join(this.outputFolder, 'coverage.json'), JSON.stringify(summary, null, 2));
+    const thresholds = evaluateThresholds(summary, this.options.threshold);
+    const json = this.options.threshold === undefined ? summary : { ...summary, thresholds };
+    fs.writeFileSync(path.join(this.outputFolder, 'coverage.json'), JSON.stringify(json, null, 2));
     fs.writeFileSync(path.join(this.outputFolder, 'index.html'), renderHtml(summary));
 
     const pad = (s: string, n: number) => s.padEnd(n);
@@ -112,8 +119,10 @@ class UiCoverageReporter implements Reporter {
     const rel = path.relative(process.cwd(), path.join(this.outputFolder, 'index.html'));
     console.log(`  Report: ${rel}\n`);
 
-    if (this.options.threshold !== undefined && summary.percent < this.options.threshold) {
-      console.error(`UI coverage ${summary.percent}% is below threshold ${this.options.threshold}%`);
+    const { warnings, errors } = formatThresholdResults(thresholds, summary.routes.map((r) => r.route));
+    warnings.forEach((w) => console.warn(w));
+    if (errors.length) {
+      console.error(errors.join('\n') + '\n');
       return { status: 'failed' as const };
     }
   }
