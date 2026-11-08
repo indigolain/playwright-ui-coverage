@@ -41,6 +41,8 @@ export {
   type AttributeFilter,
   type ElementFilter,
   type NamedElement,
+  type AutoGroupOptions,
+  type ElementGroupRule,
   type LinkRules,
   type UiCoverageRules,
 } from './model/rules';
@@ -90,6 +92,7 @@ export type {
   CoverageCounts,
   ViewCoverage,
   ElementCoverage,
+  ElementGroup,
   LinkCoverage,
   UntestedView,
   UntestedViewReferrer,

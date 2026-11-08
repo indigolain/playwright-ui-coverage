@@ -85,6 +85,7 @@ const comparable = (s) =>
     untestedViews: s.untestedViews,
   });
 const keys = (s) => s.views.flatMap((v) => v.elements.map((e) => `${v.name} ${e.key}`));
+const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
 /** Keys of the <a> elements of link units, once per view. */
 const linkKeys = (s) => s.views.flatMap((v) => [...new Set((v.links ?? []).flatMap((l) => l.referrers.map((e) => `${v.name} ${e.key}`)))]);
 /** How coverage.json names a config file: relative to the working directory, absolute outside it. */
@@ -144,7 +145,6 @@ try {
     if (navLinks.length) errors.push(`ignored links still in link units: ${navLinks.join(', ')}`);
     if (removed.length === 0) errors.push('filter check is vacuous: no nav links / delete buttons in the baseline');
     if (left.length) errors.push(`ignored elements still in the report: ${left.join(', ')}`);
-    const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
     if (total(filtered) !== total(baseline) - removed.length)
       errors.push(`filtered total ${total(filtered)}, expected ${total(baseline)} - ${removed.length}`);
     else console.log(`filter check: ${total(baseline)} → ${total(filtered)} elements`);
@@ -215,7 +215,45 @@ try {
     console.log(`views and element rules check: ${baseline.views.length} → ${changed.views.length} views, ${total(baseline)} → ${total(changed)} elements`);
   }
 
-  // 2c. `links: false`: every <a> is an element again, no link units or untested views.
+  // 2c. Grouping rules (README "Element grouping"): an elementGroups entry merges
+  //     the controls of every product card on /shop into one element;
+  //     autoGroup: false undoes the automatic groups there (repeated cards, the label).
+  const shop = (s) => s.views.find((v) => v.name === '/shop');
+  const groupsConfig = writeConfig(
+    'groups.config.mjs',
+    `export default ${JSON.stringify({ ...rules, elementGroups: [{ selector: '.card-actions', name: 'card actions' }] })};\n`,
+  );
+  const groupsOut = path.join(tmp, 'groups');
+  if (runCli(['report', '--data', data, '--config', groupsConfig, '--out', groupsOut]) !== 0) {
+    errors.push('CLI rebuild with elementGroups failed');
+  } else {
+    const grouped = read(groupsOut);
+    const cards = (s) => (shop(s)?.elements ?? []).filter((e) => e.key.startsWith('main > ul > li') || e.key === '.card-actions');
+    const before = cards(baseline);
+    const after = cards(grouped);
+    if (before.length < 2) errors.push(`elementGroups check is vacuous: ${before.length} card elements on /shop`);
+    else if (after.length !== 1 || after[0].key !== '.card-actions' || after[0].group?.reason !== 'config' || after[0].group.name !== 'card actions' || !after[0].tested)
+      errors.push(`elementGroups: card elements on /shop ${JSON.stringify(after.map((e) => [e.key, e.group, e.tested]))}`);
+    else if (total(grouped) !== total(baseline) - before.length + 1)
+      errors.push(`elementGroups total ${total(grouped)}, expected ${total(baseline)} - ${before.length} + 1`);
+    else console.log(`elementGroups check: ${total(baseline)} → ${total(grouped)} elements`);
+  }
+  const ungroupedConfig = writeConfig('ungrouped.config.json', JSON.stringify({ ...rules, autoGroup: false }));
+  const ungroupedOut = path.join(tmp, 'ungrouped');
+  if (runCli(['report', '--data', data, '--config', ungroupedConfig, '--out', ungroupedOut]) !== 0) {
+    errors.push('CLI rebuild with autoGroup: false failed');
+  } else {
+    const before = shop(baseline);
+    const after = shop(read(ungroupedOut));
+    const n = (v) => v.summary.testedElementsCount + v.summary.untestedElementsCount;
+    if (!before || !after) errors.push('autoGroup check: no /shop view');
+    else if (after.elements.some((e) => e.group && e.group.reason !== 'markup' && e.group.reason !== 'same-key'))
+      errors.push('autoGroup: false still has automatic groups on /shop');
+    else if (n(after) <= n(before)) errors.push(`autoGroup: false: /shop has ${n(after)} elements, grouped ${n(before)}`);
+    else console.log(`autoGroup check: /shop ${n(before)} → ${n(after)} elements without automatic grouping`);
+  }
+
+  // 2d. `links: false`: every <a> is an element again, no link units or untested views.
   const noLinksConfig = writeConfig('no-links.config.json', JSON.stringify({ ...rules, links: false }));
   const noLinksOut = path.join(tmp, 'no-links');
   if (runCli(['report', '--data', data, '--config', noLinksConfig, '--out', noLinksOut]) !== 0) {

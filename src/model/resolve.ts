@@ -10,7 +10,7 @@
  * structural `tag:nth-of-type(n)` path up to the nearest identified ancestor.
  * Elements in frames and shadow trees are prefixed by their host's key and `>>`.
  */
-import type { Interaction, InventoryElement, Snapshot, TestCoverageData } from '../types';
+import type { GroupHints, GroupLevel, Interaction, InventoryElement, Snapshot, TestCoverageData } from '../types';
 import { inputType, roleOf } from './elements';
 import {
   READABLE_RECORDING_FORMAT_VERSIONS,
@@ -21,15 +21,19 @@ import {
   type RawNode,
 } from './raw';
 import {
+  autoGroupSwitches,
   compileAttributeFilters,
   compileRuleSelector,
   identityAttributes,
   mergeRules,
   UICOV_ID_ATTRIBUTE,
+  UICOV_GROUP_ATTRIBUTE,
+  type AutoGroupOptions,
   type CompiledAttributeFilter,
+  type ElementGroupRule,
   type UiCoverageRules,
 } from './rules';
-import { DOCUMENT_TAG, treeParent, type CompiledSelector, type SelectorNode } from './selector';
+import { DOCUMENT_TAG, isBoundary, treeParent, type CompiledSelector, type SelectorNode } from './selector';
 
 /** What a `ui-coverage` attachment (or a stored attempt) may contain. */
 export type RecordedCoverageData = RawCoverageData | TestCoverageData;
@@ -47,6 +51,8 @@ export interface CompiledRules {
   named: { selector: CompiledSelector; key: string; label?: string }[];
   /** `[data-uicov-ignore]` and `ignoreSelectors`, checked on the element and its ancestors. */
   ignore: CompiledSelector[];
+  autoGroup: Required<AutoGroupOptions>;
+  groups: { rule: ElementGroupRule; selector: CompiledSelector }[];
 }
 
 export function compileRules(rules: UiCoverageRules): CompiledRules {
@@ -69,6 +75,13 @@ export function compileRules(rules: UiCoverageRules): CompiledRules {
     ignore: ['[data-uicov-ignore]', ...uniqueBy(rules.ignoreSelectors ?? [], (s) => JSON.stringify(s))].map(
       compileRuleSelector,
     ),
+    autoGroup: autoGroupSwitches(rules),
+    groups: (rules.elementGroups ?? []).map((rule) => ({
+      rule,
+      selector: compileRuleSelector(
+        rule.documentScope === undefined ? rule.selector : { selector: rule.selector, documentScope: rule.documentScope },
+      ),
+    })),
   };
 }
 
@@ -88,7 +101,29 @@ const treeTop = (n: Node): Node => {
   for (let p = treeParent(top); p; p = treeParent(top)) top = p;
   return top;
 };
+const firstRole = (n: Node) => (n.attrs.role ?? '').trim().toLowerCase().split(/\s+/)[0];
 const isRow = (n: Node) => n.tag === 'tr' || n.attrs.role === 'row';
+const isRowContainer = (n: Node) => n.tag === 'table' || ['grid', 'table', 'treegrid'].includes(firstRole(n));
+const isForm = (n: Node) => n.tag === 'form' || firstRole(n) === 'form';
+/**
+ * Links aren't grouped by the row and repeated-structure heuristics: links
+ * are grouped by their destination instead (hook: handled outside of them).
+ */
+const isLink = (n: Node) => (n.tag === 'a' || n.tag === 'area') && n.attrs.href !== undefined;
+/** Containers whose items are distinct choices: the repeated-structure heuristic stays out of them. */
+const isNavigation = (n: Node) =>
+  n.tag === 'nav' ||
+  n.tag === 'menu' ||
+  ['navigation', 'menu', 'menubar', 'tablist', 'toolbar', 'radiogroup', 'listbox', 'tree'].includes(firstRole(n));
+const LABELABLE = new Set(['input', 'select', 'textarea', 'button', 'meter', 'output', 'progress']);
+/** Class tokens that describe the shape (tokens with digits are usually per-instance), sorted. */
+const classShape = (n: Node) =>
+  [...new Set((n.attrs.class ?? '').split(/\s+/).filter((c) => c && !/\d/.test(c)))]
+    .sort()
+    .map((c) => `.${c}`)
+    .join('');
+const withoutDigits = (s: string) => s.replace(/\d+/g, '#');
+type Level = { node: Node; sep: string };
 const DETAIL_ATTRS = new Set(['id', 'name', 'role', 'type', 'aria-label', 'href', 'tabindex', 'contenteditable']);
 const directive = (n: Node) => (n.attrs['data-uicov-interactive'] ?? '').trim().toLowerCase();
 
@@ -100,6 +135,8 @@ export class Resolver {
   private excluded = new Map<Node, boolean>();
   /** Elements pinned by an `elements` rule (see `pinNamedElements`). */
   private pins = new Map<Node, { key: string; label?: string }>();
+  private ids?: { size: number; byTree: Map<Node, Map<string, Node>> };
+  private hints = new Map<Node, { hints?: GroupHints; shape?: { sig: string; levels: GroupLevel[] } }>();
 
   /**
    * `data.nodes` may grow after construction (the recorder appends to it);
@@ -230,7 +267,7 @@ export class Resolver {
    * Structural fallback: `tag:nth-of-type(n)` steps (index only when there are
    * same-tag siblings) up to the nearest ancestor that has an identity, or up
    * to <body> (in a shadow tree: up to its top-level element). Table rows are
-   * repeated data, so they get no index.
+   * repeated data, so they get no index (unless `autoGroup.rows` is off).
    */
   private structuralKey(el: Node): string {
     const steps: string[] = [];
@@ -244,7 +281,7 @@ export class Resolver {
         }
       }
       let step = cur.tag;
-      if (cur.parent && !isRow(cur) && cur.of > 1) step += `:nth-of-type(${cur.nth})`;
+      if (cur.parent && (!isRow(cur) || !this.rules.autoGroup.rows) && cur.of > 1) step += `:nth-of-type(${cur.nth})`;
       steps.unshift(step);
       cur = treeParent(cur);
     }
@@ -270,6 +307,154 @@ export class Resolver {
       this.keys.set(node, k);
     }
     return k;
+  }
+
+  /**
+   * The chain from below `from` (exclusive; undefined: from the top document)
+   * down to `el`, without `<html>`/`<body>`. A level at the top of a shadow
+   * root or frame document gets the ` >> ` separator.
+   */
+  private levels(el: Node, from?: Node): Level[] {
+    const out: Level[] = [];
+    for (let n: Node | undefined = el; n && n !== from; n = n.parent) {
+      if (isBoundary(n)) {
+        if (out.length) out[out.length - 1].sep = ' >> ';
+        continue;
+      }
+      if (n.tag === 'html' || n.tag === 'body') continue;
+      out.push({ node: n, sep: ' > ' });
+    }
+    return out.reverse();
+  }
+
+  /** Positional steps (`tag:nth-of-type(n)`, rows without an index), each after its separator. */
+  private path(levels: Level[]): string {
+    return levels.map((l) => l.sep + this.step(l.node)).join('');
+  }
+
+  private step(n: Node): string {
+    return n.of > 1 && !isRow(n) ? `${n.tag}:nth-of-type(${n.nth})` : n.tag;
+  }
+
+  /**
+   * Grouping facts for `grouping.ts` (README "Element grouping"). Explicit
+   * groups come first: the closest `data-uicov-group` (self or ancestor, also
+   * across frames and shadow roots; an empty value turns grouping off), then
+   * the first `elementGroups` entry matching the element or an ancestor.
+   * Their keys are used as-is, without a host prefix (like `data-uicov-id`):
+   * `[data-uicov-group="name"]`, or the entry's selector.
+   */
+  groupHints(ref: RawElementRef, node: Node): GroupHints | undefined {
+    let cached = this.hints.get(node);
+    if (!cached) this.hints.set(node, (cached = this.structuralHints(node)));
+    const { hints, shape } = cached;
+    // The accessible name is per snapshot; the rest only depends on the node.
+    const name = ref.name?.trim();
+    if (!shape || !name || ref.nameFrom === 'name') return hints;
+    return { ...hints, repeated: { sig: `${shape.sig} ${quote(name)}`, levels: shape.levels } };
+  }
+
+  private structuralHints(node: Node): { hints?: GroupHints; shape?: { sig: string; levels: GroupLevel[] } } {
+    for (let n: Node | undefined = node; n; n = n.parent) {
+      const v = n.attrs[UICOV_GROUP_ATTRIBUTE];
+      if (v === undefined) continue;
+      const name = v.trim();
+      if (!name) return { hints: { none: true } };
+      return { hints: { explicit: { key: `[${UICOV_GROUP_ATTRIBUTE}=${quote(name)}]`, name, reason: 'markup' } } };
+    }
+    for (const { rule, selector } of this.rules.groups) {
+      for (let n: Node | undefined = node; n; n = n.parent) {
+        if (isBoundary(n) || !selector.matches(n)) continue;
+        if (rule.exclude) return { hints: { none: true } };
+        const key = rule.documentScope ? `${rule.documentScope} >> ${rule.selector}` : rule.selector;
+        return { hints: { explicit: { key, name: rule.name?.trim() || key, reason: 'config' } } };
+      }
+    }
+
+    const sw = this.rules.autoGroup;
+    const hints: GroupHints = {};
+    const explicitId = !!node.attrs[UICOV_ID_ATTRIBUTE]?.trim();
+    if (sw.forms && !explicitId) {
+      for (let n = treeParent(node); n; n = treeParent(n))
+        if (isForm(n)) {
+          hints.form = this.key(n);
+          break;
+        }
+    }
+    // data-uicov-id is an explicit identity: never grouped automatically.
+    const auto = !explicitId && !isLink(node);
+    const row = auto && sw.rows ? this.rowKey(node) : undefined;
+    if (row) hints.row = row;
+    const shape = auto && sw.repeated && !row ? this.repeatedShape(node) : undefined;
+    if (sw.labels && node.tag === 'label') {
+      const control = this.controlOf(node);
+      if (control) hints.label = this.key(control);
+    }
+    return { ...(Object.keys(hints).length ? { hints } : {}), ...(shape ? { shape } : {}) };
+  }
+
+  /**
+   * In a row (`<tr>`, `role=row`) of a table or grid: the table's key and the
+   * position below it, rows without an index and identities ignored, so the
+   * same column of every row gives the same value.
+   */
+  private rowKey(node: Node): string | undefined {
+    let row: Node | undefined;
+    for (let n: Node | undefined = node; n && !row; n = treeParent(n)) if (isRow(n)) row = n;
+    if (!row) return undefined;
+    let table: Node | undefined;
+    for (let n = treeParent(row); n && !table; n = treeParent(n)) if (isRowContainer(n)) table = n;
+    if (!table) return undefined;
+    return this.key(table) + this.path(this.levels(node, table));
+  }
+
+  /**
+   * The shape of the element and its ancestors (tag and classes; forms also
+   * by their identity and action; the element also by its identity with
+   * digits ignored), plus role and accessible name. Elements with the same
+   * shape in repeated sibling structures (cards, list items) are grouped.
+   * Conservative: needs an accessible name (added by `groupHints`), and not
+   * inside navigation.
+   */
+  private repeatedShape(node: Node): { sig: string; levels: GroupLevel[] } | undefined {
+    for (let n = node.parent; n; n = n.parent) if (!isBoundary(n) && isNavigation(n)) return undefined;
+    const levels: GroupLevel[] = [];
+    let sig = '';
+    for (const { node: n, sep } of this.levels(node)) {
+      const identity = this.identityOf(n);
+      let shape = n.tag + classShape(n);
+      if (isForm(n)) shape += `{${withoutDigits(identity)}|${n.attrs.action ?? ''}}`;
+      else if (n === node && identity) shape += `{${withoutDigits(identity)}}`;
+      sig += sep + shape;
+      const anchor = identity && n.attrs[UICOV_ID_ATTRIBUTE] !== undefined ? `[data-uicov-id=${quote(identity)}]` : identity;
+      levels.push({ step: this.step(n), tag: n.tag, ...(anchor ? { anchor } : {}), sep });
+    }
+    return { sig: `${sig} ${roleOf(node)}`, levels };
+  }
+
+  /** The labelable element a `<label>` is for (`for`, else the first one inside it), if recorded. */
+  private controlOf(label: Node): Node | undefined {
+    const top = treeTop(label);
+    const forId = label.attrs.for;
+    if (forId !== undefined) {
+      if (!this.ids || this.ids.size !== this.nodes.length) {
+        const byTree = new Map<Node, Map<string, Node>>();
+        for (const n of this.nodes) {
+          if (n.attrs.id === undefined || isBoundary(n)) continue;
+          const t = treeTop(n);
+          if (!byTree.has(t)) byTree.set(t, new Map());
+          if (!byTree.get(t)!.has(n.attrs.id)) byTree.get(t)!.set(n.attrs.id, n);
+        }
+        this.ids = { size: this.nodes.length, byTree };
+      }
+      const n = this.ids.byTree.get(top)?.get(forId);
+      return n && LABELABLE.has(n.tag) ? n : undefined;
+    }
+    for (const n of this.nodes) {
+      if (!LABELABLE.has(n.tag) || (n.tag === 'input' && inputType(n.attrs) === 'hidden')) continue;
+      for (let p = treeParent(n); p; p = treeParent(p)) if (p === label) return n;
+    }
+    return undefined;
   }
 
   /** Keys of the `<iframe>`/`<frame>` elements the node is inside, outermost first. */
@@ -302,6 +487,7 @@ export class Resolver {
       attrs.value = node.attrs.value.slice(0, 200);
     const frames = this.frames(node);
     const pin = this.pins.get(node);
+    const grouping = this.groupHints(ref, node);
     return {
       key: pin?.key ?? this.key(node),
       label: pin?.label ?? this.label(ref, node),
@@ -311,6 +497,7 @@ export class Resolver {
       nameFrom: ref.nameFrom ?? '',
       ...(frames.length ? { frames } : {}),
       ...(pin ? { autoKey: this.key(node) } : {}),
+      ...(grouping ? { grouping } : {}),
       ...(ref.href ? { href: ref.href } : {}),
     };
   }

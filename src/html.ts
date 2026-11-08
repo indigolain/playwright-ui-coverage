@@ -429,7 +429,7 @@ function show(i, fromUser, focusKey) {
   const rows = sortedElements(r.elements).map(e =>
     '<tr class="' + (e.tested ? 'ok' : 'bad') + '" data-key="' + esc(e.key) + '">' +
       '<td><span class="pill ' + (e.tested ? 'ok" title="' + esc(countsText(e)) + '">tested' : failingOnly(e) ? 'warn" title="Touched only by tests that did not pass; not counted as tested">failing tests only' : 'bad">untested') + '</span></td>' +
-      '<td>' + esc(e.label) + (e.instances > 1 ? ' <span class="muted">×' + e.instances + '</span>' : '') + (e.key !== e.label ? '<br><code class="muted">' + esc(e.key) + '</code>' : '') +
+      '<td>' + esc(e.label) + instancesText(e) + (e.key !== e.label ? '<br><code class="muted">' + esc(e.key) + '</code>' : '') +
         (e.a11yHints || []).map(h => '<div class="a11y" title="Accessibility hint (informational, not part of the coverage score)">' + esc(h) + '</div>').join('') +
         (!e.tested && e.suggestedLocator ? '<div class="snip"><code>' + esc(e.suggestedLocator) + '</code><button class="btn" data-copy="' + esc(e.key) + '" title="Copy this line">Copy</button></div>' : '') +
       '</td>' +
@@ -490,6 +490,19 @@ const multiProject = new Set(tests.map(t => t.project)).size > 1;
 const sumCounts = (c) => Object.values(c || {}).reduce((s, n) => s + n, 0);
 const interactionsOf = (e) => e.interactionTotal != null ? e.interactionTotal : sumCounts(e.interactionCounts);
 const testsOf = (e) => e.testCount != null ? e.testCount : e.testedBy.length;
+// "(3 instances · name)" after the label, with why the elements were grouped as the tooltip.
+const GROUP_REASONS = { markup: 'data-uicov-group', config: 'elementGroups', 'same-key': 'same key', row: 'same column in a table', repeated: 'repeated structure', label: 'label and its control' };
+const instancesText = (e) => {
+  const g = e.group;
+  const n = g && g.reason !== 'label' ? Math.max(e.instances, g.members) : e.instances;
+  const parts = [];
+  if (n > 1) parts.push(n + ' instances');
+  if (g && g.name) parts.push(esc(g.name));
+  if (g && g.reason === 'label') parts.push('with its label');
+  if (!parts.length) return '';
+  const why = g ? 'Grouped: ' + (GROUP_REASONS[g.reason] || g.reason) + (g.name ? ' "' + g.name + '"' : '') + '; counts once' : '';
+  return ' <span class="muted"' + (why ? ' title="' + esc(why) + '"' : '') + '>(' + parts.join(' · ') + ')</span>';
+};
 // "click ×3, input ×1", shown as the tooltip of the "tested" pill and the Interactions cell.
 const countsText = (e) => Object.entries(e.interactionCounts || {}).map(([t, n]) => t + ' ×' + n).join(', ');
 const rowSorters = {

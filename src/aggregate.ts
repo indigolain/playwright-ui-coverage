@@ -3,6 +3,7 @@ import type { A11yHint } from './a11y';
 import type { LinkRules, UiCoverageRules } from './model/rules';
 import type { InventoryElement, TestCoverageData } from './types';
 import { boxInImage, intersects } from './model/geometry';
+import { applyGrouping, type ElementGroup } from './grouping';
 
 /** Recorded role, accessible name and attributes of an element (see `InventoryElement`). */
 type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames' | 'autoKey'>;
@@ -21,6 +22,11 @@ export interface ElementCoverage {
   tag: string;
   /** Max number of instances seen at once (e.g. a "Delete" button per row). */
   instances: number;
+  /**
+   * Set when this element stands for several: a group (README "Element
+   * grouping") or instances sharing a key. Absent for a single element.
+   */
+  group?: ElementGroup;
   tested: boolean;
   testedBy: string[];
   /**
@@ -270,6 +276,8 @@ export function aggregate(
   const included = opts.viewMapper?.included;
   /** `view` (set for `viewBy: 'file'`) puts all of an entry's data in one view, whatever the URL. */
   const routeName = (url: string, view?: string) => view ?? viewOf(url);
+  const grouping = applyGrouping(tests, routeName);
+  tests = grouping.tests;
   const routeFor = (r: string) => {
     if (!routes.has(r)) routes.set(r, { elements: new Map(), snapshots: [], kinds: new Map() });
     return routes.get(r)!;
@@ -308,14 +316,15 @@ export function aggregate(
       const acc = routeFor(route);
       acc.snapshots.push({ snap, test: title, testId });
       for (const el of snap.elements) classify(acc, route, el, snap.url, data.view !== undefined);
+      // A label joined into its control's element is neither an instance nor a label variant.
       const counts = new Map<string, number>();
-      for (const el of snap.elements) counts.set(el.key, (counts.get(el.key) ?? 0) + 1);
-      for (const el of snap.elements) {
+      for (const el of snap.elements) if (!el.grouping?.joined) counts.set(el.key, (counts.get(el.key) ?? 0) + 1);
+      for (const el of [...snap.elements].sort((a, b) => Number(!!a.grouping?.joined) - Number(!!b.grouping?.joined))) {
         const existing = acc.elements.get(el.key);
-        const n = counts.get(el.key)!;
+        const n = counts.get(el.key) ?? 1;
         if (existing) {
           existing.instances = Math.max(existing.instances, n);
-          if (!existing.labels.has(el.label)) existing.labels.set(el.label, details(el));
+          if (!el.grouping?.joined && !existing.labels.has(el.label)) existing.labels.set(el.label, details(el));
         } else
           acc.elements.set(el.key, {
             key: el.key,
@@ -371,7 +380,13 @@ export function aggregate(
   const unvisited = new Map<string, { urls: Set<string>; referrers: UntestedView['referrers'] }>();
   for (const [route, acc] of routes) {
     const withIds = tests.some((t) => t.testId);
+    const groups = grouping.groups.get(route);
     const all = [...acc.elements.values()].map(({ testedBySet, failingSet, labels, idSet, failingIdSet, ...e }) => {
+      // A heuristic group with one member seen once is just an element.
+      let group = groups?.get(e.key);
+      if (group && group.reason !== 'markup' && group.reason !== 'config' && group.members < 2 && e.instances < 2)
+        group = undefined;
+      if (!group && e.instances > 1) group = { reason: 'same-key', members: 1 };
       // Elements sharing a key (e.g. a link on every table row) can have different
       // labels; pick one independent of test order so reports are reproducible.
       const sorted = [...labels.keys()].sort();
@@ -379,6 +394,7 @@ export function aggregate(
         ...e,
         ...labels.get(sorted[0]),
         label: sorted.length > 1 ? `${sorted[0]} (+${sorted.length - 1} variants)` : sorted[0],
+        ...(group ? { group } : {}),
         testedBy: [...testedBySet].sort(),
         testedByFailing: [...failingSet].filter((t) => !testedBySet.has(t)).sort(),
         // Sorted by type so the JSON doesn't depend on test order.
