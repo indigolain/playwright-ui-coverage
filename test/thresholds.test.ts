@@ -24,7 +24,7 @@ describe('evaluateThresholds', () => {
 
   it('treats a number as the overall threshold', () => {
     expect(evaluateThresholds(s, 50)).toEqual([
-      { target: 'overall', required: 50, actual: 50, passed: true, status: 'passed' },
+      { scope: 'overall', target: 'overall', required: 50, actual: 50, passed: true, status: 'passed' },
     ]);
     expect(evaluateThresholds(s, 50.1)[0]).toMatchObject({ passed: false, status: 'failed' });
   });
@@ -48,7 +48,7 @@ describe('evaluateThresholds', () => {
 
   it('lets an exact key win over a pattern', () => {
     const r = evaluateThresholds(s, { views: { '/users/*': 90, '/users/:id': 5 } });
-    expect(r).toEqual([{ target: '/users/:id', required: 5, actual: 20, passed: true, status: 'passed' }]);
+    expect(r).toEqual([{ scope: 'view', target: '/users/:id', required: 5, actual: 20, passed: true, status: 'passed' }]);
   });
 
   it('prefers the most specific pattern, then fewer **, then declaration order', () => {
@@ -67,7 +67,7 @@ describe('evaluateThresholds', () => {
 
   it('reports patterns that match no view as missing', () => {
     expect(evaluateThresholds(s, { views: { '/admin/**': 10 } })).toEqual([
-      { target: '/admin/**', pattern: '/admin/**', required: 10, actual: null, passed: true, status: 'missing' },
+      { scope: 'view', target: '/admin/**', pattern: '/admin/**', required: 10, actual: null, passed: true, status: 'missing' },
     ]);
   });
 

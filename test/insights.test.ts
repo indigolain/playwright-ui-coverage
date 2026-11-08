@@ -17,8 +17,8 @@ describe('indexTests', () => {
       attempt({ testId: 'broken', title: 'broken', retry: 1, passed: false }),
     ]);
     expect(tests).toEqual([
-      { id: 'broken', title: 'broken', run: 1 },
-      { id: 'flaky', title: 'flaky', run: 1, trace: 'abc.zip' },
+      { id: 'broken', title: 'broken', run: 1, passed: false },
+      { id: 'flaky', title: 'flaky', run: 1, passed: true, trace: 'abc.zip' },
     ]);
   });
 
