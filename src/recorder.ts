@@ -1,8 +1,9 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import type { BrowserContext, Page, TestInfo } from '@playwright/test';
 import { tracker } from './tracker';
 import type { UiCoverageOptions } from './options';
-import { ATTACHMENT_NAME, type Interaction, type Inventory, type Snapshot } from './types';
+import { ATTACHMENT_NAME, SCREENSHOT_ATTACHMENT_PREFIX, type Interaction, type Inventory, type Snapshot } from './types';
 
 /**
  * Runs `fn` as an "internal" Playwright call when possible, so our evaluate /
@@ -15,6 +16,10 @@ function internal<T>(owner: unknown, fn: () => Promise<T>): Promise<T> {
 }
 
 const recorders = new WeakMap<BrowserContext, ContextRecorder>();
+/** Screenshot counter per test, so several contexts in one test don't collide. */
+const shotCounters = new WeakMap<TestInfo, number>();
+
+const IMAGE_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 
 /**
  * Records UI coverage for one browser context (every page and popup in it)
@@ -29,7 +34,8 @@ export class ContextRecorder {
   private shotKeys = new Map<string, Set<string>>();
   private chain: Promise<void> = Promise.resolve();
   private timers = new Map<Page, NodeJS.Timeout>();
-  private shotIndex = 0;
+  /** Screenshot files, attached to the test (by name) in finish(). */
+  private shots: { name: string; path: string }[] = [];
   private finished = false;
 
   private constructor(
@@ -128,9 +134,15 @@ export class ContextRecorder {
 
       this.addNew(this.shotKeys, after);
       this.addNew(this.seenKeys, after);
-      const screenshot = this.testInfo.outputPath(`ui-coverage-${this.shotIndex++}.png`);
-      await fs.promises.writeFile(screenshot, image);
-      this.snapshots.push({ ...after, screenshot });
+      const index = shotCounters.get(this.testInfo) ?? 0;
+      shotCounters.set(this.testInfo, index + 1);
+      const file = this.testInfo.outputPath(`ui-coverage-${index}.png`);
+      await fs.promises.writeFile(file, image);
+      // The JSON refers to the screenshot by attachment name, not by path, so it
+      // still resolves after the blob reporter / merge-reports move the files.
+      const name = `${SCREENSHOT_ATTACHMENT_PREFIX}${index}`;
+      this.shots.push({ name, path: file });
+      this.snapshots.push({ ...after, screenshot: name });
       return;
     }
   }
@@ -166,11 +178,17 @@ export class ContextRecorder {
     recorders.delete(this.context);
     if (this.interactions.length === 0 && this.snapshots.length === 0) return;
     // Push directly (like Playwright does for videos) rather than testInfo.attach(),
-    // which would add an "Attach" step to the user's report.
-    this.testInfo.attachments.push({
-      name: ATTACHMENT_NAME,
-      body: Buffer.from(JSON.stringify({ interactions: this.interactions, snapshots: this.snapshots })),
-      contentType: 'application/json',
-    });
+    // which would add an "Attach" step to the user's report. Screenshots go in as
+    // file attachments so the blob reporter carries them to merge-reports.
+    const contentType = (file: string) =>
+      IMAGE_TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream';
+    this.testInfo.attachments.push(
+      ...this.shots.map((s) => ({ name: s.name, path: s.path, contentType: contentType(s.path) })),
+      {
+        name: ATTACHMENT_NAME,
+        body: Buffer.from(JSON.stringify({ interactions: this.interactions, snapshots: this.snapshots })),
+        contentType: 'application/json',
+      },
+    );
   }
 }
