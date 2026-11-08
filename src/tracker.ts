@@ -1,13 +1,29 @@
 /**
- * In-page tracker. This function is serialized and injected with
- * `page.addInitScript`, so it must be fully self-contained: no imports,
- * no references to anything outside its own body (type-only imports are fine).
+ * In-page tracker. It records raw facts: every visible candidate element
+ * (tag, attributes, same-tag sibling position, ancestors, accessible name,
+ * box) and the interactions on them. Identity and filtering are computed in
+ * Node from those facts (`model/resolve.ts`), so they can change at report
+ * time. Interactivity ("does this element count?") is decided here and
+ * recorded as a fact, because it needs the live DOM: computed styles and
+ * scroll geometry, descendants (the nesting rule), `label.control`,
+ * `isContentEditable`.
+ *
+ * This function is serialized and injected with `page.addInitScript`, so it
+ * must be fully self-contained: no imports, no references to anything outside
+ * its own body (type-only imports are fine).
  */
-import type { IdentityArgs } from './identity';
 import type { InteractionArgs } from './interactions';
+import type { RawElementRef, RawInteractionEvent, RawInventory, RawNode } from './model/raw';
 
-export interface TrackerArgs extends IdentityArgs, InteractionArgs {
+export interface TrackerArgs extends InteractionArgs {
+  /**
+   * Selectors whose subtrees are excluded while recording, like
+   * `data-uicov-interactive="exclude-all"` (the deprecated
+   * `use.uiCoverage.ignoreSelectors`; report-time `ignoreSelectors` are applied in Node).
+   */
   ignoreSelectors: string[];
+  /** Extra elements to record although they aren't interactive (`RECORDED_CANDIDATES`). */
+  extraCandidates: string;
 }
 
 export function tracker(args: TrackerArgs): void {
@@ -206,35 +222,6 @@ export function tracker(args: TrackerArgs): void {
   const clean = (s: unknown): string =>
     typeof s === 'string' ? s.replace(/\s+/g, ' ').trim().slice(0, 60) : '';
 
-  const IMPLICIT_ROLES: Record<string, string> = {
-    a: 'link',
-    button: 'button',
-    select: 'combobox',
-    textarea: 'textbox',
-    summary: 'button',
-  };
-  const INPUT_ROLES: Record<string, string> = {
-    checkbox: 'checkbox',
-    radio: 'radio',
-    range: 'slider',
-    submit: 'button',
-    button: 'button',
-    reset: 'button',
-    image: 'button',
-    search: 'searchbox',
-    number: 'spinbutton',
-    file: 'button',
-  };
-
-  const roleOf = (el: Element): string => {
-    const explicit = (el.getAttribute('role') || '').trim().split(/\s+/)[0];
-    if (explicit) return explicit;
-    const tag = el.tagName.toLowerCase();
-    if (tag === 'input') return INPUT_ROLES[(el as HTMLInputElement).type] || 'textbox';
-    if ((el as HTMLElement).isContentEditable) return 'textbox';
-    return IMPLICIT_ROLES[tag] || tag;
-  };
-
   const nameOf = (el: Element): string => {
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
@@ -258,104 +245,78 @@ export function tracker(args: TrackerArgs): void {
     );
   };
 
-  // ---- Identity -------------------------------------------------------
-  // Order: data-uicov-id → identityAttributes (significant + built-in test
-  // ids) → id → name → structural path. Text is only used for the label.
-  const filters = (args.attributeFilters || []).map((f) => ({
-    attribute: new RegExp(f.attribute, 'i'),
-    value: f.value === undefined ? undefined : new RegExp(f.value),
-    include: f.include,
-  }));
-  const identityAttributes = args.identityAttributes || [];
+  // ---- Raw element facts ------------------------------------------------
+  // No identity here: Node computes it from these facts (model/resolve.ts).
 
-  /** The first matching filter decides; no match means the value is usable. */
-  const usable = (attr: string, value: string): boolean => {
-    if (!value.trim()) return false;
-    for (const f of filters) {
-      if (f.attribute.test(attr) && (!f.value || f.value.test(value))) return f.include;
-    }
-    return true;
-  };
+  const MAX_ATTRS = 40;
+  const VALUE_CAP = 256;
+  const CLASS_CAP = 1024;
 
-  const quote = (v: string) => JSON.stringify(v);
-
-  /** Attribute-based identity of `el`, or '' if it has none. */
-  const identityOf = (el: Element): string => {
-    const explicit = el.getAttribute('data-uicov-id');
-    if (explicit && explicit.trim()) return explicit.trim();
-    for (const attr of identityAttributes) {
-      const v = el.getAttribute(attr);
-      if (v !== null && usable(attr, v)) return `[${attr}=${quote(v)}]`;
-    }
-    const id = el.getAttribute('id');
-    if (id && usable('id', id)) return /^[A-Za-z_][\w-]*$/.test(id) ? `#${id}` : `[id=${quote(id)}]`;
-    const name = el.getAttribute('name');
-    if (name && usable('name', name)) {
-      let key = `[name=${quote(name)}]`;
-      // Radio buttons / checkboxes in a group share a name; tell them apart by value.
-      const type = (el as HTMLInputElement).type;
-      const value = el.getAttribute('value');
-      if (el.tagName === 'INPUT' && (type === 'radio' || type === 'checkbox') && value)
-        key += `[value=${quote(value)}]`;
-      return key;
-    }
-    return '';
-  };
-
-  // Table rows are repeated data: the controls in each row are instances of
-  // one element (e.g. a "Delete" button per row), so rows get no index.
-  const isRow = (el: Element) => el.tagName === 'TR' || el.getAttribute('role') === 'row';
-
-  /**
-   * Structural fallback: `tag:nth-of-type(n)` steps (index only when there are
-   * same-tag siblings) up to the nearest ancestor that has an identity, or up
-   * to <body>. Reads as a CSS selector, e.g. `#rows > tr > td:nth-of-type(2) > button`.
-   */
-  const structuralKey = (el: Element): string => {
-    const steps: string[] = [];
-    let cur: Element | null = el;
-    while (cur && cur !== document.body && cur !== document.documentElement) {
-      if (cur !== el) {
-        const anchor = identityOf(cur);
-        if (anchor) {
-          // A data-uicov-id value isn't a selector; show it as one so the path stays readable.
-          steps.unshift(cur.hasAttribute('data-uicov-id') ? `[data-uicov-id=${quote(anchor)}]` : anchor);
-          break;
-        }
-      }
-      let step = cur.tagName.toLowerCase();
-      const parent: Element | null = cur.parentElement;
-      if (parent && !isRow(cur)) {
-        const tag = cur.tagName;
-        const same = Array.from(parent.children).filter((c) => c.tagName === tag);
-        if (same.length > 1) step += `:nth-of-type(${same.indexOf(cur) + 1})`;
-      }
-      steps.unshift(step);
-      cur = parent;
-    }
-    return steps.join(' > ');
-  };
-
-  const RAW_ATTRS = ['id', 'name', 'role', 'type', 'aria-label', 'href'];
-  /** Raw identifying attributes, so identity can be recomputed later with other rules. */
-  const rawAttrs = (el: Element): Record<string, string> => {
-    const out: Record<string, string> = {};
+  /** All attributes except `style`; handler code (`on*`) is kept as presence only. Values capped. */
+  const attrsOf = (el: Element): Record<string, string> | undefined => {
+    let out: Record<string, string> | undefined;
+    let n = 0;
     for (const { name, value } of Array.from(el.attributes)) {
-      if (name.startsWith('data-') || RAW_ATTRS.includes(name) || identityAttributes.includes(name))
-        out[name] = value.slice(0, 200);
+      if (name === 'style') continue;
+      if (++n > MAX_ATTRS) break;
+      (out ??= {})[name] = name.startsWith('on') ? '' : value.slice(0, name === 'class' ? CLASS_CAP : VALUE_CAP);
     }
-    const type = (el as HTMLInputElement).type;
-    if (el.tagName === 'INPUT' && (type === 'radio' || type === 'checkbox') && el.hasAttribute('value'))
-      out.value = (el.getAttribute('value') || '').slice(0, 200);
     return out;
   };
 
-  const describe = (el: Element) => {
-    const role = roleOf(el);
+  /**
+   * Collects elements into a node table: each element once, parents first,
+   * so a chain of ancestors shared by many elements is stored once.
+   */
+  const nodeTable = () => {
+    const nodes: RawNode[] = [];
+    const index = new Map<Element, number>();
+    const add = (el: Element): number => {
+      const known = index.get(el);
+      if (known !== undefined) return known;
+      const parentEl = el.parentElement;
+      const parent = parentEl ? add(parentEl) : undefined;
+      const node: RawNode = { tag: el.tagName.toLowerCase() };
+      if (parent !== undefined) node.parent = parent;
+      if (parentEl) {
+        const tag = el.tagName;
+        let nth = 0;
+        let of = 0;
+        for (const c of Array.from(parentEl.children)) {
+          if (c.tagName !== tag) continue;
+          of++;
+          if (c === el) nth = of;
+        }
+        if (of > 1) {
+          node.nth = nth;
+          node.of = of;
+        }
+      }
+      const attrs = attrsOf(el);
+      if (attrs) node.attrs = attrs;
+      index.set(el, nodes.length);
+      nodes.push(node);
+      return nodes.length - 1;
+    };
+    return { nodes, add };
+  };
+
+  const ref = (el: Element, add: (el: Element) => number): RawElementRef => {
+    const out: RawElementRef = { node: add(el) };
     const name = nameOf(el);
-    const label = name ? `${role} "${name}"` : role;
-    const key = identityOf(el) || structuralKey(el);
-    return { key, label, attrs: rawAttrs(el) };
+    if (name) out.name = name;
+    if ((el.tagName === 'A' || el.tagName === 'AREA') && el.hasAttribute('href')) {
+      // Only when it can't be derived from the attribute and the page URL (a <base> element).
+      const resolved = (el as HTMLAnchorElement).href;
+      let derived = '';
+      try {
+        derived = new URL(el.getAttribute('href') || '', location.href).href;
+      } catch {
+        /* invalid URL */
+      }
+      if (resolved && resolved !== derived) out.href = resolved;
+    }
+    return out;
   };
 
   // ---- Event recording -------------------------------------------------
@@ -376,15 +337,13 @@ export function tracker(args: TrackerArgs): void {
   const lastScroll = new WeakMap<Element, number>();
 
   const send = (el: Element, type: string) => {
-    const { key, label, attrs } = describe(el);
+    const { nodes, add } = nodeTable();
+    const event: RawInteractionEvent = { event: type, url: location.href, nodes, element: ref(el, add) };
     // These may navigate away before a delayed snapshot can run, so ship the
     // current inventory with them (synchronously, before navigation).
     const withInventory = type === 'click' || type === 'submit' || type === 'keydown';
     try {
-      w.__uicovRecord?.(
-        { key, label, attrs, event: type, url: location.href },
-        withInventory ? w.__uicovInventory() : undefined,
-      );
+      w.__uicovRecord?.(event, withInventory ? w.__uicovInventory() : undefined);
     } catch {
       /* binding not available (e.g. about:blank) */
     }
@@ -433,24 +392,26 @@ export function tracker(args: TrackerArgs): void {
     return r.width > 0 && r.height > 0;
   };
 
-  w.__uicovInventory = () => ({
-    url: location.href,
-    dpr: window.devicePixelRatio || 1,
-    elements: interactiveElements()
-      .filter(isVisible)
-      .map((el) => {
-        const r = el.getBoundingClientRect();
-        const { key, label, attrs } = describe(el);
-        return {
-          key,
-          label,
-          attrs,
-          tag: el.tagName.toLowerCase(),
-          x: Math.round(r.x + window.scrollX),
-          y: Math.round(r.y + window.scrollY),
-          w: Math.round(r.width),
-          h: Math.round(r.height),
-        };
-      }),
-  });
+  const EXTRA = args.extraCandidates || '';
+  /** Visible interactive elements and visible extra candidates, flagged, in document order. */
+  w.__uicovInventory = (): RawInventory => {
+    const interactive = interactiveElements();
+    const flagged = new Set(interactive);
+    const all = EXTRA ? new Set([...interactive, ...Array.from(document.querySelectorAll(EXTRA))]) : flagged;
+    const ordered = all === flagged ? interactive : Array.from(all).sort((a, b) =>
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    const { nodes, add } = nodeTable();
+    const elements = ordered.filter(isVisible).map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        ...ref(el, add),
+        ...(flagged.has(el) ? {} : { candidateOnly: true as const }),
+        x: Math.round(r.x + window.scrollX),
+        y: Math.round(r.y + window.scrollY),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+      };
+    });
+    return { url: location.href, dpr: window.devicePixelRatio || 1, nodes, elements };
+  };
 }

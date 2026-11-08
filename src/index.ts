@@ -37,7 +37,10 @@ export {
   BUILTIN_ATTRIBUTE_FILTERS,
   BUILTIN_IDENTITY_ATTRIBUTES,
   type AttributeFilter,
-} from './identity';
+  type UiCoverageRules,
+} from './model/rules';
+export { RECORDED_CANDIDATES } from './model/elements';
+export { resolveCoverageData } from './model/resolve';
 export {
   DEFAULT_INTERACTIONS,
   INTERACTION_TYPES,
@@ -45,3 +48,14 @@ export {
   type InteractionType,
 } from './interactions';
 export type { TestCoverageData, Interaction, Snapshot, InventoryElement } from './types';
+export type {
+  RawCoverageData,
+  RawNode,
+  RawElement,
+  RawElementRef,
+  RawSnapshot,
+  RawInteraction,
+  StoredData,
+  StoredAttempt,
+} from './model/raw';
+export type { UiCoverageReporterOptions } from './report';

@@ -86,8 +86,8 @@ UI coverage: 38.9% (14/36 elements)
 ## How it works
 
 1. **Tracker** (`addInitScript`): capture-phase listeners record every interaction (`click`, `input`, `change`, `submit`, `dblclick`, `contextmenu`, keyboard activation, drag and drop, opt-in `scroll`/`focus`/`blur`, see [Interaction types](#interaction-types)) on an [interactive element](#which-elements-count), whichever Playwright API (or a real user) caused it.
-2. **Inventory + screenshot**: when a page loads and shortly after interactions, the recorder lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear.
-3. **Reporter**: merges data from all workers, groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it, and renders the HTML report and `coverage.json`.
+2. **Inventory + screenshot**: when a page loads and shortly after interactions, the recorder lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear. It records **raw facts** (tag, attributes, position among siblings, ancestors, accessible name), not keys: identity and filtering are decided later.
+3. **Reporter**: merges data from all workers, applies the [report-time rules](#report-time-rules-reporter-options) (filters, identity), groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it, and renders the HTML report and `coverage.json`. It also saves the raw data in `ui-coverage-report/data/`, so you can [rebuild the report](#rebuilding-the-report-report-cli) with other rules without running the tests again.
 
 ### Which elements count
 
@@ -130,11 +130,61 @@ Elements are matched across tests by **attributes and position, never by visible
 | 5 | `name` (radios/checkboxes add their `value`) | `[name="plan"][value="pro"]` |
 | 6 | Position: tag + index among same-tag siblings, up to the nearest ancestor that has a key from 1–5 (or `<body>`) | `#add > form > div > button:nth-of-type(2)` |
 
-Attribute values that look generated (rules 2–5) are skipped, see `attributeFilters` below. Visible text (role + accessible name, e.g. `button "Save"`) is shown in the report as the element's **label** only.
+Keys are computed when the report is built, from the recorded attributes, so changing `significantAttributes` or `attributeFilters` only needs a [rebuild](#rebuilding-the-report-report-cli). Attribute values that look generated (rules 2–5) are skipped, see `attributeFilters` below. Visible text (role + accessible name, e.g. `button "Save"`) is shown in the report as the element's **label** only.
 
 Positional keys read like CSS selectors and only use an index when there are several siblings with the same tag. Table rows (`<tr>`, `role="row"`) never get an index, so a "Delete" button on every row is one element with several instances. Positional keys change when the markup around the element changes, so for anything that matters, add a `data-testid` (or a `data-uicov-id`).
 
 ## Options
+
+Options come in two places:
+
+- **Report-time rules** (which elements count, how they're identified) are **reporter options**. They're applied when the report is built, so you can change them and [rebuild the report](#rebuilding-the-report-report-cli) without running the tests.
+- **Recording options** (`use.uiCoverage`) control what is captured while tests run: on/off, timing, screenshots, interaction types.
+
+### Report-time rules (reporter options)
+
+```ts
+// playwright.config.ts
+reporter: [
+  ['playwright-ui-coverage/reporter', {
+    ignoreSelectors: ['.cookie-banner', '#debug-toolbar *'], // default: []
+    significantAttributes: ['data-component'],              // default: []
+    attributeFilters: [                                      // default: []
+      { attribute: 'id', value: 'tmp-.*' },                  // ignore id="tmp-…"
+      { attribute: 'id', value: 'mui-legacy', include: true }, // keep, despite the built-in rule
+    ],
+  }],
+],
+```
+
+To share them with the `report` CLI, keep them in their own file and spread it into the reporter options, e.g. `...require('./ui-coverage.config.json')` (the demo does this with `demo/ui-coverage.config.json`). The type is exported as `UiCoverageRules`.
+
+- **`ignoreSelectors`**: elements matching one of these selectors, or inside an element that does, are excluded. Same rules as `data-uicov-interactive="exclude-all"` (a `reset` inside stops it, an element's own `include` wins). Anything inside `data-uicov-ignore` is always excluded. Selectors are evaluated on the recorded structure, see [Report-time selectors](#report-time-selectors). One difference from excluding in the markup: the [nesting rule](#which-elements-count) is decided while recording, so excluding all inner widgets of a container widget doesn't make the container count.
+- **`significantAttributes`**: attributes that identify an element, checked after `data-uicov-id` and before the built-in test-id attributes, in the order given.
+- **`attributeFilters`**: `{ attribute, value?, include? }` rules deciding whether an attribute value may be used as a key. `attribute` and `value` are regular expressions, anchored automatically (`'id'` means `^(?:id)$`). Attribute names match case-insensitively, values case-sensitively. Without `value`, the rule matches any value. The first matching rule wins: `include: false` (default) skips the value, `include: true` keeps it. Your rules run before the built-in ones, which skip:
+  - React `useId` values (`:r1:`, `:R2kq:`, `«r1»`), UUIDs and hex strings of 16+ characters, in any attribute;
+  - in `id` and `name`: framework counters (`ember123`, `mui-12345`, `radix-…`, `headlessui-…`, `react-aria-…`, `downshift-…`, `react-select-…`, `mat-…-0`, `cdk-…-3`, `ui-id-4`, `ext-gen12`, `gwt-uid-3`, `yui_…`, `j_id…`), purely numeric values and values with 3+ consecutive digits.
+
+  The built-in lists are exported as `BUILTIN_IDENTITY_ATTRIBUTES` and `BUILTIN_ATTRIBUTE_FILTERS`.
+
+#### Report-time selectors
+
+Selector rules run in Node on the recorded DOM structure (each element with its attributes, its position among same-tag siblings and its ancestors), not in the browser. Supported:
+
+- type (`button`), `*`, `#id`, `.class`, attribute selectors (`[a]`, `[a=v]`, `~=`, `|=`, `^=`, `$=`, `*=`, with the ` i` / ` s` flags);
+- descendant (` `) and child (`>`) combinators, selector lists (`,`);
+- `:not()`, `:is()`, `:where()`, `:nth-of-type()`, `:nth-last-of-type()`, `:first-of-type`, `:last-of-type`, `:only-of-type`, `:root`.
+
+Not supported, because the data needed isn't recorded: sibling combinators (`+`, `~`), `:has()`, `:nth-child()` and friends, state pseudo-classes (`:checked`, `:hover`, `:disabled`, …). An unsupported selector fails the run (or the CLI) with a message saying which part isn't supported. Attribute values are recorded up to 256 characters (`class` up to 1024), and `style` isn't recorded.
+
+#### Deprecated: rules in `use.uiCoverage`
+
+`ignoreSelectors`, `significantAttributes` and `attributeFilters` used to be recording options. In `use.uiCoverage` they still work, but are deprecated:
+
+- `significantAttributes` and `attributeFilters` are recorded with the data and applied at report time. If the reporter options set the same rule (even to `[]`), the reporter's value wins.
+- `ignoreSelectors` is applied while recording (as before, with any CSS the browser supports), so it can't be undone at report time.
+
+Move them to the reporter options to change them without re-running tests. When you do, pass them to `merge-reports` too (see [Sharding](#sharding-and-merge-reports)).
 
 ### Recording (`use.uiCoverage`, works in both modes)
 
@@ -146,13 +196,7 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
   use: {
     uiCoverage: {
       enabled: !!process.env.UI_COVERAGE, // default: true
-      ignoreSelectors: ['.cookie-banner'], // default: []
       snapshotDelay: 250,                  // ms, default: 250
-      significantAttributes: ['data-component'], // default: []
-      attributeFilters: [                  // default: []
-        { attribute: 'id', value: 'tmp-.*' },               // ignore id="tmp-…"
-        { attribute: 'id', value: 'mui-legacy', include: true }, // keep, despite the built-in rule
-      ],
       screenshots: 'on',                   // 'on' | 'first-only' | 'off', default: 'on'
       format: 'jpeg',                      // 'png' | 'jpeg', default: 'png'
       quality: 80,                         // JPEG quality 0-100, default: 80
@@ -165,15 +209,6 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
   },
 });
 ```
-
-Anything inside an element with `data-uicov-ignore` (or `data-uicov-interactive="exclude-all"`) is excluded, see [Which elements count](#which-elements-count).
-
-- **`significantAttributes`**: attributes that identify an element, checked after `data-uicov-id` and before the built-in test-id attributes, in the order given.
-- **`attributeFilters`**: `{ attribute, value?, include? }` rules deciding whether an attribute value may be used as a key. `attribute` and `value` are regular expressions, anchored automatically (`'id'` means `^(?:id)$`). Attribute names match case-insensitively, values case-sensitively. Without `value`, the rule matches any value. The first matching rule wins: `include: false` (default) skips the value, `include: true` keeps it. Your rules run before the built-in ones, which skip:
-  - React `useId` values (`:r1:`, `:R2kq:`, `«r1»`), UUIDs and hex strings of 16+ characters, in any attribute;
-  - in `id` and `name`: framework counters (`ember123`, `mui-12345`, `radix-…`, `headlessui-…`, `react-aria-…`, `downshift-…`, `react-select-…`, `mat-…-0`, `cdk-…-3`, `ui-id-4`, `ext-gen12`, `gwt-uid-3`, `yui_…`, `j_id…`), purely numeric values and values with 3+ consecutive digits.
-
-  The built-in lists are exported as `BUILTIN_IDENTITY_ATTRIBUTES` and `BUILTIN_ATTRIBUTE_FILTERS`.
 
 - **`interactions`**: the events that count, see below. Unknown names fail the run with the list of supported ones.
 - **`allowedInteractions`**: `{ selector, events }` rules. For an element matching `selector` (the first matching rule wins), only `events` count, replacing `interactions`. The events listed here are recorded even if `interactions` leaves them out.
@@ -192,7 +227,7 @@ Anything inside an element with `data-uicov-ignore` (or `data-uicov-interactive=
 
 `DEFAULT_INTERACTIONS` and `INTERACTION_TYPES` are exported. A Playwright `dblclick()` also fires two `click`s, and `press('Enter')` on a button fires `keydown` and `click`; each is recorded under its own type.
 
-Each recorded element also keeps its raw identifying attributes (`attrs`: `id`, `name`, `role`, `type`, `aria-label`, `href`, `data-*` and your `significantAttributes`) in the test attachment.
+Interaction types are recording options: events that aren't listened to can't be recovered later.
 
 Screenshot options:
 
@@ -222,6 +257,8 @@ The summary has `tests` (one entry per test: `id`, `title`, `project`, `run`, th
 | `countFailedTests` | `false` | Let interactions from tests that didn't pass mark elements as tested. See below. |
 | `viewBy` | `'auto'` | Group views by page URL (`'url'`) or by spec file (`'file'`). `'auto'` picks `'file'` for component tests. See [Component testing](#component-testing). |
 | `htmlReport` | detected | Folder of Playwright's HTML report (relative to the config file) that "Tested by" links to. Detected from the `html` reporter in the config; `false` turns the links off. See below. |
+| `saveData` | `true` | Keep the raw data and every screenshot in `<outputFolder>/data/` for the [`report` CLI](#rebuilding-the-report-report-cli). |
+| `ignoreSelectors`, `significantAttributes`, `attributeFilters` | `[]` | [Report-time rules](#report-time-rules-reporter-options). |
 
 ### Links to the HTML report and traces
 
@@ -301,16 +338,56 @@ npx playwright test --shard=2/2 --reporter=blob
 npx playwright merge-reports --reporter playwright-ui-coverage/reporter all-blob-reports
 ```
 
-The merged report is the same as one from an unsharded run. To pass reporter options (e.g. `outputFolder`, `threshold`), use a config file with `npx playwright merge-reports --config merge.config.ts all-blob-reports`:
+The merged report is the same as one from an unsharded run. To pass reporter options (e.g. `outputFolder`, `threshold`, and the [report-time rules](#report-time-rules-reporter-options)), use a config file with `npx playwright merge-reports --config merge.config.ts all-blob-reports`. `--reporter` on the command line uses default options, so rules set in the reporter options would be missing:
 
 ```ts
 // merge.config.ts
+import rules from './ui-coverage.config.json';
+
 export default {
-  reporter: [['playwright-ui-coverage/reporter', { outputFolder: 'ui-coverage-report', threshold: 30 }]],
+  reporter: [['playwright-ui-coverage/reporter', { ...rules, outputFolder: 'ui-coverage-report', threshold: 30 }]],
 };
 ```
 
 Each screenshot is a file attachment named `ui-coverage-screenshot-<n>`, next to the `ui-coverage` JSON attachment, so you'll see them listed under the test's attachments in Playwright's own HTML report.
+
+## Rebuilding the report (`report` CLI)
+
+The reporter keeps the raw recordings next to the report:
+
+```
+ui-coverage-report/
+  index.html, coverage.json, screens/   ← the report
+  data/
+    ui-coverage-data.json               ← every test attempt's raw recording
+    screenshots/                        ← every screenshot, not just the ones the report shows
+```
+
+Rebuild the report from it, e.g. after changing a filter, without running the tests:
+
+```bash
+npx playwright-ui-coverage report --config ui-coverage.config.json
+npx playwright-ui-coverage report --data ci-artifacts/ui-coverage-report/data --config ui-coverage.config.mjs --out ui-coverage-report
+```
+
+| Flag | Default | |
+|---|---|---|
+| `--config <file>` | none (default options) | A module exporting the reporter options: `.json`, `.js`/`.cjs` (`module.exports = {…}`), `.mjs` (`export default {…}`), or `.ts`/`.mts` if your Node.js can import TypeScript (22.18+ / 23.6+). Functions like `normalizeUrl` need a JS/TS config. |
+| `--data <dir>` | `data/` in the config's `outputFolder` (else `ui-coverage-report/data`) | The data folder. |
+| `--out <dir>` | the folder that contains `--data` | Where to write the report. Only `index.html`, `coverage.json` and `screens/` are replaced. |
+
+`threshold` is checked like in the reporter: the CLI exits with code 1 if a threshold isn't met, and 2 on errors (bad flags, unreadable data, invalid rules).
+
+**What a rebuild can change:** everything the reporter does with the data: [report-time rules](#report-time-rules-reporter-options), `normalizeUrl`, `viewBy`, `threshold`, `countFailedTests`, `maxScreenshotsPerRoute`. Links to the HTML report are kept and adjusted to `--out` (`htmlReport: false` drops them). **What it can't:** what was recorded. Which elements are interactive is decided in the browser (it needs the live page: computed styles, descendants, label targets), interaction types are recording options, and screenshots are what they are. The deprecated `use.uiCoverage.ignoreSelectors` was applied while recording.
+
+**Data format.** `ui-coverage-data.json` has `formatVersion: 1` and an `attempts` array: one entry per test attempt and browser context with `testId`, `retry`, `passed`, `title`, `project`, `trace`, `tags`, `specFile` and `data`, the recording (`formatVersion: 2`, see `RawCoverageData` in [src/model/raw.ts](src/model/raw.ts)):
+
+- `nodes`: a table of DOM elements, each `{ tag, parent?, nth?, of?, attrs? }`: the parent's index, the position among same-tag siblings (`:nth-of-type`), and the attributes. Ancestor chains are stored once and shared by every element under them.
+- `snapshots`: `{ url, dpr, screenshot?, elements }`, with each element `{ node, name?, x, y, w, h }` (`name` is the accessible name, used for labels only; `candidateOnly: true` marks elements recorded although they aren't interactive, like `<label>`).
+- `interactions`: `{ event, url, element: { node, name? } }`, pointing into the same node table, so an interaction resolves to the same key as the element in the inventory.
+- `rules`: the deprecated `use.uiCoverage` identity rules, if any.
+
+The same recording is the `ui-coverage` test attachment, so `merge-reports` and the data folder carry identical data. Attachments from earlier versions (no `formatVersion`, keys computed in the browser) are still read, but report-time rules can't change their keys.
 
 ## Component testing
 
@@ -376,6 +453,8 @@ UICOV_TRACE=1 npm run demo  # records traces; "Tested by" links to them in playw
 npm run check:interactivity  # in-browser check of the interactivity rules and interaction types
 npm run example:ct    # component testing example (examples/ct-react): installs it, runs it, writes its report
 npm run demo:sharded  # runs 2 blob shards + merge-reports, checks it matches an unsharded run
+npm run check:rebuild # checks the report CLI rebuilds the same report from data/, and that changed rules apply
+UICOV_DEMO_LEGACY=1 npm run demo  # sets the rules the deprecated way (use.uiCoverage); same report
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
 npm run perf          # builds a 300-route synthetic report in perf-report/ and times it in Chromium
 npm run typecheck

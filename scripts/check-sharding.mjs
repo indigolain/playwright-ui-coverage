@@ -72,7 +72,17 @@ try {
   fs.rmSync(path.join(root, 'test-results'), { recursive: true, force: true });
   fs.rmSync(report, { recursive: true, force: true });
 
-  run(['merge-reports', '--reporter', './src/reporter.ts', merged]);
+  // A merge config passes the report-time rules (demo/ui-coverage.config.json),
+  // like the demo's playwright.config.ts does; `--reporter` alone would drop them.
+  const rules = JSON.parse(fs.readFileSync(path.join(root, 'demo', 'ui-coverage.config.json'), 'utf8'));
+  const mergeConfig = path.join(tmp, 'merge.config.mjs');
+  fs.writeFileSync(
+    mergeConfig,
+    `export default ${JSON.stringify({
+      reporter: [[path.join(root, 'src', 'reporter.ts'), { ...rules, outputFolder: report }]],
+    })};\n`,
+  );
+  run(['merge-reports', '--config', mergeConfig, merged]);
   const result = readReport();
 
   // 4. Compare.
@@ -82,12 +92,31 @@ try {
       `coverage differs: merged ${result.percent}% (${result.tested}/${result.total}), ` +
         `unsharded ${baseline.percent}% (${baseline.tested}/${baseline.total})`,
     );
+    const a = JSON.parse(comparable(result)).routes;
+    const b = JSON.parse(comparable(baseline)).routes;
+    for (const r of a) {
+      const other = b.find((x) => x.route === r.route);
+      const text = (els) => new Set((els ?? []).map((e) => JSON.stringify(e)));
+      const [mine, theirs] = [text(r.elements), text(other?.elements)];
+      for (const e of mine) if (!theirs.has(e)) errors.push(`  merged only (${r.route}): ${e}`);
+      for (const e of theirs) if (!mine.has(e)) errors.push(`  unsharded only (${r.route}): ${e}`);
+    }
   }
   for (const r of result.routes) {
     for (const s of r.screenshots) {
       const file = path.join(report, s.source);
       if (!fs.existsSync(file) || fs.statSync(file).size === 0) errors.push(`missing screenshot ${s.source} (${r.route})`);
     }
+  }
+  // The merged report also keeps the raw data, for `playwright-ui-coverage report`.
+  const dataFile = path.join(report, 'data', 'ui-coverage-data.json');
+  if (!fs.existsSync(dataFile)) errors.push('merged report has no data/ui-coverage-data.json');
+  else {
+    const stored = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    const shots = stored.attempts.flatMap((a) => a.data.snapshots ?? []).filter((s) => s.screenshot);
+    const missing = shots.filter((s) => !fs.existsSync(path.join(report, 'data', s.screenshot)));
+    if (shots.length === 0) errors.push('merged data/ has no screenshots');
+    if (missing.length) errors.push(`${missing.length} screenshot(s) referenced in data/ are missing`);
   }
   const [got, want] = [countShots(result), countShots(baseline)];
   if (got === 0 && want > 0) errors.push('merged report has no screenshots');

@@ -1,0 +1,156 @@
+/**
+ * Raw recording format: what the in-page tracker collects. No identity or
+ * filtering is applied; those run in Node (`model/resolve.ts`) when the
+ * report is built. Interactivity is recorded as a per-element fact (it needs
+ * the live DOM to decide).
+ */
+import type { HtmlReportLink } from '../insights';
+import type { UiCoverageRules } from './rules';
+
+/**
+ * Version of the `ui-coverage` test attachment payload (`RawCoverageData`).
+ * Payloads without `formatVersion` are the pre-0.2 format, where keys and
+ * labels were computed in the browser (`TestCoverageData` in `types.ts`).
+ */
+export const RECORDING_FORMAT_VERSION = 2;
+
+/**
+ * One DOM element: a recorded candidate or one of its ancestors. Nodes are
+ * stored once per test attempt in `RawCoverageData.nodes` and point to their
+ * parent, so ancestor chains shared by many elements are stored once.
+ */
+export interface RawNode {
+  /** Lowercase tag name. */
+  tag: string;
+  /** Index into `nodes` of the parent element. Absent for `<html>` (or a detached root). */
+  parent?: number;
+  /** 1-based position among same-tag siblings (`:nth-of-type`). Absent when `of` is absent. */
+  nth?: number;
+  /** Number of same-tag siblings including this one. Absent when 1. */
+  of?: number;
+  /**
+   * Attributes, in DOM order. Values are capped (`class` at 1024 characters,
+   * others at 256); `style` is left out and event handler attributes (`on*`)
+   * are kept with an empty value so selectors like `[onclick]` still match.
+   */
+  attrs?: Record<string, string>;
+}
+
+/** A candidate element's state at one moment (an inventory entry or an interaction target). */
+export interface RawElementRef {
+  /** Index into `nodes`. */
+  node: number;
+  /** Accessible name (aria-labelledby, aria-label, label, placeholder, title, alt, text…), capped at 60 chars. */
+  name?: string;
+  /** Resolved destination of `<a href>` / `<area href>`, only when it differs from `new URL(href, snapshot url)` (a `<base>` element). */
+  href?: string;
+}
+
+/** A visible recorded element in an inventory, with its box in document CSS pixels. */
+export interface RawElement extends RawElementRef {
+  /**
+   * Recorded as a candidate only (`RECORDED_CANDIDATES`): not interactive by
+   * the in-browser rules (README "Which elements count"), which include markup
+   * directives and the recording-time `ignoreSelectors`. Absent: interactive.
+   */
+  candidateOnly?: true;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface RawSnapshot {
+  url: string;
+  dpr: number;
+  /**
+   * Screenshot reference: an attachment name (`ui-coverage-screenshot-<n>`)
+   * in the test attachment, a path relative to the data folder in
+   * `ui-coverage-report/data/`, or an absolute path once resolved.
+   */
+  screenshot?: string;
+  /** Height in CSS px of the screenshot when it was cropped (`maxScreenshotHeight`). */
+  screenshotHeight?: number;
+  /** Visible recorded elements, in document order. */
+  elements: RawElement[];
+}
+
+export interface RawInteraction {
+  /** DOM event type (`click`, `input`, `keydown`, …). */
+  event: string;
+  url: string;
+  /**
+   * The element the event was credited to in the browser (e.g. a label's
+   * control, a form's submitter). It resolves to the same key as that
+   * element's inventory entry, since both point into the same node table.
+   */
+  element: RawElementRef;
+}
+
+/** Payload of the `ui-coverage` attachment (one per browser context per test attempt). */
+export interface RawCoverageData {
+  formatVersion: typeof RECORDING_FORMAT_VERSION;
+  nodes: RawNode[];
+  /**
+   * Identity rules set in `use.uiCoverage` (deprecated there) when recording;
+   * merged with the report-time rules, which win. (`use.uiCoverage.ignoreSelectors`
+   * is applied while recording, through `RawElement.candidateOnly`.)
+   */
+  rules?: UiCoverageRules;
+  snapshots: RawSnapshot[];
+  interactions: RawInteraction[];
+  /** True when the test ran under Playwright component testing. */
+  componentTest?: boolean;
+}
+
+/** Result of the in-page `__uicovInventory()` (node indices are local to it). */
+export interface RawInventory {
+  url: string;
+  dpr: number;
+  nodes: RawNode[];
+  elements: RawElement[];
+}
+
+/** First argument of the `__uicovRecord` binding (node indices are local to it). */
+export interface RawInteractionEvent {
+  event: string;
+  url: string;
+  nodes: RawNode[];
+  element: RawElementRef;
+}
+
+/** Version of `ui-coverage-report/data/ui-coverage-data.json`. */
+export const DATA_FORMAT_VERSION = 1;
+export const DATA_FILE = 'ui-coverage-data.json';
+
+/** One test attempt as stored in the data folder. */
+export interface StoredAttempt {
+  /** `TestCase.id`: the same across retries of one test. */
+  testId: string;
+  /** `TestResult.retry`: 0 for the first attempt. */
+  retry: number;
+  /** Whether this attempt had the expected outcome. */
+  passed: boolean;
+  /** Test title path without the project and file (`describe › test`). */
+  title: string;
+  /** Project name. */
+  project?: string;
+  /** Trace file name in Playwright's HTML report attachments folder, when the report links to it. */
+  trace?: string;
+  tags?: string[];
+  /** Spec file relative to the project's testDir (`/` separators), for `viewBy: 'file'`. */
+  specFile?: string;
+  /** The `ui-coverage` attachment: `RawCoverageData`, or the pre-0.2 `TestCoverageData`. */
+  data: unknown;
+}
+
+/** `ui-coverage-report/data/ui-coverage-data.json`. */
+export interface StoredData {
+  formatVersion: typeof DATA_FORMAT_VERSION;
+  generatedAt: string;
+  /** The run's config was a Playwright component testing config (for `viewBy: 'auto'`). */
+  componentTestConfig?: boolean;
+  /** Playwright's HTML report, `path` relative to the report folder (the data folder's parent). */
+  htmlReport?: HtmlReportLink;
+  attempts: StoredAttempt[];
+}
