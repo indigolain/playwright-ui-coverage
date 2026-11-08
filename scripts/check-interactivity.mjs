@@ -1,6 +1,7 @@
 // In-browser check of the interactivity rules and interaction types
 // (src/tracker.ts). Runs the built tracker (dist/) in Chromium against a
-// fixture page and compares the inventory and the recorded interactions.
+// fixture page and compares the inventory and the recorded interactions
+// (keys computed from the raw recording with dist/model/resolve.js).
 //
 //   npm run check:interactivity    # builds first
 import assert from 'node:assert/strict';
@@ -9,7 +10,14 @@ import { chromium } from '@playwright/test';
 
 const require = createRequire(import.meta.url);
 const { tracker } = require('../dist/tracker.js');
-const { identityArgs } = require('../dist/identity.js');
+const { Resolver, compileRules } = require('../dist/model/resolve.js');
+const { RECORDED_CANDIDATES } = require('../dist/model/elements.js');
+
+/** Keys of raw element refs, with default identity rules. */
+const keysOf = (nodes, refs) => {
+  const r = new Resolver({ nodes }, compileRules({}));
+  return refs.map((ref) => r.key(r.node(ref)));
+};
 const { interactionArgs, DEFAULT_INTERACTIONS } = require('../dist/interactions.js');
 
 const PAGE = `<!doctype html><html><body>
@@ -69,7 +77,7 @@ const EXPECTED_INVENTORY = [
 
 const options = {
   ignoreSelectors: ['.banner', '!!invalid'],
-  ...identityArgs({}),
+  extraCandidates: RECORDED_CANDIDATES.join(','),
   // scroll is opt-in; turn it on so scroll containers are inventoried and credited.
   ...interactionArgs({
     interactions: [...DEFAULT_INTERACTIONS, 'scroll'],
@@ -92,7 +100,10 @@ const check = async (name, fn) => {
 async function setup(opts = options) {
   const context = await browser.newContext();
   const recorded = [];
-  await context.exposeBinding('__uicovRecord', (_source, i) => void recorded.push(`${i.event}:${i.key}`));
+  await context.exposeBinding(
+    '__uicovRecord',
+    (_source, i) => void recorded.push(`${i.event}:${keysOf(i.nodes, [i.element])[0]}`),
+  );
   await context.addInitScript(tracker, opts);
   const page = await context.newPage();
   page.on('console', () => {}); // invalid selector warning
@@ -107,8 +118,10 @@ async function setup(opts = options) {
 
 try {
   const { context, page, take } = await setup();
-  const inventory = async () =>
-    (await page.evaluate(() => window.__uicovInventory())).elements.map((e) => e.key.replace(/^#/, ''));
+  const inventory = async () => {
+    const inv = await page.evaluate(() => window.__uicovInventory());
+    return keysOf(inv.nodes, inv.elements.filter((e) => !e.candidateOnly)).map((k) => k.replace(/^#/, ''));
+  };
 
   console.log('interactivity rules');
   await check('inventory', async () => assert.deepEqual(await inventory(), EXPECTED_INVENTORY));
@@ -205,7 +218,8 @@ try {
     await s.page.focus('#btn');
     await s.page.focus('#ta');
     assert.deepEqual(await s.take(), ['focus:#btn', 'blur:#btn', 'focus:#ta']);
-    const keys = (await s.page.evaluate(() => window.__uicovInventory())).elements.map((e) => e.key);
+    const inv = await s.page.evaluate(() => window.__uicovInventory());
+    const keys = keysOf(inv.nodes, inv.elements.filter((e) => !e.candidateOnly));
     assert.ok(!keys.includes('#scroller'), 'scroll container inventoried although scroll is off');
     await s.context.close();
   });

@@ -1,3 +1,9 @@
+/**
+ * Resolved coverage data: raw recordings (`model/raw.ts`) after identity,
+ * interactivity and filtering rules were applied (`model/resolve.ts`). This is
+ * also the `ui-coverage` attachment format before 0.2 (no `formatVersion`).
+ */
+
 /** An interactive element found on the page during an inventory pass. */
 export interface InventoryElement {
   /**
@@ -8,7 +14,7 @@ export interface InventoryElement {
   key: string;
   /** Human-readable label (role + accessible name). Display only. */
   label: string;
-  /** Raw identifying attributes (`id`, `name`, `data-*`, …), to recompute identity later. */
+  /** Raw identifying attributes. Only in pre-0.2 recordings. */
   attrs?: Record<string, string>;
   /** Role as computed in the page (the first word of `label`). */
   role?: string;
@@ -63,7 +69,7 @@ export interface Snapshot extends Inventory {
   screenshotHeight?: number;
 }
 
-/** Payload attached to each test result (attachment name: "ui-coverage"). */
+/** Resolved data of one recording (one browser context in one test attempt). */
 export interface TestCoverageData {
   interactions: Interaction[];
   snapshots: Snapshot[];

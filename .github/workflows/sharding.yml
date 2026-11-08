@@ -28,3 +28,9 @@ jobs:
         env:
           CI: true
           UICOV_MODE: ${{ matrix.mode }}
+      # Rebuilding the report from ui-coverage-report/data/ with the CLI gives the same result.
+      - run: npm run check:rebuild
+        env:
+          CI: true
+          UICOV_MODE: ${{ matrix.mode }}
+      - run: node --test test/model.test.mjs
