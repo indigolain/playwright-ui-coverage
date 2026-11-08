@@ -55,6 +55,8 @@ export interface RouteScreenshot {
   source: string;
   dpr: number;
   test: string;
+  /** `TestCase.id` of `test`, when known. */
+  testId?: string;
   boxes: ScreenshotBox[];
 }
 
@@ -135,7 +137,7 @@ export function aggregate(
 ): CoverageSummary {
   type RouteAcc = {
     elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string>; labels: Map<string, ElementDetails>; idSet: Set<string>; failingIdSet: Set<string> }>;
-    snapshots: { snap: TestCoverageData['snapshots'][number]; test: string }[];
+    snapshots: { snap: TestCoverageData['snapshots'][number]; test: string; testId?: string }[];
   };
   const routes = new Map<string, RouteAcc>();
   /** `view` (set for `viewBy: 'file'`) puts all of an entry's data in one view, whatever the URL. */
@@ -146,10 +148,10 @@ export function aggregate(
   };
 
   // Pass 1: inventories.
-  for (const { title, data } of tests) {
+  for (const { title, testId, data } of tests) {
     for (const snap of data.snapshots) {
       const acc = routeFor(snap.url, data.view);
-      acc.snapshots.push({ snap, test: title });
+      acc.snapshots.push({ snap, test: title, testId });
       const counts = new Map<string, number>();
       for (const el of snap.elements) counts.set(el.key, (counts.get(el.key) ?? 0) + 1);
       for (const el of snap.elements) {
@@ -249,13 +251,14 @@ export function aggregate(
         }
       });
       if (best < 0) break;
-      const [{ snap, test }] = candidates.splice(best, 1);
+      const [{ snap, test, testId }] = candidates.splice(best, 1);
       const inImage = visible(snap);
       inImage.forEach((e) => shown.add(e.key));
       chosen.push({
         source: snap.screenshot!,
         dpr: snap.dpr,
         test,
+        ...(testId ? { testId } : {}),
         boxes: inImage.map(({ key, x, y, w, h }) => ({ key, x, y, w, h })),
       });
     }

@@ -14,6 +14,8 @@ export interface TestInfo {
    * report's `run`): the last passing attempt, or the last attempt if none passed.
    */
   run: number;
+  /** Whether that attempt passed. */
+  passed: boolean;
   /** Trace of that attempt, as a file name in the HTML report's attachments folder. */
   trace?: string;
 }
@@ -31,7 +33,7 @@ export function indexTests(entries: AttemptEntry[]): TestInfo[] {
   }
   return [...chosen.values()]
     .map((e) => {
-      const t: TestInfo = { id: e.testId, title: e.title, run: e.retry };
+      const t: TestInfo = { id: e.testId, title: e.title, run: e.retry, passed: e.passed };
       if (e.project) t.project = e.project;
       if (e.trace) t.trace = e.trace;
       return t;

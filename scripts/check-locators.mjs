@@ -120,8 +120,8 @@ try {
   for (let i = 0; i < 50; i++) {
     try { await page.goto(`http://localhost:${port}/`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
   }
-  for (const r of report.routes) {
-    await page.goto(`http://localhost:${port}${r.route.replace(':id', '1')}`);
+  for (const r of report.views) {
+    await page.goto(`http://localhost:${port}${r.name.replace(':id', '1')}`);
     // Show content that tests open first (the add-user dialog, "Learn more").
     await page.evaluate(() => {
       document.querySelector('dialog')?.show();
@@ -137,7 +137,7 @@ try {
       const known = /as of \d/.test(e.name || '');
       if (!ok && !known) {
         bad++;
-        console.log(`FAIL ${r.route}: ${expr} matched ${n}`);
+        console.log(`FAIL ${r.name}: ${expr} matched ${n}`);
       }
     }
   }
@@ -149,4 +149,4 @@ if (bad) {
   console.error(`${bad} suggested locator(s) didn't resolve`);
   process.exit(1);
 }
-console.log(`demo report: all suggested locators resolve (${report.routes.reduce((n, r) => n + r.elements.length, 0)} elements)`);
+console.log(`demo report: all suggested locators resolve (${report.views.reduce((n, r) => n + r.elements.length, 0)} elements)`);
