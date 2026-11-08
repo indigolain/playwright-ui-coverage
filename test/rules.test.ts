@@ -1,17 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_ATTRIBUTE_FILTERS, BUILTIN_IDENTITY_ATTRIBUTES, identityArgs } from '../src/identity';
+import {
+  BUILTIN_ATTRIBUTE_FILTERS,
+  BUILTIN_IDENTITY_ATTRIBUTES,
+  compileAttributeFilters,
+  identityAttributes,
+  type UiCoverageRules,
+} from '../src/model/rules';
 
-/** Whether `identityArgs` filters would drop `attribute="value"` (first matching rule wins). */
+const identityArgs = (rules: UiCoverageRules) => ({
+  identityAttributes: identityAttributes(rules),
+  attributeFilters: compileAttributeFilters(rules),
+});
+
+/** Whether the filters would drop `attribute="value"` (first matching rule wins). */
 function ignored(args: ReturnType<typeof identityArgs>, attribute: string, value: string): boolean {
   for (const f of args.attributeFilters) {
-    if (!new RegExp(f.attribute, 'i').test(attribute)) continue;
-    if (f.value !== undefined && !new RegExp(f.value).test(value)) continue;
+    if (!f.attribute.test(attribute)) continue;
+    if (f.value !== undefined && !f.value.test(value)) continue;
     return !f.include;
   }
   return false;
 }
 
-describe('identityArgs', () => {
+describe('identityAttributes / compileAttributeFilters', () => {
   it('puts significantAttributes before the built-in ones, normalized and deduplicated', () => {
     const { identityAttributes } = identityArgs({ significantAttributes: [' Data-Action ', 'data-testid', '', 'data-uicov-id'] });
     expect(identityAttributes).toEqual(['data-action', ...BUILTIN_IDENTITY_ATTRIBUTES]);
@@ -25,9 +36,9 @@ describe('identityArgs', () => {
 
   it('anchors patterns and puts user filters first', () => {
     const { attributeFilters } = identityArgs({ attributeFilters: [{ attribute: 'data-.*', value: 'tmp-.*' }] });
-    expect(attributeFilters[0]).toEqual({ attribute: '^(?:data-.*)$', value: '^(?:tmp-.*)$', include: false });
+    expect(attributeFilters[0]).toEqual({ attribute: /^(?:data-.*)$/i, value: /^(?:tmp-.*)$/, include: false });
     expect(identityArgs({ attributeFilters: [{ attribute: 'id', include: true }] }).attributeFilters[0]).toEqual({
-      attribute: '^(?:id)$',
+      attribute: /^(?:id)$/i,
       value: undefined,
       include: true,
     });

@@ -2,10 +2,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { BrowserContext, Page, TestInfo } from '@playwright/test';
 import { tracker } from './tracker';
-import { identityArgs } from './identity';
 import { interactionArgs } from './interactions';
-import type { UiCoverageOptions } from './options';
-import { ATTACHMENT_NAME, SCREENSHOT_ATTACHMENT_PREFIX, type Interaction, type Inventory, type Snapshot } from './types';
+import { recordedRules, type UiCoverageOptions } from './options';
+import { RECORDED_CANDIDATES } from './model/elements';
+import {
+  RECORDING_FORMAT_VERSION,
+  type RawCoverageData,
+  type RawElementRef,
+  type RawInteraction,
+  type RawInteractionEvent,
+  type RawInventory,
+  type RawNode,
+  type RawSnapshot,
+} from './model/raw';
+import { compileRules, Resolver } from './model/resolve';
+import type { UiCoverageRules } from './model/rules';
+import { ATTACHMENT_NAME, SCREENSHOT_ATTACHMENT_PREFIX } from './types';
 
 /**
  * Runs `fn` as an "internal" Playwright call when possible, so our evaluate /
@@ -32,11 +44,22 @@ const IMAGE_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'imag
 
 /**
  * Records UI coverage for one browser context (every page and popup in it)
- * and attaches the result to the test when finished.
+ * and attaches the raw result to the test when finished.
  */
 export class ContextRecorder {
-  private interactions: Interaction[] = [];
-  private snapshots: Snapshot[] = [];
+  /** Node table shared by every snapshot and interaction of this context. */
+  private nodes: RawNode[] = [];
+  private nodeIds = new Map<string, number>();
+  private interactions: RawInteraction[] = [];
+  private snapshots: RawSnapshot[] = [];
+  /** Identity rules from `use.uiCoverage` (deprecated there), recorded with the data. */
+  private rules: UiCoverageRules;
+  /**
+   * Resolves keys with the recording-time rules. Only used to decide when a
+   * new snapshot / screenshot is worth taking; the report recomputes keys
+   * with its own rules.
+   */
+  private resolver: Resolver;
   /** Keys already captured in any inventory, per URL. */
   private seenKeys = new Map<string, Set<string>>();
   /** Keys already visible in a screenshot, per URL. */
@@ -51,7 +74,10 @@ export class ContextRecorder {
     private context: BrowserContext,
     private testInfo: TestInfo,
     private options: UiCoverageOptions,
-  ) {}
+  ) {
+    this.rules = recordedRules(options);
+    this.resolver = new Resolver({ nodes: this.nodes }, compileRules(this.rules));
+  }
 
   /** Starts recording `context`. Returns undefined if it is already being recorded. */
   static async attach(
@@ -74,20 +100,51 @@ export class ContextRecorder {
     await internal(this.context, async () => {
       await this.context.exposeBinding(
         '__uicovRecord',
-        ({ page }, interaction: Interaction, inventory?: Inventory) => {
-          this.interactions.push(interaction);
-          if (inventory && this.addNew(this.seenKeys, inventory)) this.snapshots.push(inventory);
+        ({ page }, event: RawInteractionEvent, inventory?: RawInventory) => {
+          const map = this.intern(event.nodes);
+          this.interactions.push({ event: event.event, url: event.url, element: this.remap(event.element, map) });
+          if (inventory) {
+            const snap = this.toSnapshot(inventory);
+            if (this.addNew(this.seenKeys, snap)) this.snapshots.push(snap);
+          }
           if (page) this.schedule(page);
         },
       );
       await this.context.addInitScript(tracker, {
-        ignoreSelectors: this.options.ignoreSelectors,
-        ...identityArgs(this.options),
+        ignoreSelectors: this.options.ignoreSelectors ?? [],
+        extraCandidates: RECORDED_CANDIDATES.join(','),
         ...interactionArgs(this.options),
       });
     });
     this.context.on('page', (page) => this.watch(page));
     this.context.pages().forEach((page) => this.watch(page));
+  }
+
+  /** Adds an in-page node list to the shared table; returns local → shared indices. */
+  private intern(local: RawNode[]): number[] {
+    const map: number[] = [];
+    for (const n of local) {
+      const node: RawNode = { ...n };
+      if (n.parent !== undefined) node.parent = map[n.parent];
+      const id = JSON.stringify([node.tag, node.parent, node.nth, node.of, node.attrs]);
+      let idx = this.nodeIds.get(id);
+      if (idx === undefined) {
+        idx = this.nodes.length;
+        this.nodes.push(node);
+        this.nodeIds.set(id, idx);
+      }
+      map.push(idx);
+    }
+    return map;
+  }
+
+  private remap<T extends RawElementRef>(ref: T, map: number[]): T {
+    return { ...ref, node: map[ref.node] };
+  }
+
+  private toSnapshot(inv: RawInventory): RawSnapshot {
+    const map = this.intern(inv.nodes);
+    return { url: inv.url, dpr: inv.dpr, elements: inv.elements.map((e) => this.remap(e, map)) };
   }
 
   private watch(page: Page) {
@@ -118,10 +175,10 @@ export class ContextRecorder {
   private async snapshot(page: Page) {
     const inventory = () =>
       internal(page, () =>
-        page.evaluate(() => (window as any).__uicovInventory?.() as Inventory | undefined),
+        page.evaluate(() => (window as any).__uicovInventory?.() as RawInventory | undefined),
       );
-    const sameLayout = (a: Inventory, b: Inventory) =>
-      a.url === b.url && JSON.stringify(a.elements) === JSON.stringify(b.elements);
+    const sameLayout = (a: RawInventory, b: RawInventory) =>
+      a.url === b.url && JSON.stringify([a.nodes, a.elements]) === JSON.stringify([b.nodes, b.elements]);
 
     // The test keeps running while we snapshot, so the page can change between
     // the inventory and the screenshot. Re-check after the screenshot and retry.
@@ -129,16 +186,18 @@ export class ContextRecorder {
       if (page.isClosed()) return;
       const before = await inventory();
       if (!before) return;
-      if (!this.wantsScreenshot(before)) {
+      const beforeSnap = this.toSnapshot(before);
+      if (!this.wantsScreenshot(beforeSnap)) {
         // Record the elements without an image.
-        if (this.addNew(this.seenKeys, before)) this.snapshots.push(before);
+        if (this.addNew(this.seenKeys, beforeSnap)) this.snapshots.push(beforeSnap);
         return;
       }
 
       const { image, height } = await this.capture(page);
-      const after = await inventory();
-      if (!after) return;
-      if (!sameLayout(before, after)) {
+      const afterRaw = await inventory();
+      if (!afterRaw) return;
+      const after = this.toSnapshot(afterRaw);
+      if (!sameLayout(before, afterRaw)) {
         if (attempt === 2) {
           // Couldn't get a stable frame: keep the elements, skip the image.
           if (this.addNew(this.seenKeys, after)) this.snapshots.push(after);
@@ -162,11 +221,11 @@ export class ContextRecorder {
   }
 
   /** 'on': when this state shows elements no screenshot has shown yet; 'first-only': once per URL. */
-  private wantsScreenshot(inventory: Inventory): boolean {
+  private wantsScreenshot(snap: RawSnapshot): boolean {
     const mode = this.options.screenshots;
     if (mode === 'off') return false;
-    if (mode === 'first-only') return !this.shotKeys.has(inventory.url.split('#')[0]);
-    return this.hasNew(this.shotKeys, inventory);
+    if (mode === 'first-only') return !this.shotKeys.has(snap.url.split('#')[0]);
+    return this.hasNew(this.shotKeys, snap);
   }
 
   /** Full-page screenshot in the configured format, cropped to `maxScreenshotHeight`. */
@@ -200,24 +259,58 @@ export class ContextRecorder {
     });
   }
 
-  private hasNew(seen: Map<string, Set<string>>, inventory: Inventory): boolean {
-    const set = seen.get(inventory.url.split('#')[0]);
-    return !set || inventory.elements.some((e) => !set.has(e.key));
+  /** Keys (under the recording-time rules) of the elements that count in `snap`. */
+  private keysOf(snap: RawSnapshot): string[] {
+    const keys: string[] = [];
+    for (const e of snap.elements) {
+      if (e.candidateOnly) continue;
+      const node = this.resolver.node(e);
+      if (node) keys.push(this.resolver.key(node));
+    }
+    return keys;
   }
 
-  /** Adds the inventory's keys to `seen`; returns true if any were new. */
-  private addNew(seen: Map<string, Set<string>>, inventory: Inventory): boolean {
-    const urlKey = inventory.url.split('#')[0];
+  private hasNew(seen: Map<string, Set<string>>, snap: RawSnapshot): boolean {
+    const set = seen.get(snap.url.split('#')[0]);
+    return !set || this.keysOf(snap).some((k) => !set.has(k));
+  }
+
+  /** Adds the snapshot's keys to `seen`; returns true if any were new. */
+  private addNew(seen: Map<string, Set<string>>, snap: RawSnapshot): boolean {
+    const urlKey = snap.url.split('#')[0];
     const set = seen.get(urlKey) ?? new Set<string>();
     seen.set(urlKey, set);
     let added = false;
-    for (const e of inventory.elements) {
-      if (!set.has(e.key)) {
-        set.add(e.key);
+    for (const k of this.keysOf(snap)) {
+      if (!set.has(k)) {
+        set.add(k);
         added = true;
       }
     }
     return added;
+  }
+
+  /** Drops nodes that no kept snapshot or interaction refers to (directly or as an ancestor). */
+  private compact(): RawNode[] {
+    const keep = new Array<boolean>(this.nodes.length).fill(false);
+    const mark = (i: number | undefined) => {
+      while (i !== undefined && !keep[i]) {
+        keep[i] = true;
+        i = this.nodes[i].parent;
+      }
+    };
+    for (const s of this.snapshots) s.elements.forEach((e) => mark(e.node));
+    for (const i of this.interactions) mark(i.element.node);
+    const map: number[] = [];
+    const out: RawNode[] = [];
+    this.nodes.forEach((n, i) => {
+      if (!keep[i]) return;
+      map[i] = out.length;
+      out.push(n.parent === undefined ? n : { ...n, parent: map[n.parent] });
+    });
+    for (const s of this.snapshots) s.elements = s.elements.map((e) => ({ ...e, node: map[e.node] }));
+    for (const i of this.interactions) i.element = { ...i.element, node: map[i.element.node] };
+    return out;
   }
 
   /** Takes a final snapshot of every open page and attaches the data to the test. */
@@ -230,6 +323,14 @@ export class ContextRecorder {
     for (const page of this.context.pages()) await this.enqueue(page); // final state (open modals, etc.)
     recorders.delete(this.context);
     if (this.interactions.length === 0 && this.snapshots.length === 0) return;
+    const data: RawCoverageData = {
+      formatVersion: RECORDING_FORMAT_VERSION,
+      nodes: this.compact(),
+      ...(Object.keys(this.rules).length ? { rules: this.rules } : {}),
+      snapshots: this.snapshots,
+      interactions: this.interactions,
+      ...(isComponentTest(this.testInfo) && { componentTest: true }),
+    };
     // Push directly (like Playwright does for videos) rather than testInfo.attach(),
     // which would add an "Attach" step to the user's report. Screenshots go in as
     // file attachments so the blob reporter carries them to merge-reports.
@@ -239,11 +340,7 @@ export class ContextRecorder {
       ...this.shots.map((s) => ({ name: s.name, path: s.path, contentType: contentType(s.path) })),
       {
         name: ATTACHMENT_NAME,
-        body: Buffer.from(JSON.stringify({
-          interactions: this.interactions,
-          snapshots: this.snapshots,
-          ...(isComponentTest(this.testInfo) && { componentTest: true }),
-        })),
+        body: Buffer.from(JSON.stringify(data)),
         contentType: 'application/json',
       },
     );

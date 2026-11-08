@@ -64,9 +64,21 @@ jobs:
         run: npm run demo:sharded
         env:
           CI: true
+      # Rebuilding the report from ui-coverage-report/data/ with the CLI gives the same result.
+      - name: check:rebuild (fixture mode)
+        if: matrix.browser == 'chromium'
+        run: npm run check:rebuild
+        env:
+          CI: true
       - name: demo:sharded (register mode)
         if: matrix.browser == 'chromium'
         run: npm run demo:sharded
+        env:
+          CI: true
+          UICOV_MODE: register
+      - name: check:rebuild (register mode)
+        if: matrix.browser == 'chromium'
+        run: npm run check:rebuild
         env:
           CI: true
           UICOV_MODE: register

@@ -1,5 +1,7 @@
 import { defineConfig, devices, type ReporterDescription } from '@playwright/test';
 import { DEFAULT_INTERACTIONS, type UiCoverageOptions } from './src';
+// Report-time rules, shared with the CLI: `npx playwright-ui-coverage report --config demo/ui-coverage.config.json`.
+import uiCoverageRules from './demo/ui-coverage.config.json';
 
 // Config for the bundled demo. In your own project, use
 // `import 'playwright-ui-coverage/register'` and
@@ -21,6 +23,10 @@ const demoThresholds =
       ? { overall: 30, views: { '/users': 40, '/settings': 50, '/users/*': 20, '/setings': 10 } }
       : undefined;
 
+// UICOV_DEMO_LEGACY=1 sets the rules the deprecated way (use.uiCoverage) instead
+// of in the reporter options; the report must be the same (scripts/check-rebuild.mjs).
+const legacyRules = !!process.env.UICOV_DEMO_LEGACY;
+
 // BROWSER=firefox|webkit runs the demo in another engine (CI runs all three).
 const browser = process.env.BROWSER || 'chromium';
 const deviceFor: Record<string, string> = {
@@ -38,6 +44,7 @@ const reporter: ReporterDescription[] = [
   // UICOV_COUNT_FAILED=1 lets failed tests' interactions count (see demo/tests/failing.spec.ts).
   ['./src/reporter.ts', {
     outputFolder: 'ui-coverage-report',
+    ...(legacyRules ? {} : uiCoverageRules),
     countFailedTests: !!process.env.UICOV_COUNT_FAILED,
     threshold: demoThresholds,
   }],
@@ -55,8 +62,9 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
     trace: process.env.UICOV_TRACE ? 'on' : 'off',
     // Recording options (read by both the fixture and register mode).
     uiCoverage: {
-      // Delete buttons on /users carry data-action; use it as their identity.
-      significantAttributes: ['data-action'],
+      // Rules (identity, filters) are report-time options: demo/ui-coverage.config.json,
+      // passed to the reporter above. UICOV_DEMO_LEGACY=1 sets them here instead (deprecated).
+      ...(legacyRules ? uiCoverageRules : {}),
       // UICOV_FORMAT=jpeg records JPEG screenshots instead of PNG.
       ...(process.env.UICOV_FORMAT === 'jpeg' ? { format: 'jpeg' as const } : {}),
       // On /widgets, "Double-click to rename" only counts when double-clicked.
