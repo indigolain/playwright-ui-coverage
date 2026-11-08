@@ -43,6 +43,11 @@ export interface Snapshot extends Inventory {
    * (page may be navigating).
    */
   screenshot?: string;
+  /**
+   * Height in CSS px of the screenshot when it was cropped (`maxScreenshotHeight`).
+   * Elements below it are counted but not visible in the image.
+   */
+  screenshotHeight?: number;
 }
 
 /** Payload attached to each test result (attachment name: "ui-coverage"). */

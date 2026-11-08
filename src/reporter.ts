@@ -91,7 +91,7 @@ class UiCoverageReporter implements Reporter {
     let n = 0;
     for (const route of summary.routes) {
       for (const shot of route.screenshots) {
-        const file = `screens/${n++}.png`;
+        const file = `screens/${n++}${path.extname(shot.source) || '.png'}`;
         try {
           fs.copyFileSync(shot.source, path.join(this.outputFolder, file));
           shot.source = file;

@@ -172,6 +172,9 @@ export function aggregate(
     });
     if (elements.length === 0) continue;
 
+    // Elements actually in the image (a cropped screenshot hides those below its height).
+    const visible = (snap: TestCoverageData['snapshots'][number]) =>
+      snap.screenshotHeight ? snap.elements.filter((e) => e.y < snap.screenshotHeight!) : snap.elements;
     // Greedy set cover: pick screenshots that show the most not-yet-shown elements.
     const chosen: RouteScreenshot[] = [];
     const shown = new Set<string>();
@@ -180,7 +183,7 @@ export function aggregate(
       let best = -1;
       let bestGain = 0;
       candidates.forEach((c, idx) => {
-        const gain = new Set(c.snap.elements.map((e) => e.key).filter((k) => !shown.has(k))).size;
+        const gain = new Set(visible(c.snap).map((e) => e.key).filter((k) => !shown.has(k))).size;
         if (gain > bestGain) {
           bestGain = gain;
           best = idx;
@@ -188,12 +191,13 @@ export function aggregate(
       });
       if (best < 0) break;
       const [{ snap, test }] = candidates.splice(best, 1);
-      snap.elements.forEach((e) => shown.add(e.key));
+      const inImage = visible(snap);
+      inImage.forEach((e) => shown.add(e.key));
       chosen.push({
         source: snap.screenshot!,
         dpr: snap.dpr,
         test,
-        boxes: snap.elements.map(({ key, x, y, w, h }) => ({ key, x, y, w, h })),
+        boxes: inImage.map(({ key, x, y, w, h }) => ({ key, x, y, w, h })),
       });
     }
 

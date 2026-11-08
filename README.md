@@ -18,6 +18,8 @@ See which buttons, links and inputs your Playwright E2E tests **actually touch**
 
 <img src="docs/report-hover.png" alt="Hovering the 'button Delete ×3' row highlights all three Delete buttons on the screenshot in orange; the table lists each element with its status and the tests that covered it" width="720">
 
+**Large suites.** Filter routes by name (press `/`), sort them by name, lowest coverage or most untested elements, and screenshots load lazily. A synthetic report with 300 routes × 80 elements opens in under 0.1 s and switching routes takes a few milliseconds (`npm run perf` to measure).
+
 **Dark mode** follows your system setting:
 
 <img src="docs/report-dark.png" alt="The report in dark mode showing the home page" width="720">
@@ -119,6 +121,10 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
         { attribute: 'id', value: 'tmp-.*' },               // ignore id="tmp-…"
         { attribute: 'id', value: 'mui-legacy', include: true }, // keep, despite the built-in rule
       ],
+      screenshots: 'on',                   // 'on' | 'first-only' | 'off', default: 'on'
+      format: 'jpeg',                      // 'png' | 'jpeg', default: 'png'
+      quality: 80,                         // JPEG quality 0-100, default: 80
+      maxScreenshotHeight: 8000,           // CSS px, 0 = no cap, default: 8000
     },
   },
 });
@@ -134,6 +140,15 @@ Anything inside an element with `data-uicov-ignore` is always excluded.
   The built-in lists are exported as `BUILTIN_IDENTITY_ATTRIBUTES` and `BUILTIN_ATTRIBUTE_FILTERS`.
 
 Each recorded element also keeps its raw identifying attributes (`attrs`: `id`, `name`, `role`, `type`, `aria-label`, `href`, `data-*` and your `significantAttributes`) in the test attachment.
+
+Screenshot options:
+
+| Option | Default | Description |
+|---|---|---|
+| `screenshots` | `'on'` | `'on'`: screenshot whenever a page state shows elements no screenshot has shown yet. `'first-only'`: at most one screenshot per URL per test. `'off'`: no screenshots; the report shows the element tables only. Elements are counted in every mode. |
+| `format` | `'png'` | `'jpeg'` files are usually several times smaller. |
+| `quality` | `80` | JPEG quality (ignored for PNG). |
+| `maxScreenshotHeight` | `8000` | Full-page screenshots of taller pages are cropped to this height. Elements below the crop are still counted, just not drawn on the image. `0` disables the cap. |
 
 ### Reporter
 
@@ -226,6 +241,7 @@ UICOV_DEMO_THRESHOLDS=pass npm run demo  # per-view thresholds that pass
 UICOV_DEMO_FAIL=1 npx playwright test --retries=1  # adds a failing and a flaky test (demo/tests/failing.spec.ts)
 npm run demo:sharded  # runs 2 blob shards + merge-reports, checks it matches an unsharded run
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
+npm run perf          # builds a 300-route synthetic report in perf-report/ and times it in Chromium
 npm run typecheck
 npm run build         # compiles to dist/
 ```
