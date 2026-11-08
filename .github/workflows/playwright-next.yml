@@ -29,6 +29,23 @@ jobs:
       - run: scripts/demo-both-modes.sh
         env:
           BROWSER: ${{ matrix.browser }}
+      - name: check:interactivity
+        if: matrix.browser == 'chromium'
+        run: npm run check:interactivity
+      - name: check:locators (against the demo report)
+        if: matrix.browser == 'chromium'
+        run: npm run check:locators
+      - name: demo:sharded (fixture mode)
+        if: matrix.browser == 'chromium'
+        run: npm run demo:sharded
+        env:
+          CI: true
+      - name: demo:sharded (register mode)
+        if: matrix.browser == 'chromium'
+        run: npm run demo:sharded
+        env:
+          CI: true
+          UICOV_MODE: register
       - uses: actions/upload-artifact@v5
         if: failure()
         with:

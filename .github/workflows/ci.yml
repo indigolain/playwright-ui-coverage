@@ -28,9 +28,11 @@ jobs:
   demo:
     # Each job runs the demo in both recording modes (fixture and register)
     # and checks that they produce the same coverage.json, so a broken
-    # register hook fails CI. See scripts/demo-both-modes.sh.
+    # register hook fails CI. See scripts/demo-both-modes.sh. Chromium jobs
+    # also run the in-browser checks and the sharding / merge-reports check.
     name: demo (${{ matrix.browser }}, @playwright/test ${{ matrix.playwright }})
-    runs-on: ubuntu-latest
+    # Older Playwright releases don't know the newest Ubuntu image.
+    runs-on: ${{ matrix.playwright == 'latest' && 'ubuntu-latest' || 'ubuntu-24.04' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -51,6 +53,23 @@ jobs:
       - run: scripts/demo-both-modes.sh
         env:
           BROWSER: ${{ matrix.browser }}
+      - name: check:interactivity
+        if: matrix.browser == 'chromium'
+        run: npm run check:interactivity
+      - name: check:locators (against the demo report)
+        if: matrix.browser == 'chromium'
+        run: npm run check:locators
+      - name: demo:sharded (fixture mode)
+        if: matrix.browser == 'chromium'
+        run: npm run demo:sharded
+        env:
+          CI: true
+      - name: demo:sharded (register mode)
+        if: matrix.browser == 'chromium'
+        run: npm run demo:sharded
+        env:
+          CI: true
+          UICOV_MODE: register
       - uses: actions/upload-artifact@v5
         if: failure()
         with:

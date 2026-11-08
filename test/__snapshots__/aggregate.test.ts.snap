@@ -8,11 +8,15 @@ exports[`aggregate > matches the snapshot 1`] = `
     {
       "elements": [
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {},
           "interactionTotal": 0,
           "key": "#archive",
           "label": "button "Archive"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "button",
           "testCount": 0,
           "tested": false,
@@ -20,11 +24,15 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {},
           "interactionTotal": 0,
           "key": "#cancel",
           "label": "button "Cancel"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "button",
           "testCount": 0,
           "tested": false,
@@ -32,6 +40,7 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {
             "click": 1,
@@ -39,6 +48,9 @@ exports[`aggregate > matches the snapshot 1`] = `
           "interactionTotal": 1,
           "key": "#save",
           "label": "button "Save"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "button",
           "testCount": 1,
           "tested": true,
@@ -58,11 +70,15 @@ exports[`aggregate > matches the snapshot 1`] = `
     {
       "elements": [
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {},
           "interactionTotal": 0,
           "key": "button "Cancel"",
           "label": "button "Cancel"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "button",
           "testCount": 0,
           "tested": false,
@@ -70,11 +86,15 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 3,
           "interactionCounts": {},
           "interactionTotal": 0,
           "key": "button "Delete"",
           "label": "button "Delete"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "button",
           "testCount": 0,
           "tested": false,
@@ -82,11 +102,15 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {},
           "interactionTotal": 0,
           "key": "link "Ada Lovelace"",
           "label": "link "Ada Lovelace"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "a",
           "testCount": 0,
           "tested": false,
@@ -94,11 +118,15 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {},
           "interactionTotal": 0,
           "key": "link "Grace Hopper"",
           "label": "link "Grace Hopper"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "a",
           "testCount": 0,
           "tested": false,
@@ -106,6 +134,7 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {
             "click": 1,
@@ -113,6 +142,9 @@ exports[`aggregate > matches the snapshot 1`] = `
           "interactionTotal": 1,
           "key": "[data-testid="add-user"]",
           "label": "button "Add user"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "button",
           "testCount": 1,
           "tested": true,
@@ -122,6 +154,7 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {
             "click": 1,
@@ -129,6 +162,9 @@ exports[`aggregate > matches the snapshot 1`] = `
           "interactionTotal": 1,
           "key": "button "Dismiss"",
           "label": "button "Dismiss"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "?",
           "testCount": 1,
           "tested": true,
@@ -138,6 +174,7 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {
             "click": 1,
@@ -145,6 +182,9 @@ exports[`aggregate > matches the snapshot 1`] = `
           "interactionTotal": 1,
           "key": "button "Save"",
           "label": "button "Save"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "button",
           "testCount": 1,
           "tested": true,
@@ -154,6 +194,7 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {
             "click": 1,
@@ -161,6 +202,9 @@ exports[`aggregate > matches the snapshot 1`] = `
           "interactionTotal": 1,
           "key": "link "Katherine Johnson"",
           "label": "link "Katherine Johnson"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "a",
           "testCount": 1,
           "tested": true,
@@ -170,6 +214,7 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {
             "change": 1,
@@ -178,6 +223,9 @@ exports[`aggregate > matches the snapshot 1`] = `
           "interactionTotal": 2,
           "key": "#search",
           "label": "searchbox "Search users"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "input",
           "testCount": 1,
           "tested": true,
@@ -187,6 +235,7 @@ exports[`aggregate > matches the snapshot 1`] = `
           "testedByFailing": [],
         },
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {
             "input": 1,
@@ -194,6 +243,9 @@ exports[`aggregate > matches the snapshot 1`] = `
           "interactionTotal": 1,
           "key": "#new-name",
           "label": "textbox "Name"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "input",
           "testCount": 1,
           "tested": true,
@@ -291,6 +343,7 @@ exports[`aggregate > matches the snapshot 1`] = `
     {
       "elements": [
         {
+          "attrs": undefined,
           "instances": 1,
           "interactionCounts": {
             "click": 1,
@@ -298,6 +351,9 @@ exports[`aggregate > matches the snapshot 1`] = `
           "interactionTotal": 1,
           "key": "link "← Back to users"",
           "label": "link "← Back to users"",
+          "name": undefined,
+          "nameFrom": undefined,
+          "role": undefined,
           "tag": "?",
           "testCount": 1,
           "tested": true,

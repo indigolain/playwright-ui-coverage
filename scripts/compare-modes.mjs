@@ -4,9 +4,9 @@
 //
 //   node scripts/compare-modes.mjs <a/coverage.json> <b/coverage.json>
 //
-// Compared: totals, and per route every element by key (tag, instances,
-// tested, testedBy, …). Labels are display-only and may contain live text
-// (a counter, a clock), so they are not compared.
+// Compared: totals, and per route every element by key: the coverage fields
+// in COMPARED. Text-derived fields (label, name, suggested locator, hints) are
+// display-only and may contain live text (a counter, a clock), so they aren't.
 //
 // Ignored: generatedAt and the chosen screenshots. Those depend on timing, not
 // on the recording mode: whether a short-lived state (a modal, a page the test
@@ -30,6 +30,10 @@ function load(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+const COMPARED = ['key', 'tag', 'instances', 'tested', 'testedBy', 'testedByFailing', 'interactionCounts'];
+const pick = (e) => Object.fromEntries(COMPARED.filter((k) => k in e).map((k) => [k, e[k]]));
+const sorted = (list) => (Array.isArray(list) ? [...list].sort() : list);
+
 function normalize(summary) {
   return {
     total: summary.total,
@@ -41,7 +45,7 @@ function normalize(summary) {
       tested: r.tested,
       percent: r.percent,
       elements: r.elements
-        .map(({ label, ...e }) => ({ ...e, testedBy: [...e.testedBy].sort() }))
+        .map((e) => ({ ...pick(e), testedBy: sorted(e.testedBy), testedByFailing: sorted(e.testedByFailing) }))
         .sort((a, b) => a.key.localeCompare(b.key)),
     })),
   };
