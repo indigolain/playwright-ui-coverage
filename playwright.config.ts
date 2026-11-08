@@ -69,6 +69,8 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
     trace: process.env.UICOV_TRACE ? 'on' : 'off',
     // Recording options here win over `recording` in ui-coverage.config.ts, key by key.
     uiCoverage: {
+      // UICOV_OFF=1 turns recording off, e.g. to check whether a flaky test is flaky without it.
+      ...(process.env.UICOV_OFF ? { enabled: false } : {}),
       ...(legacy ? { significantAttributes: uiCoverageConfig.significantAttributes, ...uiCoverageConfig.recording } : {}),
       // UICOV_FORMAT=jpeg records JPEG screenshots instead of PNG.
       ...(process.env.UICOV_FORMAT === 'jpeg' ? { format: 'jpeg' as const } : {}),
