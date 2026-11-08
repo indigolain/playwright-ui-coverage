@@ -164,7 +164,7 @@ Elements that share a key without any of these (the same `data-testid` on every 
 
 The heuristics (rules 4–6) only group **two or more** elements of the view, from all tests together (a list with one card in one test and three in another still forms one group). They are deliberately conservative:
 
-- Links (`<a href>`) are left to link grouping by destination and aren't grouped by rows or structure. Elements with a `data-uicov-id` (an explicit identity) aren't grouped automatically either; explicit groups (rules 1–2) apply to both.
+- Links (`<a href>`) aren't grouped by rows or structure: a link to another view is already one [link unit](#links-and-untested-views) per destination view, whatever the number of links. Elements with a `data-uicov-id` (an explicit identity) aren't grouped automatically either; explicit groups (rules 1–2) apply to both.
 - Repeated structures need an accessible name and the same one: navigation items ("Home", "Users") and toolbar buttons have different names, so they stay separate. Nothing inside `<nav>`, `<menu>` or `role="navigation"`/`menu`/`menubar`/`tablist`/`toolbar`/`radiogroup`/`listbox`/`tree` is grouped this way.
 - Limits: two unrelated controls with identical names and markup structure (two "Edit" buttons in two identical, unnamed panels) are grouped; give one a `data-testid` with a word in it, or use `data-uicov-group=""`. Names that change per item ("Add Desk lamp to cart") prevent a repeated-structure group; use `data-uicov-group` or `elementGroups`. Group keys of rules 4–5 are positional, so they change with the markup like any positional key.
 
