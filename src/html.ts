@@ -103,7 +103,7 @@ table { width: 100%; border-collapse: collapse; background: var(--panel); border
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { font-size: 12px; color: var(--muted); font-weight: 600; }
 tr.hl td { background: var(--bg); }
-.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pill { display: inline-block; white-space: nowrap; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .pill.ok { color: var(--ok); background: var(--ok-bg); }
 .pill.bad { color: var(--bad); background: var(--bad-bg); }
 .pill.warn { color: var(--hl); background: rgba(245,158,11,.18); }

@@ -39,6 +39,8 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
     uiCoverage: {
       // Delete buttons on /users carry data-action; use it as their identity.
       significantAttributes: ['data-action'],
+      // UICOV_FORMAT=jpeg records JPEG screenshots instead of PNG.
+      ...(process.env.UICOV_FORMAT === 'jpeg' ? { format: 'jpeg' as const } : {}),
     },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
