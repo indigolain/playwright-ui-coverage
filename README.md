@@ -286,6 +286,8 @@ In `coverage.json`, each element has `interactionCounts`: the interactions that 
 | `viewBy` | `'auto'` | Group views by page URL (`'url'`) or by spec file (`'file'`). `'auto'` picks `'file'` for component tests. See [Component testing](#component-testing). |
 | `htmlReport` | detected | Folder of Playwright's HTML report (relative to the config file) that "Tested by" links to. Detected from the `html` reporter in the config; `false` turns the links off. See below. |
 | `saveData` | `true` | Keep the raw data and every screenshot in `<outputFolder>/data/` for the [`report` CLI](#rebuilding-the-report-report-cli). |
+| `baseline` | none | Fail only on *new* untested elements, compared with a committed baseline file. See [Baseline](#baseline-fail-only-on-new-untested-elements). |
+| `githubSummary` | `false` | Append a markdown summary to `$GITHUB_STEP_SUMMARY` when it's set. See [Comparing runs](#comparing-runs-pr-comments-and-the-github-step-summary). |
 | `ignoreSelectors`, `significantAttributes`, `attributeFilters` | `[]` | [Report-time rules](#report-time-rules-reporter-options). |
 
 ### Links to the HTML report and traces
@@ -386,6 +388,68 @@ What it can't see: elements that are clickable only through a JS handler and hav
 
 `scope` is `overall` or `view` (then `view` is the view name, or the pattern when it matched no view). `status` is `passed`, `failed` or `missing` (then `actual` is `null`; missing views only warn).
 
+### Baseline (fail only on new untested elements)
+
+Thresholds are hard to adopt on a suite with low coverage. A baseline is a ratchet instead: commit the list of what's untested today, and a run fails only when a view has an untested element that isn't on the list.
+
+```ts
+['playwright-ui-coverage/reporter', {
+  baseline: 'ui-coverage-baseline.json',   // = { file: 'ui-coverage-baseline.json', mode: 'check' }
+}],
+```
+
+```bash
+npx playwright test                              # writes ui-coverage-report/coverage.json
+npx playwright-ui-coverage baseline update       # writes ui-coverage-baseline.json from it; commit it
+```
+
+| `baseline` | |
+|---|---|
+| `'file.json'` / `true` | `{ file, mode: 'check' }`; `true` uses `ui-coverage-baseline.json`. Relative to the config file. |
+| `file` | Default `ui-coverage-baseline.json`. |
+| `mode` | `'check'` (default): fail on new gaps and write the current state to `<file>.next.json` (`ui-coverage-baseline.next.json`). `'update'`: rewrite `<file>` with the current state; never fails. `'off'`: nothing. |
+| `allowNewViews` | Default `false`: untested elements of a view the baseline doesn't have are new gaps (a new page needs tests, or a baseline update). `true`: new views are listed but don't fail. |
+
+**The file** lists, per view, the keys of its untested elements (sorted, one per line, so diffs review well). Views with nothing untested are kept with an empty list, so "fully tested" and "new view" stay different:
+
+```json
+{
+  "baselineVersion": 1,
+  "views": {
+    "/settings": { "untestedElements": ["#bio", "#theme", "[data-testid=\"delete-account\"]"] },
+    "/users": { "untestedElements": [] }
+  }
+}
+```
+
+Links get an `untestedLinks` list once they're tracked as their own units.
+
+**What happens in check mode:**
+
+- A view in both: its untested elements not in the baseline are **new gaps** and fail the run (exit code 1, like a threshold). Elements the baseline lists that are now tested, or gone, are **resolved**.
+- **Ratchet:** `<file>.next.json` is always written with the current state. When elements got tested, the run says so; copy `.next.json` over the baseline (or run `baseline update`) and commit. Add `*.next.json` to `.gitignore`.
+- **Renamed views** (a `normalizeUrl` change, a route moved): a view that disappeared and one that appeared with mostly the same untested keys (Jaccard index ≥ 0.5) are matched and compared as one, reported as `view renamed?`.
+- **Removed views** (in the baseline, not in the run) are reported and never fail; a filtered run (`--grep`) doesn't visit every view. Compare against full runs: in a filtered run, a view that *was* visited can have elements that other tests normally cover.
+- **No baseline file yet:** a warning, not a failure, and `.next.json` is written so you can commit it.
+- Accepting a gap on purpose: commit the new state (`baseline update`), so the PR shows the added keys.
+
+```
+UI coverage baseline: 1 new untested element(s) not in ui-coverage-baseline.json:
+    /settings  checkbox "Email notifications"  #notify
+  Test them, or accept them by committing ui-coverage-baseline.next.json as ui-coverage-baseline.json (`npx playwright-ui-coverage baseline update`).
+```
+
+`coverage.json` has the result in `baseline` (`status`, `newGaps`, `resolved`, `addedViews`, `removedViews`, `renamedViews`; see [docs/coverage-json.md](docs/coverage-json.md#baseline-baselinecheck)).
+
+The CLI checks or updates a baseline from an existing `coverage.json`, without running tests:
+
+```bash
+npx playwright-ui-coverage baseline check  [--report ui-coverage-report/coverage.json] [--file ui-coverage-baseline.json] [--allow-new-views] [--config <file>]
+npx playwright-ui-coverage baseline update [--report ui-coverage-report/coverage.json] [--file ui-coverage-baseline.json] [--config <file>]
+```
+
+`--config` reads `outputFolder` and `baseline` from the reporter options. `check` exits with 1 on new gaps (and writes `.next.json`), 2 on errors.
+
 ### Retries and failed tests
 
 Playwright runs a test again on retry, and every attempt records coverage. The reporter combines the attempts of each test like this:
@@ -433,6 +497,48 @@ const report = JSON.parse(fs.readFileSync('ui-coverage-report/coverage.json', 'u
 if (report.schemaVersion !== 1) throw new Error(`unsupported coverage.json schemaVersion ${report.schemaVersion}`);
 const low = report.views.filter((v) => v.name.startsWith('/admin') && v.summary.coverage < 60);
 ```
+
+## Comparing runs, PR comments and the GitHub step summary
+
+`compare` diffs two `coverage.json` files, e.g. the latest run on `main` and the pull request's run:
+
+```bash
+npx playwright-ui-coverage compare base/coverage.json ui-coverage-report/coverage.json [--format markdown|json] [--out file] [--report-url <url>] [--title <text>]
+```
+
+It reports the overall and per-view coverage delta, **new untested elements** (with why: `was tested`, `new element`, `new view`), **resolved** gaps (untested in base, tested now), added, removed and renamed views (matched by similar keys, like the baseline), and threshold checks whose status changed. Elements are matched by `(view, key)`.
+
+The markdown is meant for a sticky PR comment: it starts with `<!-- playwright-ui-coverage -->` (so a workflow can find and update its comment), lists only changed views, collapses long lists in `<details>` and truncates them at 50 entries, and is deterministic (no timestamps, stable order). For example:
+
+```md
+<!-- playwright-ui-coverage -->
+### UI coverage: 38.6% (-1.8 pp)
+
+| | Coverage | Tested | Views |
+|---|---:|---:|---:|
+| Base | 40.4% | 23/57 | 5 |
+| Head | **38.6%** | 22/57 | 5 |
+
+**1 new untested element** · 0 resolved
+
+**Views changed (1), 4 unchanged**
+
+| View | Base | Head | Δ | New gaps | Resolved |
+|---|---:|---:|---:|---:|---:|
+| `/settings` | 30% (3/10) | 20% (2/10) | -10.0 pp | 1 | 0 |
+
+**New untested elements (1)**
+
+- `/settings` checkbox "Email notifications" (was tested) `#notify`
+```
+
+`--format json` writes the same data (`CoverageComparison` in [src/compare.ts](src/compare.ts), `comparisonVersion: 1`). `compare` always exits with 0 (2 on errors): gate with `threshold` or `baseline`. `--report-url` (where you publish the HTML report) turns view names into links.
+
+**Step summary:** with `githubSummary: true`, the reporter (and the `report` CLI) appends a markdown summary to the file in `$GITHUB_STEP_SUMMARY`: coverage per view, failing thresholds and the baseline result. Off by default; outside GitHub Actions (variable not set) it does nothing. `npx playwright-ui-coverage summary [coverage.json]` prints the same markdown, e.g. for a PR comment when there's no base run to compare with.
+
+A complete GitHub Actions workflow (download the base artifact from `main`, run the tests, compare, post or update a sticky comment): [docs/github-actions.md](docs/github-actions.md).
+
+The functions are exported for your own tooling: `compareReports`, `comparisonMarkdown`, `reportMarkdown`, `checkBaseline`, `createBaseline`.
 
 ## Sharding and `merge-reports`
 
@@ -485,7 +591,7 @@ npx playwright-ui-coverage report --data ci-artifacts/ui-coverage-report/data --
 | `--data <dir>` | `data/` in the config's `outputFolder` (else `ui-coverage-report/data`) | The data folder. |
 | `--out <dir>` | the folder that contains `--data` | Where to write the report. Only `index.html`, `coverage.json` and `screens/` are replaced. |
 
-`threshold` is checked like in the reporter: the CLI exits with code 1 if a threshold isn't met, and 2 on errors (bad flags, unreadable data, invalid rules).
+`threshold` and `baseline` are checked like in the reporter: the CLI exits with code 1 if a threshold isn't met or there are new untested elements, and 2 on errors (bad flags, unreadable data, invalid rules). Other commands: [`baseline`](#baseline-fail-only-on-new-untested-elements), [`compare` and `summary`](#comparing-runs-pr-comments-and-the-github-step-summary).
 
 **What a rebuild can change:** everything the reporter does with the data: [report-time rules](#report-time-rules-reporter-options), `normalizeUrl`, `viewBy`, `threshold`, `countFailedTests`, `maxScreenshotsPerRoute`. Links to the HTML report are kept and adjusted to `--out` (`htmlReport: false` drops them). **What it can't:** what was recorded. Which elements are interactive is decided in the browser (it needs the live page: computed styles, descendants, label targets), interaction types are recording options, and screenshots are what they are. The deprecated `use.uiCoverage.ignoreSelectors` was applied while recording.
 
@@ -570,6 +676,9 @@ npm run check:locators       # checks suggested locators and a11y hints; with a 
 npm run example:ct    # component testing example (examples/ct-react): installs it, runs it, writes its report
 npm run demo:sharded  # runs 2 blob shards + merge-reports, checks it matches an unsharded run
 npm run check:rebuild # checks the report CLI rebuilds the same report from data/, and that changed rules apply
+npm run check:baseline  # baseline update/check, a new gap (UICOV_DEMO_GAP=1), compare and the step summary, end to end
+UICOV_DEMO_BASELINE=update npm run demo           # writes demo/ui-coverage-baseline.json (gitignored)
+UICOV_DEMO_BASELINE=check UICOV_DEMO_GAP=1 npm run demo  # a test skips a step: fails with 1 new untested element
 UICOV_DEMO_LEGACY=1 npm run demo  # sets the rules the deprecated way (use.uiCoverage); same report
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
 npm run perf          # builds a 300-route synthetic report in perf-report/ and times it in Chromium

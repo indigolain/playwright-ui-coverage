@@ -1,0 +1,39 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`markdown > renders a comparison for a sticky comment 1`] = `
+"<!-- playwright-ui-coverage -->
+### UI coverage: 40% (-4.4 pp)
+
+| | Coverage | Tested | Views |
+|---|---:|---:|---:|
+| Base | 44.4% | 4/9 | 4 |
+| Head | **40%** | 4/10 | 4 |
+
+**4 new untested elements** · 1 resolved · 1 view added · 1 view removed · 1 view renamed · thresholds: **1 failing** (was 0)
+
+**Views changed (4), 1 unchanged**
+
+| View | Base | Head | Δ | New gaps | Resolved |
+|---|---:|---:|---:|---:|---:|
+| [\`/checkout\`](https://example.com/r/index.html#%2Fcheckout) | — | 0% (0/2) | new | 2 | 0 |
+| [\`/old\`](https://example.com/r/index.html#%2Fold) | 0% (0/1) | — | removed | 0 | 0 |
+| [\`/settings\`](https://example.com/r/index.html#%2Fsettings) | 33.3% (1/3) | 33.3% (1/3) | ±0 pp | 2 | 1 |
+| [\`/users/:id\`](https://example.com/r/index.html#%2Fusers%2F%3Aid) (was \`/user/:id\`) | 33.3% (1/3) | 33.3% (1/3) | ±0 pp | 0 | 0 |
+
+**New untested elements (4)**
+
+- [\`/checkout\`](https://example.com/r/index.html#%2Fcheckout) button "cancel" (new view) \`cancel\`
+- [\`/checkout\`](https://example.com/r/index.html#%2Fcheckout) button "pay" (new view) \`pay\`
+- [\`/settings\`](https://example.com/r/index.html#%2Fsettings) button "notify" (new element) \`notify\`
+- [\`/settings\`](https://example.com/r/index.html#%2Fsettings) button "save" (was tested) \`save\`
+
+**Resolved: now tested (1)**
+
+- [\`/settings\`](https://example.com/r/index.html#%2Fsettings) button "theme" (now tested) \`theme\`
+
+**Threshold changes (2)**
+
+- overall: **failed (40% < 50%)**, was not checked
+- [\`/settings\`](https://example.com/r/index.html#%2Fsettings): **not checked**, was passed (33.3% ≥ 30%)
+"
+`;

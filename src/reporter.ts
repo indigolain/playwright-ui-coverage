@@ -6,6 +6,7 @@ import { isPassingResult } from './attempts';
 import type { StoredAttempt } from './model/raw';
 import { pickRules, validateRules } from './model/rules';
 import { buildReport, DATA_DIR, readData, writeData, type ReportInput, type UiCoverageReporterOptions } from './report';
+import { resolveBaselineOption } from './baseline';
 import { resolveHtmlReport, type HtmlReportLink } from './insights';
 import { ATTACHMENT_NAME } from './types';
 
@@ -56,6 +57,8 @@ class UiCoverageReporter implements Reporter {
   /** One entry per attachment per attempt; retries are resolved when the report is built. */
   private tests: StoredAttempt[] = [];
   private outputFolder = 'ui-coverage-report';
+  /** The config file's folder: relative option paths (`baseline.file`) resolve from it. */
+  private configDir = process.cwd();
   private componentTestConfig = false;
   private htmlReport: HtmlReportLink | undefined;
   /** `use.testIdAttribute` of the first project that sets it. */
@@ -64,11 +67,13 @@ class UiCoverageReporter implements Reporter {
   constructor(private options: UiCoverageReporterOptions = {}) {
     // Fail fast on bad rules (invalid regex, unsupported selector syntax).
     validateRules(pickRules(options as Record<string, unknown>), 'reporter options');
+    resolveBaselineOption(options.baseline, process.cwd());
   }
 
   onBegin(config: FullConfig) {
     // Resolve relative to the config file's directory (like Playwright's html reporter).
     const configDir = config.configFile ? path.dirname(config.configFile) : process.cwd();
+    this.configDir = configDir;
     this.outputFolder = path.resolve(configDir, this.options.outputFolder ?? 'ui-coverage-report');
     this.componentTestConfig = CT_CONFIG_KEY in config;
     this.htmlReport = resolveHtmlReport(config.reporter, configDir, this.outputFolder, this.options.htmlReport);
@@ -114,7 +119,7 @@ class UiCoverageReporter implements Reporter {
       writeData(dataDir, input);
       input = readData(dataDir);
     }
-    const { failed } = buildReport(input, this.options, this.outputFolder);
+    const { failed } = buildReport(input, this.options, this.outputFolder, { baseDir: this.configDir });
     if (failed) return { status: 'failed' as const };
   }
 

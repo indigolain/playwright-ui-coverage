@@ -49,6 +49,7 @@ rounded to one decimal; `100` when there are no units.
 | `insights` | `{ mostRepeated }` | See [Insights](#insights). |
 | `playwrightReport` | `{ path, attachmentsBaseURL }`, optional | Playwright's HTML report, when linked: `path` is its folder relative to the folder of `coverage.json` (`/` separators), `attachmentsBaseURL` where `tests[].trace` files are, relative to `path`. |
 | `config` | object, optional | **Reserved** for the effective report configuration. Treat its contents as informational. |
+| `baseline` | [`BaselineCheck`](#baseline-baselinecheck), optional | Result of the `baseline` option; absent when it isn't set. |
 
 ## `summary`: `ReportSummary` / `CoverageCounts`
 
@@ -122,6 +123,25 @@ Optional fields are absent (not `null`) when unknown, e.g. for data recorded by 
 | `required` | number | Required `coverage`. |
 | `actual` | number \| null | Actual `coverage`; `null` when the view wasn't in this run. |
 | `status` | `"passed"` \| `"failed"` \| `"missing"` | `missing` only warns; the run fails when any check is `failed`. |
+
+## `baseline`: `BaselineCheck`
+
+Present when the `baseline` reporter option is set (and not `mode: 'off'`). Units are identified by `(view, kind, key)`.
+
+| Field | Type | |
+|---|---|---|
+| `file` | string | The baseline file, relative to the folder of `coverage.json` (`/` separators). |
+| `mode` | `"check"` \| `"update"` | |
+| `status` | `"passed"` \| `"failed"` \| `"missing"` \| `"updated"` | `failed`: `newGaps` is non-empty and the run failed. `missing`: no baseline file yet (warning only). `updated`: `mode: 'update'` rewrote the file; never fails. |
+| `nextFile` | string, optional | Check mode: where the current state was written (`<file>` → `<name>.next.json`), relative like `file`. |
+| `allowNewViews` | boolean | Whether untested units of views not in the baseline were allowed. |
+| `newGaps` | `{ view, kind, key, label, newView }[]` | Untested units the baseline doesn't list, by view, kind, key. `kind` is `element` or `link`; `newView` is true when the whole view is new. In update mode: the units added to the file. |
+| `resolved` | `{ view, kind, key, reason, label? }[]` | Units the baseline lists as untested that aren't any more: `reason` `tested` (with `label`) or `removed` (no longer in the view). |
+| `addedViews` | string[] | Views not in the baseline (renames excluded). |
+| `removedViews` | string[] | Baseline views not in this run (renames excluded). Never fail. |
+| `renamedViews` | `{ from, to }[]` | A baseline view that disappeared and a new view with similar untested keys (Jaccard index ≥ 0.5), compared as one. |
+
+The baseline file itself (`ui-coverage-baseline.json`) is `{ "baselineVersion": 1, "views": { "<view>": { "untestedElements": [keys], "untestedLinks"?: [keys] } } }`, keys sorted.
 
 ## Insights
 

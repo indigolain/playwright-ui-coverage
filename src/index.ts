@@ -72,3 +72,25 @@ export type {
   ThresholdCheck,
   RepeatedElement,
 } from './coverage-report';
+export type { BaselineCheck, BaselineGap, BaselineResolved, ViewRename } from './coverage-report';
+export {
+  BASELINE_VERSION,
+  DEFAULT_BASELINE_FILE,
+  checkBaseline,
+  createBaseline,
+  type BaselineDiff,
+  type BaselineFile,
+  type BaselineOption,
+  type BaselineView,
+} from './baseline';
+export {
+  COMPARISON_VERSION,
+  compareReports,
+  type ComparedUnit,
+  type CoverageComparison,
+  type RunTotals,
+  type ThresholdChange,
+  type ViewComparison,
+  type ViewTotals,
+} from './compare';
+export { MARKDOWN_MARKER, comparisonMarkdown, reportMarkdown, type MarkdownOptions } from './markdown';

@@ -40,6 +40,7 @@
     "perf": "npm run build && node scripts/perf-report.mjs",
     "check:interactivity": "npm run build && node scripts/check-interactivity.mjs",
     "check:locators": "npm run build && node scripts/check-locators.mjs",
+    "check:baseline": "npm run build && node scripts/check-baseline.mjs",
     "example:ct": "node scripts/example-ct.mjs",
     "example:ct:register": "node scripts/example-ct.mjs register",
     "test": "vitest run --dir test"
