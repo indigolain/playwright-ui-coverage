@@ -13,7 +13,13 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { CoverageSummary, ElementCoverage as InternalElement, RouteCoverage } from './aggregate';
+import type {
+  CoverageSummary,
+  ElementCoverage as InternalElement,
+  LinkCoverage as InternalLink,
+  RouteCoverage,
+  UntestedView as InternalUntestedView,
+} from './aggregate';
 import type { HtmlReportLink, TestInfo } from './insights';
 import type { ThresholdResult } from './thresholds';
 
@@ -25,9 +31,9 @@ export const COVERAGE_SCHEMA_VERSION = 1;
  * (`ViewCoverage.summary`).
  *
  * The denominator of `coverage` is every coverage unit: interactive elements
- * plus links, `testedElementsCount + untestedElementsCount + testedLinksCount +
- * untestedLinksCount`. Until links are tracked as their own units, the link
- * counts are 0 and `<a>` elements count as elements.
+ * plus link units, `testedElementsCount + untestedElementsCount +
+ * testedLinksCount + untestedLinksCount`. An `<a>` that is part of a link unit
+ * (`ViewCoverage.links`) is not also counted as an element.
  */
 export interface CoverageCounts {
   /**
@@ -39,9 +45,9 @@ export interface CoverageCounts {
   testedElementsCount: number;
   /** Interactive elements no counted test interacted with (includes `failingOnlyElementsCount`). */
   untestedElementsCount: number;
-  /** Links whose destination view was visited. 0 until link tracking is available. */
+  /** Link units (`ViewCoverage.links`) whose destination view a counted test visited. */
   testedLinksCount: number;
-  /** Links whose destination view was never visited. 0 until link tracking is available. */
+  /** Link units whose destination view no counted test visited. */
   untestedLinksCount: number;
   /**
    * Untested elements that only attempts that didn't pass interacted with
@@ -56,6 +62,8 @@ export interface CoverageCounts {
 export interface ReportSummary extends CoverageCounts {
   /** Number of views (entries in `views`). */
   viewCount: number;
+  /** Number of entries in `untestedViews`. */
+  untestedViewCount: number;
 }
 
 /** One view: a normalized URL (`/users/:id`) or, for component tests, a spec file. */
@@ -68,8 +76,10 @@ export interface ViewCoverage {
    */
   reportUrl: string;
   summary: CoverageCounts;
-  /** Untested first, then by label. */
+  /** Interactive elements (not the `<a>` elements of `links`). Untested first, then by label. */
   elements: ElementCoverage[];
+  /** Link units: this view's links grouped by destination view. Untested first, then by key. */
+  links: LinkCoverage[];
   /**
    * Screenshots shown in the HTML report, with element boxes. Internal:
    * which screenshots are picked depends on timing, and the shape may change
@@ -140,6 +150,50 @@ export interface ElementGroup {
   reason: 'markup' | 'config' | 'same-key' | 'row' | 'repeated' | 'label';
   /** Number of distinct elements (keys before grouping) in the group. */
   members: number;
+}
+
+/**
+ * The links of a view that go to one other view: one coverage unit, tested
+ * when a counted test visited that view (by any path, not necessarily through
+ * these links). `(view name, key)` identifies it across runs.
+ */
+export interface LinkCoverage {
+  /** The destination view's name. Unique within the view. */
+  key: string;
+  /** `link "name"` of the first referrer, `(+N more)` when several links go there. */
+  label: string;
+  tested: boolean;
+  /** Distinct destination URLs, sorted, at most 20: path, query and hash on the page's origin, else the full URL. */
+  destinations: string[];
+  /** Number of distinct destination URLs (may exceed `destinations.length`). */
+  destinationCount: number;
+  /**
+   * The `<a>` elements of this view that link there. Their `tested` means a
+   * test interacted with them (informational: it doesn't affect coverage).
+   */
+  referrers: ElementCoverage[];
+}
+
+/** A view that links point to but no counted test visited. */
+export interface UntestedView {
+  /** View name (from the destination URL, the same way page URLs are named). */
+  name: string;
+  /** Distinct destination URLs, sorted, at most 20. */
+  destinations: string[];
+  /** Number of distinct destination URLs. */
+  destinationCount: number;
+  /** The views that link to it, by name. */
+  referrers: UntestedViewReferrer[];
+}
+
+/** A view linking to an untested view. */
+export interface UntestedViewReferrer {
+  /** Name of the linking view (in `views`). */
+  view: string;
+  /** Label of its link unit (`ViewCoverage.links[].label`). */
+  label: string;
+  /** Keys of the `<a>` elements (`ViewCoverage.links[].referrers[].key`). */
+  keys: string[];
 }
 
 export interface A11yHint {
@@ -222,6 +276,8 @@ export interface CoverageReport {
   summary: ReportSummary;
   /** Sorted by name. */
   views: ViewCoverage[];
+  /** Destination views of untested links that no recorded test visited, sorted by name. */
+  untestedViews: UntestedView[];
   /** Every test with recorded data, by title. */
   tests: TestRef[];
   /** Empty when no `threshold` is configured. */
@@ -335,15 +391,17 @@ function packageVersion(): string {
 
 const percent = (tested: number, total: number) => (total === 0 ? 100 : Math.round((tested / total) * 1000) / 10);
 
-function counts(r: Pick<RouteCoverage, 'total' | 'tested' | 'failingOnly' | 'a11yHints'>): CoverageCounts {
-  const testedLinks = 0;
-  const untestedLinks = 0;
+function counts(
+  r: Pick<RouteCoverage, 'total' | 'tested' | 'failingOnly' | 'a11yHints'> & Partial<Pick<RouteCoverage, 'totalLinks' | 'testedLinks'>>,
+): CoverageCounts {
+  const totalLinks = r.totalLinks ?? 0;
+  const testedLinks = r.testedLinks ?? 0;
   return {
-    coverage: percent(r.tested + testedLinks, r.total + testedLinks + untestedLinks),
-    testedElementsCount: r.tested,
-    untestedElementsCount: r.total - r.tested,
+    coverage: percent(r.tested, r.total),
+    testedElementsCount: r.tested - testedLinks,
+    untestedElementsCount: r.total - totalLinks - (r.tested - testedLinks),
     testedLinksCount: testedLinks,
-    untestedLinksCount: untestedLinks,
+    untestedLinksCount: totalLinks - testedLinks,
     failingOnlyElementsCount: r.failingOnly,
     a11yHintsCount: r.a11yHints ?? 0,
   };
@@ -374,6 +432,22 @@ function element(e: InternalElement): ElementCoverage {
   return out;
 }
 
+const link = (l: InternalLink): LinkCoverage => ({
+  key: l.key,
+  label: l.label,
+  tested: l.tested,
+  destinations: [...l.destinations],
+  destinationCount: l.destinationCount,
+  referrers: l.referrers.map(element),
+});
+
+const untestedView = (v: InternalUntestedView): UntestedView => ({
+  name: v.view,
+  destinations: [...v.destinations],
+  destinationCount: v.destinationCount,
+  referrers: v.referrers.map((r) => ({ view: r.route, label: r.label, keys: [...r.keys] })),
+});
+
 const threshold = (t: ThresholdResult): ThresholdCheck => ({
   scope: t.scope,
   ...(t.scope === 'view' ? { view: t.target } : {}),
@@ -401,17 +475,19 @@ export function toCoverageReport(
   thresholds: ThresholdResult[],
   config?: ReportConfig,
 ): CoverageReport {
-  const link: HtmlReportLink | undefined = summary.htmlReport;
+  const htmlReport: HtmlReportLink | undefined = summary.htmlReport;
+  const untestedViews = (summary.untestedViews ?? []).map(untestedView);
   return {
     schemaVersion: COVERAGE_SCHEMA_VERSION,
     generatedAt: summary.generatedAt,
     generator: { name: 'playwright-ui-coverage', version: packageVersion() },
-    summary: { viewCount: summary.routes.length, ...counts(summary) },
+    summary: { viewCount: summary.routes.length, untestedViewCount: untestedViews.length, ...counts(summary) },
     views: summary.routes.map((r) => ({
       name: r.route,
       reportUrl: `index.html#${encodeURIComponent(r.route)}`,
       summary: counts(r),
       elements: r.elements.map(element),
+      links: (r.links ?? []).map(link),
       screenshots: r.screenshots.map((s) => ({
         file: s.source,
         dpr: s.dpr,
@@ -420,6 +496,7 @@ export function toCoverageReport(
         boxes: s.boxes.map(({ key, x, y, w, h, pos }) => (pos ? { key, x, y, w, h, pos } : { key, x, y, w, h })),
       })),
     })),
+    untestedViews,
     tests: (summary.tests ?? []).map(test),
     thresholds: thresholds.map(threshold),
     insights: {
@@ -432,7 +509,7 @@ export function toCoverageReport(
         testShare: m.share,
       })),
     },
-    ...(link ? { playwrightReport: { path: link.path, attachmentsBaseURL: link.attachmentsBaseURL } } : {}),
+    ...(htmlReport ? { playwrightReport: { path: htmlReport.path, attachmentsBaseURL: htmlReport.attachmentsBaseURL } } : {}),
     ...(config ? { config } : {}),
   };
 }

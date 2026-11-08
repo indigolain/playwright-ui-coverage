@@ -32,7 +32,7 @@ export default defineUiCoverageConfig({
     {
       name: 'thresholds-fail',
       comment: 'Thresholds the demo misses (exit code 1), plus a typo\'d view that only warns.',
-      config: { threshold: { overall: 30, views: { '/users': 40, '/settings': 50, '/users/*': 20, '/setings': 10 } } },
+      config: { threshold: { overall: 30, views: { '/users': 40, '/settings': 50, '/users/*': 40, '/setings': 10 } } },
     },
   ],
 });

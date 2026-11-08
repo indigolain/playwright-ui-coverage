@@ -424,6 +424,7 @@ export class Resolver {
       nameFrom: ref.nameFrom ?? '',
       ...(frames.length ? { frames } : {}),
       ...(grouping ? { grouping } : {}),
+      ...(ref.href ? { href: ref.href } : {}),
     };
   }
 }

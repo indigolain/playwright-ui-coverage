@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { CoverageSummary } from './aggregate';
+import { allElements, type CoverageSummary } from './aggregate';
 import type { AttemptEntry } from './attempts';
 
 /** A test as listed under "Tested by", with what's needed to link to it. */
@@ -64,10 +64,10 @@ export const interactionTotal = (counts: Record<string, number> | undefined) =>
 export function mostRepeated(summary: CoverageSummary, limit = 10): RepeatedElement[] {
   const totalTests =
     summary.tests?.length ||
-    new Set(summary.routes.flatMap((r) => r.elements.flatMap((e) => e.testIds ?? e.testedBy))).size;
+    new Set(summary.routes.flatMap((r) => allElements(r).flatMap((e) => e.testIds ?? e.testedBy))).size;
   const all: RepeatedElement[] = [];
   for (const r of summary.routes) {
-    for (const e of r.elements) {
+    for (const e of allElements(r)) {
       const tests = e.testCount ?? e.testedBy.length;
       if (tests < 2) continue;
       all.push({

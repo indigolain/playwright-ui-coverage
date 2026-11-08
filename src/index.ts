@@ -41,6 +41,7 @@ export {
   type AttributeFilter,
   type AutoGroupOptions,
   type ElementGroupRule,
+  type LinkRules,
   type UiCoverageRules,
 } from './model/rules';
 export { RECORDED_CANDIDATES } from './model/elements';
@@ -80,6 +81,9 @@ export type {
   ViewCoverage,
   ElementCoverage,
   ElementGroup,
+  LinkCoverage,
+  UntestedView,
+  UntestedViewReferrer,
   A11yHint,
   ViewScreenshot,
   TestRef,

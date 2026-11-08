@@ -58,9 +58,10 @@ export function repeatedKey(members: GroupLevel[][]): string {
   return out;
 }
 
-export function applyGrouping(tests: TestEntry[], viewOf: (url: string, view?: string) => string): GroupingResult {
+export function applyGrouping(tests: TestEntry[], viewOf: (url: string, view?: string) => string | undefined): GroupingResult {
   const views = new Map<string, Occurrence[]>();
-  const add = (view: string, o: Occurrence) => {
+  const add = (view: string | undefined, o: Occurrence) => {
+    if (view === undefined) return;
     if (!views.has(view)) views.set(view, []);
     views.get(view)!.push(o);
   };

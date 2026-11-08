@@ -5,7 +5,7 @@
  */
 import type { BaselineCheck, CoverageReport, ThresholdCheck } from './coverage-report';
 import type { ComparedUnit, CoverageComparison, ThresholdChange, ViewComparison, ViewTotals } from './compare';
-import { byString } from './units';
+import { byString, unitNoun } from './units';
 
 /** First line of every comment: lets sticky-comment actions find and update it. */
 export const MARKDOWN_MARKER = '<!-- playwright-ui-coverage -->';
@@ -68,8 +68,10 @@ const reasonText: Record<ComparedUnit['reason'], string> = {
 };
 
 function unitLine(u: ComparedUnit, o: MarkdownOptions): string {
-  const kind = u.kind === 'link' ? 'link ' : '';
-  return `- ${viewRef(u.view, o)} ${kind}${mdText(u.label)} (${reasonText[u.reason]}) ${mdCode(u.key)}`;
+  const reason = u.kind === 'link' && u.reason === 'new' ? 'new link' : reasonText[u.reason];
+  // A link unit's key is its destination view.
+  if (u.kind === 'link') return `- ${viewRef(u.view, o)} ${mdText(u.label)} → ${mdCode(u.key)} (${reason})`;
+  return `- ${viewRef(u.view, o)} ${mdText(u.label)} (${reason}) ${mdCode(u.key)}`;
 }
 
 const thresholdTarget = (t: { scope: string; view?: string; pattern?: string }, o: MarkdownOptions) =>
@@ -105,7 +107,7 @@ export function comparisonMarkdown(c: CoverageComparison, o: MarkdownOptions = {
     '',
   );
   const facts = [
-    c.newGaps.length ? `**${plural(c.newGaps.length, 'new untested element')}**` : 'no new untested elements',
+    c.newGaps.length ? `**${plural(c.newGaps.length, `new ${unitNoun(c.newGaps)}`)}**` : 'no new untested elements or links',
     `${c.resolved.length} resolved`,
   ];
   if (c.addedViews.length) facts.push(`${plural(c.addedViews.length, 'view')} added`);
@@ -131,7 +133,7 @@ export function comparisonMarkdown(c: CoverageComparison, o: MarkdownOptions = {
     out.push('', `All ${plural(c.views.length, 'view')} unchanged.`);
   }
 
-  section(`New untested elements (${c.newGaps.length})`, c.newGaps.map((u) => unitLine(u, o)), o, out);
+  section(`New ${unitNoun(c.newGaps)}s (${c.newGaps.length})`, c.newGaps.map((u) => unitLine(u, o)), o, out);
   section(`Resolved: now tested (${c.resolved.length})`, c.resolved.map((u) => unitLine(u, o)), o, out);
   section(`Threshold changes (${c.thresholdChanges.length})`, c.thresholdChanges.map((t) => thresholdChangeLine(t, o)), o, out);
   out.push('');
@@ -150,14 +152,16 @@ function baselineLines(b: BaselineCheck, o: MarkdownOptions, out: string[]) {
   }
   const resolved = b.resolved.length ? `, ${plural(b.resolved.length, 'gap')} resolved (commit ${mdCode(b.nextFile ?? '')} to ratchet)` : '';
   if (b.status === 'passed') {
-    out.push(`**Baseline:** passed, no new untested elements${resolved}.`);
+    out.push(`**Baseline:** passed, no new untested elements or links${resolved}.`);
   } else {
-    out.push(`**Baseline: failed**, ${plural(b.newGaps.length, 'new untested element')} not in ${mdCode(b.file)}${resolved}.`);
+    out.push(`**Baseline: failed**, ${plural(b.newGaps.length, `new ${unitNoun(b.newGaps)}`)} not in ${mdCode(b.file)}${resolved}.`);
   }
-  const lines = b.newGaps.map(
-    (g) => `- ${viewRef(g.view, o)} ${g.kind === 'link' ? 'link ' : ''}${mdText(g.label)}${g.newView ? ' (new view)' : ''} ${mdCode(g.key)}`,
+  const lines = b.newGaps.map((g) =>
+    g.kind === 'link'
+      ? `- ${viewRef(g.view, o)} ${mdText(g.label)} → ${mdCode(g.key)}${g.newView ? ' (new view)' : ''}`
+      : `- ${viewRef(g.view, o)} ${mdText(g.label)}${g.newView ? ' (new view)' : ''} ${mdCode(g.key)}`,
   );
-  section(`New untested elements (${b.newGaps.length})`, lines, o, out);
+  section(`New ${unitNoun(b.newGaps)}s (${b.newGaps.length})`, lines, o, out);
 }
 
 /** Markdown summary of one run, for `$GITHUB_STEP_SUMMARY`. */

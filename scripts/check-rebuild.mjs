@@ -76,10 +76,16 @@ const comparable = (s) =>
       elements: v.elements
         .map((e) => ({ key: e.key, tested: e.tested, instances: e.instances, testIds: [...e.testIds].sort() }))
         .sort((a, b) => a.key.localeCompare(b.key)),
+      links: (v.links ?? [])
+        .map((l) => ({ key: l.key, tested: l.tested, destinations: l.destinations, referrers: l.referrers.map((e) => e.key).sort() }))
+        .sort((a, b) => a.key.localeCompare(b.key)),
     })),
+    untestedViews: s.untestedViews,
   });
 const keys = (s) => s.views.flatMap((v) => v.elements.map((e) => `${v.name} ${e.key}`));
 const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
+/** Keys of the <a> elements of link units, once per view. */
+const linkKeys = (s) => s.views.flatMap((v) => [...new Set((v.links ?? []).flatMap((l) => l.referrers.map((e) => `${v.name} ${e.key}`)))]);
 /** How coverage.json names a config file: relative to the working directory, absolute outside it. */
 const traceFile = (file) => {
   const rel = path.relative(root, file);
@@ -132,6 +138,9 @@ try {
       (k) => / nav > a/.test(k) || k.endsWith(' [data-action="delete-user"]') || inFrame.has(k),
     );
     const left = keys(filtered).filter((k) => removed.includes(k));
+    const navLinks = linkKeys(filtered).filter((k) => / nav > a/.test(k));
+    if (!linkKeys(baseline).some((k) => / nav > a/.test(k))) errors.push('filter check is vacuous: no nav links in link units');
+    if (navLinks.length) errors.push(`ignored links still in link units: ${navLinks.join(', ')}`);
     if (removed.length === 0) errors.push('filter check is vacuous: no nav links / delete buttons in the baseline');
     if (left.length) errors.push(`ignored elements still in the report: ${left.join(', ')}`);
     if (total(filtered) !== total(baseline) - removed.length)
@@ -140,23 +149,26 @@ try {
   }
 
   // 2b. Grouping rules (README "Element grouping"): an elementGroups entry merges
-  //     each view's nav links into one element; autoGroup: false undoes the
-  //     automatic groups on /shop (repeated cards, the label).
+  //     the controls of every product card on /shop into one element;
+  //     autoGroup: false undoes the automatic groups there (repeated cards, the label).
+  const shop = (s) => s.views.find((v) => v.name === '/shop');
   const groupsConfig = writeConfig(
     'groups.config.mjs',
-    `export default ${JSON.stringify({ ...rules, elementGroups: [{ selector: 'nav', name: 'main navigation' }] })};\n`,
+    `export default ${JSON.stringify({ ...rules, elementGroups: [{ selector: '.card-actions', name: 'card actions' }] })};\n`,
   );
   const groupsOut = path.join(tmp, 'groups');
   if (runCli(['report', '--data', data, '--config', groupsConfig, '--out', groupsOut]) !== 0) {
     errors.push('CLI rebuild with elementGroups failed');
   } else {
     const grouped = read(groupsOut);
-    const navLinks = keys(baseline).filter((k) => / nav > a/.test(k)).length;
-    const navGroups = grouped.views.filter((v) => v.elements.some((e) => e.key === 'nav' && e.group?.reason === 'config' && e.group.name === 'main navigation')).length;
-    const navViews = baseline.views.filter((v) => v.elements.some((e) => /^nav > a/.test(e.key))).length;
-    if (navLinks === 0 || navGroups !== navViews) errors.push(`elementGroups: ${navGroups} nav groups in ${navViews} views with nav links`);
-    else if (total(grouped) !== total(baseline) - navLinks + navGroups)
-      errors.push(`elementGroups total ${total(grouped)}, expected ${total(baseline)} - ${navLinks} + ${navGroups}`);
+    const cards = (s) => (shop(s)?.elements ?? []).filter((e) => e.key.startsWith('main > ul > li') || e.key === '.card-actions');
+    const before = cards(baseline);
+    const after = cards(grouped);
+    if (before.length < 2) errors.push(`elementGroups check is vacuous: ${before.length} card elements on /shop`);
+    else if (after.length !== 1 || after[0].key !== '.card-actions' || after[0].group?.reason !== 'config' || after[0].group.name !== 'card actions' || !after[0].tested)
+      errors.push(`elementGroups: card elements on /shop ${JSON.stringify(after.map((e) => [e.key, e.group, e.tested]))}`);
+    else if (total(grouped) !== total(baseline) - before.length + 1)
+      errors.push(`elementGroups total ${total(grouped)}, expected ${total(baseline)} - ${before.length} + 1`);
     else console.log(`elementGroups check: ${total(baseline)} → ${total(grouped)} elements`);
   }
   const ungroupedConfig = writeConfig('ungrouped.config.json', JSON.stringify({ ...rules, autoGroup: false }));
@@ -164,7 +176,6 @@ try {
   if (runCli(['report', '--data', data, '--config', ungroupedConfig, '--out', ungroupedOut]) !== 0) {
     errors.push('CLI rebuild with autoGroup: false failed');
   } else {
-    const shop = (s) => s.views.find((v) => v.name === '/shop');
     const before = shop(baseline);
     const after = shop(read(ungroupedOut));
     const n = (v) => v.summary.testedElementsCount + v.summary.untestedElementsCount;
@@ -173,6 +184,23 @@ try {
       errors.push('autoGroup: false still has automatic groups on /shop');
     else if (n(after) <= n(before)) errors.push(`autoGroup: false: /shop has ${n(after)} elements, grouped ${n(before)}`);
     else console.log(`autoGroup check: /shop ${n(before)} → ${n(after)} elements without automatic grouping`);
+  }
+
+  // 2c. `links: false`: every <a> is an element again, no link units or untested views.
+  const noLinksConfig = writeConfig('no-links.config.json', JSON.stringify({ ...rules, links: false }));
+  const noLinksOut = path.join(tmp, 'no-links');
+  if (runCli(['report', '--data', data, '--config', noLinksConfig, '--out', noLinksOut]) !== 0) {
+    errors.push('CLI rebuild with links: false failed');
+  } else {
+    const noLinks = read(noLinksOut);
+    const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
+    if (baseline.summary.untestedLinksCount + baseline.summary.testedLinksCount === 0) errors.push('links check is vacuous: no link units in the demo');
+    if (baseline.untestedViews.length === 0) errors.push('links check is vacuous: no untested views in the demo');
+    if (noLinks.summary.testedLinksCount + noLinks.summary.untestedLinksCount !== 0 || noLinks.untestedViews.length !== 0)
+      errors.push(`links: false still has link units: ${JSON.stringify(noLinks.summary)}`);
+    if (total(noLinks) !== total(baseline) + linkKeys(baseline).length)
+      errors.push(`links: false: ${total(noLinks)} elements, expected ${total(baseline)} + ${linkKeys(baseline).length} link elements`);
+    else console.log(`links check: ${total(baseline)} elements + ${linkKeys(baseline).length} link elements with links: false`);
   }
 
   // 3. Thresholds (.cjs config): exit code 1 when not met.

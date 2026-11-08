@@ -18,16 +18,25 @@ function compact(summary: CoverageSummary) {
     tests,
     mostRepeated: summary.mostRepeated ?? mostRepeated(summary),
     routes: summary.routes.map((r) => {
-      const index = new Map(r.elements.map((e, i) => [e.key, i]));
+      // The <a> elements of link units, once each: `links[].refs` and boxes index into them.
+      const linkEls = [...new Set((r.links ?? []).flatMap((l) => l.referrers))];
+      const linkIndex = new Map(linkEls.map((e, i) => [e, i]));
+      const untestedLinkEls = new Set((r.links ?? []).filter((l) => !l.tested).flatMap((l) => l.referrers));
+      // Boxes: an index into elements, then (offset by elements.length) into linkEls.
+      const index = new Map([...r.elements, ...linkEls].map((e, i) => [e.key, i]));
+      // The page needs neither the raw recorded data nor locators for tested elements.
+      // Hints become their messages.
+      const slim = ({ role, name, nameFrom, attrs, suggestedLocator, a11yHints, ...e }: ElementCoverage, keepLocator: boolean) => ({
+        ...compactTestIds(e, testIndex),
+        ...(keepLocator && suggestedLocator ? { suggestedLocator } : {}),
+        ...(a11yHints?.length ? { a11yHints: a11yHints.map((h) => h.message) } : {}),
+      });
       return {
         ...r,
-        // The page needs neither the raw recorded data nor locators for tested elements.
-        // Hints become their messages.
-        elements: r.elements.map(({ role, name, nameFrom, attrs, suggestedLocator, a11yHints, ...e }) => ({
-          ...compactTestIds(e, testIndex),
-          ...(e.tested || !suggestedLocator ? {} : { suggestedLocator }),
-          ...(a11yHints?.length ? { a11yHints: a11yHints.map((h) => h.message) } : {}),
-        })),
+        elements: r.elements.map((e) => slim(e, !e.tested)),
+        // A link's locator matters while its destination is untested.
+        linkEls: linkEls.map((e) => slim(e, untestedLinkEls.has(e))),
+        links: (r.links ?? []).map(({ referrers, ...l }) => ({ ...l, refs: referrers.map((e) => linkIndex.get(e)!) })),
         screenshots: r.screenshots.map(({ testId: _, ...s }) => ({
           ...s,
           boxes: s.boxes.map((b) => {
@@ -40,6 +49,7 @@ function compact(summary: CoverageSummary) {
         })),
       };
     }),
+    untestedViews: summary.untestedViews ?? [],
   };
 }
 
@@ -182,9 +192,19 @@ th[aria-sort=descending] button::after { content: ' \\2193'; }
   td.num { display: inline-block; margin-right: 16px; text-align: left; }
   td.num:nth-child(3)::before { content: 'Interactions: '; }
   td.num:nth-child(4)::before { content: 'Tests: '; }
-  td:last-child::before { content: 'Tested by: '; }
+  table.els td:last-child::before { content: 'Tested by: '; }
 }
 tr.flash td { animation: flash 1.2s ease-out; }
+h2.section { font-size: 15px; margin: 24px 0 8px; display: flex; gap: 10px; align-items: baseline; }
+.ref + .ref { margin-top: 6px; }
+.ref.hl { background: var(--bg); outline: 1px solid var(--border); border-radius: 4px; }
+.urls { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+.navhead { margin: 10px 8px 0; padding: 8px 10px 0; border-top: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--muted); }
+#untestedList button { all: unset; display: block; width: 100%; box-sizing: border-box; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+#untestedList button:hover { background: var(--bg); }
+#untestedList button:focus-visible { outline: 2px solid var(--accent); }
+#untestedList button[aria-current=true] { background: var(--bg); outline: 1px solid var(--border); }
+#untestedList { padding: 4px 8px 8px; }
 @keyframes flash { from { background: rgba(245,158,11,.3); } to { background: transparent; } }
 </style>
 </head>
@@ -212,6 +232,10 @@ tr.flash td { animation: flash 1.2s ease-out; }
       <div class="sub muted" id="insightsSub"></div></button>
     <div id="navList"></div>
     <p class="muted" id="navEmpty" hidden>No routes match.</p>
+    <div id="untestedNav" hidden>
+      <div class="navhead" title="Views that links point to but no test visited">Untested views <span id="untestedCount"></span></div>
+      <div id="untestedList"></div>
+    </div>
   </nav>
   <main id="main"></main>
 </div>
@@ -232,8 +256,15 @@ const store = {
 const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
 
 $('#total').textContent = data.percent + '%';
-$('#totalDetail').textContent = data.tested + ' of ' + data.total + ' interactive elements tested across ' + data.routes.length + ' routes' +
+const totalLinks = data.totalLinks || 0, testedLinks = data.testedLinks || 0;
+const untestedViews = data.untestedViews || [];
+const untestedIndex = new Map(untestedViews.map((v, i) => [v.view, i]));
+const UNTESTED_HASH = '#untested:';
+$('#totalDetail').textContent = (totalLinks
+    ? (data.tested - testedLinks) + ' of ' + (data.total - totalLinks) + ' interactive elements and ' + testedLinks + ' of ' + totalLinks + ' links tested'
+    : data.tested + ' of ' + data.total + ' interactive elements tested') + ' across ' + data.routes.length + ' routes' +
   (data.failingOnly ? ' (' + data.failingOnly + ' touched only by failing tests)' : '') +
+  (untestedViews.length ? ' · ' + plural(untestedViews.length, 'untested view') : '') +
   (data.a11yHints ? ' · ' + plural(data.a11yHints, 'accessibility hint') : '');
 $('#generated').textContent = new Date(data.generatedAt).toLocaleString();
 
@@ -255,7 +286,8 @@ navList.innerHTML = items.map(({ r, i, untested }) =>
   '<button data-i="' + i + '" aria-current="false">' +
     '<div class="row"><span class="route">' + esc(r.route) + '</span><span>' + r.percent + '%</span></div>' +
     '<div class="bar"><i style="width:' + r.percent + '%"></i></div>' +
-    '<div class="sub muted">' + (untested ? untested + ' untested' : 'all tested') + ' · ' + r.total + ' elements' +
+    '<div class="sub muted">' + (untested ? untested + ' untested' : 'all tested') + ' · ' + plural(r.total - (r.totalLinks || 0), 'element') +
+      (r.totalLinks ? ' · ' + plural(r.totalLinks, 'link') : '') +
       (r.failingOnly ? ' · <span class="warn-text">' + r.failingOnly + ' failing only</span>' : '') +
       (r.a11yHints ? ' · <span class="a11y-count">' + r.a11yHints + ' a11y</span>' : '') + '</div>' +
   '</button>').join('');
@@ -313,7 +345,7 @@ function placeBoxes(el, r, s, tested) {
   el.querySelectorAll('.box').forEach(b => b.remove());
   const frag = document.createDocumentFragment();
   for (const raw of s.boxes) {
-    const b = Array.isArray(raw) ? { key: r.elements[raw[0]].key, x: raw[1], y: raw[2], w: raw[3], h: raw[4], pos: raw[5] } : raw;
+    const b = Array.isArray(raw) ? { key: elementAt(r, raw[0]).key, x: raw[1], y: raw[2], w: raw[3], h: raw[4], pos: raw[5] } : raw;
     // The screenshot may be cropped (maxScreenshotHeight): drop or clip boxes outside it.
     if (b.y >= cssH || b.x >= cssW) continue;
     const w = Math.min(b.w, cssW - b.x);
@@ -323,7 +355,8 @@ function placeBoxes(el, r, s, tested) {
     // Fixed and sticky elements are drawn where they were on screen when the screenshot was taken.
     d.className = 'box' + (info && info.tested ? ' ok' : info && failingOnly(info) ? ' warn' : '') + (b.pos ? ' pinned' : '');
     d.dataset.key = b.key;
-    d.title = (info ? info.label : b.key) + (info && info.tested ? ' — tested' : info && failingOnly(info) ? ' — failing tests only' : ' — untested') +
+    d.title = (info ? info.label : b.key) + (info && info.dests ? ' → ' + info.dests + (info.tested ? ' — destination visited' : ' — destination never visited') :
+        info && info.tested ? ' — tested' : info && failingOnly(info) ? ' — failing tests only' : ' — untested') +
       (b.pos ? ' (position: ' + b.pos + ', shown where it was on screen)' : '') +
       (info && info.suggestedLocator ? '\\n' + info.suggestedLocator + '\\n(click to show it in the table)' : '');
     d.style.cssText = 'left:' + (b.x / cssW * 100) + '%;top:' + (b.y / cssH * 100) + '%;width:' + (w / cssW * 100) + '%;height:' + (h / cssH * 100) + '%';
@@ -333,17 +366,63 @@ function placeBoxes(el, r, s, tested) {
   el.classList.add('loaded');
 }
 
+// Box index: elements first, then the <a> elements of link units.
+const elementAt = (r, i) => i < r.elements.length ? r.elements[i] : r.linkEls[i - r.elements.length];
+const linkEls = (r) => r.linkEls || [];
+const linksOf = (r) => r.links || [];
+// What a box shows: elements by their own state; a link's <a> by its destinations (tested when all were visited).
+function boxInfo(r) {
+  const m = new Map(r.elements.map(e => [e.key, e]));
+  const units = new Map();
+  for (const l of linksOf(r)) for (const j of l.refs) {
+    const e = linkEls(r)[j];
+    if (!units.has(e.key)) units.set(e.key, { label: e.label, suggestedLocator: e.suggestedLocator, testedBy: [], tested: true, dests: [] });
+    const u = units.get(e.key);
+    u.tested = u.tested && l.tested;
+    u.dests.push(l.key);
+  }
+  for (const [k, u] of units) m.set(k, { ...u, dests: u.dests.join(', ') });
+  return m;
+}
+const findLocator = (r, key) => (r.elements.find(x => x.key === key) || linkEls(r).find(x => x.key === key) || {}).suggestedLocator;
+// The row of an element, or the referrer entry in a link unit's row.
+const rowOf = (key) => $('#main').querySelector('tr[data-key="' + CSS.escape(key) + '"], tr .ref[data-key="' + CSS.escape(key) + '"]');
+// Lines for "Copy untested as test skeleton": untested elements, then one link per untested destination.
+const skeletonLines = (r) => r.elements.filter(x => !x.tested && x.suggestedLocator).map(x => x.suggestedLocator).concat(
+  linksOf(r).filter(l => !l.tested).map(l => l.refs.map(j => linkEls(r)[j].suggestedLocator).find(Boolean)).filter(Boolean));
+function viewLink(name) {
+  if (routeIndex.has(name)) return '<a class="goto route" href="#' + esc(encodeURIComponent(name)) + '" data-route="' + esc(name) + '">' + esc(name) + '</a>';
+  if (untestedIndex.has(name)) return '<a class="goto route" href="' + esc(UNTESTED_HASH + encodeURIComponent(name)) + '" data-untested="' + untestedIndex.get(name) + '">' + esc(name) + '</a>';
+  return '<span class="route">' + esc(name) + '</span>';
+}
+const urlList = (urls, count) => urls.map(esc).join('<br>') + (count > urls.length ? '<br><span class="muted">… and ' + (count - urls.length) + ' more</span>' : '');
+function linkRows(r) {
+  return linksOf(r).map(l =>
+    '<tr class="' + (l.tested ? 'ok' : 'bad') + '">' +
+      '<td><span class="pill ' + (l.tested ? 'ok" title="A test visited this view">tested' : 'bad" title="No test visited this view">untested') + '</span></td>' +
+      '<td>' + viewLink(l.key) + '</td>' +
+      '<td>' + l.refs.map(j => {
+        const e = linkEls(r)[j];
+        return '<div class="ref" data-key="' + esc(e.key) + '">' + esc(e.label) + (e.instances > 1 ? ' <span class="muted">×' + e.instances + '</span>' : '') +
+          '<br><code class="muted">' + esc(e.key) + '</code>' +
+          (e.a11yHints || []).map(h => '<div class="a11y" title="Accessibility hint (informational, not part of the coverage score)">' + esc(h) + '</div>').join('') +
+          (!l.tested && e.suggestedLocator ? '<div class="snip"><code>' + esc(e.suggestedLocator) + '</code><button class="btn" data-copy="' + esc(e.key) + '" title="Copy this line">Copy</button></div>' : '') +
+          '</div>';
+      }).join('') + '</td>' +
+      '<td class="urls">' + urlList(l.destinations, l.destinationCount) + '</td>' +
+    '</tr>').join('');
+}
+
 function show(i, fromUser, focusKey) {
   const r = data.routes[i];
   if (!r) { $('#main').innerHTML = '<p class="muted">No coverage data.</p>'; return; }
   try { history.replaceState(null, '', '#' + encodeURIComponent(r.route)); } catch {}
-  insightsNav.setAttribute('aria-current', 'false');
-  if (buttons[current]) buttons[current].setAttribute('aria-current', 'false');
+  clearCurrent();
   current = i;
   buttons[i].setAttribute('aria-current', 'true');
   if (!fromUser) buttons[i].scrollIntoView({ block: 'nearest' });
 
-  const tested = new Map(r.elements.map(e => [e.key, e]));
+  const tested = boxInfo(r);
   const shots = r.screenshots.map((s, si) =>
     '<figure><div class="shot" data-si="' + si + '"><img loading="lazy" decoding="async" src="' + esc(s.source) + '" alt="Screenshot of ' + esc(r.route) + '"></div>' +
     '<figcaption>' + (s.viewport ? 'viewport, right after an interaction · ' : '') + 'from: ' + esc(s.test) + '</figcaption></figure>').join('');
@@ -362,13 +441,20 @@ function show(i, fromUser, focusKey) {
   main.className = onlyUntested ? 'only-untested' : '';
   main.innerHTML =
     '<div class="toolbar"><span class="route big">' + esc(r.route) + '</span>' +
-    '<span class="muted">' + r.tested + '/' + r.total + ' tested (' + r.percent + '%)</span>' +
+    '<span class="muted">' + r.tested + '/' + r.total + ' tested (' + r.percent + '%)' +
+      (r.totalLinks ? ': ' + (r.tested - r.testedLinks) + '/' + (r.total - r.totalLinks) + ' elements, ' + r.testedLinks + '/' + r.totalLinks + ' links' : '') + '</span>' +
     (r.a11yHints ? '<span class="a11y-count" title="Informational; not part of the coverage score">' + plural(r.a11yHints, 'accessibility hint') + '</span>' : '') +
     '<span style="margin-left:auto"></span>' +
-    (r.elements.some(e => !e.tested && e.suggestedLocator) ? '<button class="btn" data-copy="skeleton" title="A test that visits this route and touches each untested element">Copy untested as test skeleton</button>' : '') +
+    (skeletonLines(r).length ? '<button class="btn" data-copy="skeleton" title="A test that visits this route and touches each untested element and link">Copy untested as test skeleton</button>' : '') +
     '<label><input type="checkbox" id="only"' + (onlyUntested ? ' checked' : '') + '> Untested only</label></div>' +
     (shots ? '<div class="shots">' + shots + '</div>' : '') +
-    '<div class="table-wrap"><table><thead><tr><th>Status</th><th>Element</th>' + insightHeaders() + '<th>Tested by</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    (r.elements.length ? '<div class="table-wrap"><table class="els"><thead><tr><th>Status</th><th>Element</th>' + insightHeaders() + '<th>Tested by</th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '') +
+    (linksOf(r).length
+      ? '<h2 class="section">Links <span class="muted">' + (r.totalLinks - r.testedLinks) + ' untested of ' + r.totalLinks + '</span></h2>' +
+        '<p class="hint">Links of this route, grouped by the view they lead to. A destination counts as tested when any test visited it, not necessarily through these links. ' +
+        'Links within the route (<code>#fragment</code>, the route itself) are elements above.</p>' +
+        '<div class="table-wrap"><table class="links"><thead><tr><th>Status</th><th>Destination</th><th>Referrers</th><th>URLs</th></tr></thead><tbody>' + linkRows(r) + '</tbody></table></div>'
+      : '');
   main.querySelectorAll('th[data-sort] button').forEach(b => b.onclick = () => setRowSort(r, b.parentNode.dataset.sort));
 
   $('#only').onchange = (e) => {
@@ -389,7 +475,8 @@ function show(i, fromUser, focusKey) {
     }
   });
 
-  const focusRow = focusKey != null && main.querySelector('tr[data-key="' + CSS.escape(focusKey) + '"]');
+  wireGoto(main);
+  const focusRow = focusKey != null && rowOf(focusKey);
   if (focusRow) { focusRow.classList.add('picked'); focusRow.scrollIntoView({ block: 'center' }); }
   else if (fromUser) {
     const top = main.getBoundingClientRect().top;
@@ -442,7 +529,7 @@ function setRowSort(r, key) {
   main.querySelectorAll('th[data-sort]').forEach(th => {
     if (th.dataset.sort === rowSort) th.setAttribute('aria-sort', 'descending'); else th.removeAttribute('aria-sort');
   });
-  const tbody = main.querySelector('tbody');
+  const tbody = main.querySelector('table.els tbody');
   const byKey = new Map(Array.from(tbody.children, tr => [tr.dataset.key, tr]));
   const frag = document.createDocumentFragment();
   sortedElements(r.elements).forEach(e => frag.appendChild(byKey.get(e.key)));
@@ -479,7 +566,7 @@ $('#insightsSub').textContent = repeated.length ? 'Up to ' + repeated[0].tests +
 const REPEATED_HASH = '#/insights/repeated';
 function showRepeated() {
   try { history.replaceState(null, '', REPEATED_HASH); } catch {}
-  if (buttons[current]) buttons[current].setAttribute('aria-current', 'false');
+  clearCurrent();
   current = -1;
   insightsNav.setAttribute('aria-current', 'true');
   const rows = repeated.map(x =>
@@ -499,14 +586,70 @@ function showRepeated() {
         'Keep one test that goes through the UI for the step itself.</p>' +
         '<div class="table-wrap"><table><thead><tr><th>Element</th><th>Route</th><th class="num" title="Distinct tests (share of all tests)">Tests</th><th class="num">Interactions</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
       : '<p class="muted">No element is used by more than one test.</p>');
-  main.querySelectorAll('a.goto').forEach(a => a.onclick = (ev) => {
+  wireGoto(main);
+}
+insightsNav.onclick = showRepeated;
+
+// Links to a route (optionally to one of its elements) or to an untested view.
+function wireGoto(root) {
+  root.querySelectorAll('a.goto').forEach(a => a.onclick = (ev) => {
+    if (a.dataset.untested !== undefined) { ev.preventDefault(); showUntested(+a.dataset.untested); return; }
     const i = routeIndex.get(a.dataset.route);
     if (i === undefined) return;
     ev.preventDefault();
     show(i, true, a.dataset.key);
   });
 }
-insightsNav.onclick = showRepeated;
+
+// ---- Untested views: link destinations no test visited.
+const untestedNav = $('#untestedNav');
+const untestedList = $('#untestedList');
+let currentUntested = -1;
+function clearCurrent() {
+  insightsNav.setAttribute('aria-current', 'false');
+  if (buttons[current]) buttons[current].setAttribute('aria-current', 'false');
+  if (untestedList.children[currentUntested]) untestedList.children[currentUntested].setAttribute('aria-current', 'false');
+  currentUntested = -1;
+}
+if (untestedViews.length) {
+  untestedNav.hidden = false;
+  $('#untestedCount').textContent = '(' + untestedViews.length + ')';
+  untestedList.innerHTML = untestedViews.map((v, i) =>
+    '<button data-u="' + i + '" aria-current="false"><div class="route">' + esc(v.view) + '</div>' +
+    '<div class="sub muted">linked from ' + plural(v.referrers.length, 'route') + '</div></button>').join('');
+  untestedList.addEventListener('click', e => {
+    const b = e.target.closest('button[data-u]');
+    if (b) showUntested(+b.dataset.u);
+  });
+}
+function showUntested(i) {
+  const v = untestedViews[i];
+  if (!v) return;
+  try { history.replaceState(null, '', UNTESTED_HASH + encodeURIComponent(v.view)); } catch {}
+  clearCurrent();
+  current = -1;
+  currentUntested = i;
+  untestedList.children[i].setAttribute('aria-current', 'true');
+  const rows = v.referrers.map(x => {
+    const r = data.routes[routeIndex.get(x.route)];
+    const els = r ? x.keys.map(k => linkEls(r).find(e => e.key === k)).filter(Boolean) : [];
+    return '<tr class="bad"><td>' + viewLink(x.route) + '</td><td>' +
+      (els.length ? els.map(e => '<div class="ref">' + esc(e.label) + (e.instances > 1 ? ' <span class="muted">×' + e.instances + '</span>' : '') +
+        '<br><code class="muted">' + esc(e.key) + '</code>' +
+        (e.suggestedLocator ? '<div class="snip"><code>' + esc(e.suggestedLocator) + '</code></div>' : '') + '</div>').join('') : esc(x.label)) + '</td></tr>';
+  }).join('');
+  const main = $('#main');
+  litKey = null; lit = [];
+  main.className = '';
+  main.innerHTML =
+    '<div class="toolbar"><span class="route big">' + esc(v.view) + '</span><span class="pill bad">untested view</span></div>' +
+    '<p class="hint">No test visited this view; these routes link to it. A test that opens it (by any path) makes these links tested, and its elements appear in the report.</p>' +
+    '<h2 class="section">Referrers</h2>' +
+    '<div class="table-wrap"><table><thead><tr><th>Route</th><th>Links</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<h2 class="section">URLs <span class="muted">' + v.destinationCount + '</span></h2>' +
+    '<div class="table-wrap"><table><tbody><tr><td class="urls">' + urlList(v.destinations, v.destinationCount) + '</td></tr></tbody></table></div>';
+  wireGoto(main);
+}
 
 // ---- Hovering a row or box highlights every node with the same key.
 let lit = [];
@@ -558,17 +701,15 @@ $('#main').addEventListener('click', e => {
   const btn = e.target.closest('button[data-copy]');
   if (btn) {
     const r = data.routes[current];
-    const untested = r.elements.filter(x => !x.tested && x.suggestedLocator);
-    const text = btn.dataset.copy === 'skeleton'
-      ? testSkeleton(r.route, untested.map(x => x.suggestedLocator))
-      : r.elements.find(x => x.key === btn.dataset.copy).suggestedLocator;
+    const text = btn.dataset.copy === 'skeleton' ? testSkeleton(r.route, skeletonLines(r)) : findLocator(r, btn.dataset.copy);
     copyText(text, btn);
     return;
   }
   // Clicking a box on a screenshot scrolls to its row (where the copy button is).
   const box = e.target.closest('.box');
   if (box) {
-    const row = $('#main').querySelector('tr[data-key="' + CSS.escape(box.dataset.key) + '"]');
+    const hit = rowOf(box.dataset.key);
+    const row = hit && hit.closest('tr');
     if (row) {
       row.scrollIntoView({ block: 'center', behavior: 'smooth' });
       row.classList.remove('flash');
@@ -579,13 +720,16 @@ $('#main').addEventListener('click', e => {
 });
 
 const indexOfHash = () => data.routes.findIndex(r => '#' + encodeURIComponent(r.route) === location.hash);
+const untestedOfHash = () => untestedViews.findIndex(v => UNTESTED_HASH + encodeURIComponent(v.view) === location.hash);
 addEventListener('hashchange', () => {
   if (location.hash === REPEATED_HASH) { if (current !== -1) showRepeated(); return; }
+  if (location.hash.startsWith(UNTESTED_HASH)) { const u = untestedOfHash(); if (u >= 0 && u !== currentUntested) showUntested(u); return; }
   const i = indexOfHash(); if (i >= 0 && i !== current) show(i);
 });
 const fromHash = indexOfHash();
 const first = firstVisible();
 if (location.hash === REPEATED_HASH) showRepeated();
+else if (untestedOfHash() >= 0) showUntested(untestedOfHash());
 else show(fromHash >= 0 ? fromHash : first ? +first.dataset.i : 0);
 </script>
 </body>

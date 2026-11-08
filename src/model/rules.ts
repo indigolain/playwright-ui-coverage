@@ -84,6 +84,16 @@ export interface UiCoverageRules {
    * Explicit groups (`data-uicov-group`, `elementGroups`) always apply.
    */
   autoGroup?: boolean | AutoGroupOptions;
+  /**
+   * How `<a href>` elements count (README "Links and untested views"). By
+   * default a link to another view is a *link unit*, tested when any counted
+   * test visited its destination view, instead of an interactive element.
+   * Same-view links (`#x`, `#`, a link to the page itself), `javascript:` and
+   * empty hrefs, links inside iframes and, in component tests, every link
+   * stay interactive elements. `false`: every link is an interactive element
+   * (tested when clicked), as before link units existed.
+   */
+  links?: false | LinkRules;
 }
 
 /**
@@ -117,6 +127,18 @@ export function autoGroupSwitches(rules: UiCoverageRules): Required<AutoGroupOpt
   const a = rules.autoGroup;
   const on = (k: keyof AutoGroupOptions) => (a === undefined || a === true ? true : a === false ? false : a[k] !== false);
   return { rows: on('rows'), repeated: on('repeated'), labels: on('labels'), forms: on('forms') };
+}
+
+/** The `links` rule. */
+export interface LinkRules {
+  /**
+   * Links to an origin no test visited (another site):
+   * - `'element'` (default): an interactive element, tested when clicked.
+   * - `'ignore'`: not counted at all.
+   */
+  external?: 'element' | 'ignore';
+  /** Free text, ignored. */
+  comment?: string;
 }
 
 const regexProblem = (src: string): string | undefined => {
@@ -201,6 +223,7 @@ export const RULES_SCHEMA = {
     s.boolean(),
     s.object({ rows: s.boolean(), repeated: s.boolean(), labels: s.boolean(), forms: s.boolean() }),
   ),
+  links: s.union(s.oneOf(false), s.rule({ external: s.oneOf('element', 'ignore') }, 'an object { external? }')),
 } satisfies SchemaFields<UiCoverageRules>;
 
 /** The keys of `UiCoverageRules`, e.g. to pick them out of a larger options object. */

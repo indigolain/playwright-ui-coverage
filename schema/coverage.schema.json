@@ -4,7 +4,7 @@
   "title": "playwright-ui-coverage coverage.json",
   "description": "UI coverage report written by playwright-ui-coverage (ui-coverage-report/coverage.json). schemaVersion changes only on breaking changes; new properties may be added at any time, so readers must ignore properties they don't know. Properties marked x-internal are not covered by the schemaVersion guarantee. See docs/coverage-json.md.",
   "type": "object",
-  "required": ["schemaVersion", "generatedAt", "generator", "summary", "views", "tests", "thresholds", "insights"],
+  "required": ["schemaVersion", "generatedAt", "generator", "summary", "views", "untestedViews", "tests", "thresholds", "insights"],
   "properties": {
     "schemaVersion": { "const": 1, "description": "Bumped only on breaking changes." },
     "generatedAt": { "type": "string", "format": "date-time", "description": "ISO 8601 time the report was built." },
@@ -18,6 +18,7 @@
     },
     "summary": { "$ref": "#/$defs/ReportSummary" },
     "views": { "type": "array", "items": { "$ref": "#/$defs/ViewCoverage" }, "description": "Sorted by name." },
+    "untestedViews": { "type": "array", "items": { "$ref": "#/$defs/UntestedView" }, "description": "Destination views of untested links that no recorded test visited, sorted by name." },
     "tests": { "type": "array", "items": { "$ref": "#/$defs/TestRef" }, "description": "Every test with recorded data, sorted by title." },
     "thresholds": { "type": "array", "items": { "$ref": "#/$defs/ThresholdCheck" }, "description": "Empty when no threshold is configured." },
     "insights": {
@@ -67,7 +68,7 @@
     },
     "CoverageCounts": {
       "type": "object",
-      "description": "Coverage counts. Denominator of coverage: testedElementsCount + untestedElementsCount + testedLinksCount + untestedLinksCount.",
+      "description": "Coverage counts. Denominator of coverage: testedElementsCount + untestedElementsCount + testedLinksCount + untestedLinksCount. An <a> that is part of a link unit is not also counted as an element.",
       "required": [
         "coverage",
         "testedElementsCount",
@@ -81,8 +82,8 @@
         "coverage": { "type": "number", "minimum": 0, "maximum": 100, "description": "Percent of units tested, rounded to one decimal; 100 when there are no units." },
         "testedElementsCount": { "type": "integer", "minimum": 0 },
         "untestedElementsCount": { "type": "integer", "minimum": 0, "description": "Includes failingOnlyElementsCount." },
-        "testedLinksCount": { "type": "integer", "minimum": 0, "description": "Links whose destination view was visited. 0 until link tracking is available." },
-        "untestedLinksCount": { "type": "integer", "minimum": 0, "description": "Links whose destination view was never visited. 0 until link tracking is available." },
+        "testedLinksCount": { "type": "integer", "minimum": 0, "description": "Link units (ViewCoverage.links) whose destination view a counted test visited." },
+        "untestedLinksCount": { "type": "integer", "minimum": 0, "description": "Link units whose destination view no counted test visited." },
         "failingOnlyElementsCount": { "type": "integer", "minimum": 0, "description": "Untested elements that only attempts that didn't pass interacted with." },
         "a11yHintsCount": { "type": "integer", "minimum": 0, "description": "Informational; never affects coverage." }
       }
@@ -92,6 +93,7 @@
       "description": "Overall counts: CoverageCounts plus viewCount.",
       "required": [
         "viewCount",
+        "untestedViewCount",
         "coverage",
         "testedElementsCount",
         "untestedElementsCount",
@@ -102,6 +104,7 @@
       ],
       "properties": {
         "viewCount": { "type": "integer", "minimum": 0, "description": "Number of entries in views." },
+        "untestedViewCount": { "type": "integer", "minimum": 0, "description": "Number of entries in untestedViews." },
         "coverage": { "$ref": "#/$defs/CoverageCounts/properties/coverage" },
         "testedElementsCount": { "$ref": "#/$defs/CoverageCounts/properties/testedElementsCount" },
         "untestedElementsCount": { "$ref": "#/$defs/CoverageCounts/properties/untestedElementsCount" },
@@ -114,12 +117,13 @@
     "ViewCoverage": {
       "type": "object",
       "description": "One view: a normalized URL (/users/:id) or, for component tests, a spec file.",
-      "required": ["name", "reportUrl", "summary", "elements", "screenshots"],
+      "required": ["name", "reportUrl", "summary", "elements", "links", "screenshots"],
       "properties": {
         "name": { "type": "string", "description": "View name as shown in the report and used in threshold.views." },
         "reportUrl": { "type": "string", "description": "This view in the HTML report, relative to the folder of coverage.json: 'index.html#' + encodeURIComponent(name)." },
         "summary": { "$ref": "#/$defs/CoverageCounts" },
-        "elements": { "type": "array", "items": { "$ref": "#/$defs/ElementCoverage" }, "description": "Untested first, then by label." },
+        "elements": { "type": "array", "items": { "$ref": "#/$defs/ElementCoverage" }, "description": "Interactive elements (not the <a> elements of links). Untested first, then by label." },
+        "links": { "type": "array", "items": { "$ref": "#/$defs/LinkCoverage" }, "description": "Link units: this view's links grouped by destination view. Untested first, then by key." },
         "screenshots": {
           "type": "array",
           "items": { "$ref": "#/$defs/ViewScreenshot" },
@@ -163,6 +167,40 @@
         "name": { "type": "string", "description": "data-uicov-group value or elementGroups name; explicit groups only." },
         "reason": { "enum": ["markup", "config", "same-key", "row", "repeated", "label"], "description": "Why the elements are one. More reasons may be added." },
         "members": { "type": "integer", "minimum": 1, "description": "Number of distinct elements (keys before grouping) in the group." }
+      }
+    },
+    "LinkCoverage": {
+      "type": "object",
+      "description": "The links of a view that go to one other view: one coverage unit, tested when a counted test visited that view (by any path, not necessarily through these links). (view name, key) identifies it across runs.",
+      "required": ["key", "label", "tested", "destinations", "destinationCount", "referrers"],
+      "properties": {
+        "key": { "type": "string", "description": "The destination view's name. Unique within the view." },
+        "label": { "type": "string", "description": "link \"name\" of the first referrer; '(+N more)' when several links go there." },
+        "tested": { "type": "boolean" },
+        "destinations": { "type": "array", "items": { "type": "string" }, "description": "Distinct destination URLs, sorted, at most 20: path, query and hash on the page's origin, else the full URL." },
+        "destinationCount": { "type": "integer", "minimum": 1, "description": "Number of distinct destination URLs (may exceed the length of destinations)." },
+        "referrers": { "type": "array", "items": { "$ref": "#/$defs/ElementCoverage" }, "description": "The <a> elements of the view that link there. Their tested means a test interacted with them; it doesn't affect coverage." }
+      }
+    },
+    "UntestedView": {
+      "type": "object",
+      "description": "A view that links point to but no counted test visited.",
+      "required": ["name", "destinations", "destinationCount", "referrers"],
+      "properties": {
+        "name": { "type": "string", "description": "View name, from the destination URL the same way page URLs are named." },
+        "destinations": { "type": "array", "items": { "type": "string" }, "description": "Distinct destination URLs, sorted, at most 20." },
+        "destinationCount": { "type": "integer", "minimum": 1, "description": "Number of distinct destination URLs." },
+        "referrers": { "type": "array", "items": { "$ref": "#/$defs/UntestedViewReferrer" }, "description": "The views that link to it, by name." }
+      }
+    },
+    "UntestedViewReferrer": {
+      "type": "object",
+      "description": "A view linking to an untested view.",
+      "required": ["view", "label", "keys"],
+      "properties": {
+        "view": { "type": "string", "description": "Name of the linking view (in views)." },
+        "label": { "type": "string", "description": "Label of its link unit (views[].links[].label)." },
+        "keys": { "type": "array", "items": { "type": "string" }, "description": "Keys of the <a> elements (views[].links[].referrers[].key)." }
       }
     },
     "A11yHint": {
