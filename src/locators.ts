@@ -18,7 +18,7 @@ export interface LocatorOptions {
 
 /** The subset of `ElementCoverage` the suggestion is built from. */
 export type LocatorInput = Pick<ElementCoverage, 'key' | 'label' | 'tag' | 'instances'> &
-  Partial<Pick<ElementCoverage, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames' | 'group'>>;
+  Partial<Pick<ElementCoverage, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames' | 'autoKey' | 'group'>>;
 
 /** The tracker truncates names to this many characters. */
 const MAX_NAME = 60;
@@ -99,7 +99,9 @@ function selectorFromKey(key: string, uicovId?: string): string {
  */
 export function cssFromKey(e: LocatorInput): string {
   const frames = e.frames ?? [];
-  let key = frames.length ? withinFrame(e.key, frames[frames.length - 1]) : e.key;
+  // A name from an `elements` rule isn't a selector: use the key the identity rules give.
+  const full = e.autoKey ?? e.key;
+  let key = frames.length ? withinFrame(full, frames[frames.length - 1]) : full;
   // data-uicov-group on a wrapper: the key matches the wrapper, so look for the element inside it.
   if (e.group?.reason === 'markup' && e.attrs && e.attrs['data-uicov-group'] === undefined && /^[a-z][\w-]*$/.test(e.tag))
     key += ` ${e.tag}`;

@@ -190,6 +190,100 @@ describe('resolveCoverageData', () => {
     assert.deepEqual(out.interactions.map((i) => i.key), ['#rows > tr > td > button']);
   });
 
+  it('elementFilters: the selector matches the element itself, the first match wins', () => {
+    // `nav` alone matches no interactive element; `nav *` matches the links.
+    assert.deepEqual(keys(resolveCoverageData(data(), { elementFilters: [{ selector: 'nav', include: false }] })), keys(resolveCoverageData(data())));
+    const out = resolveCoverageData(data(), {
+      elementFilters: [
+        { selector: 'nav a[href="/"]', include: true, comment: 'protected' },
+        { selector: 'nav *', include: false },
+        { selector: '.cookie-banner *', include: false },
+        { selector: '.cookie-banner button', include: true }, // too late: the exclude above matched first
+      ],
+    });
+    const k = keys(out);
+    assert.ok(k.includes('nav > a:nth-of-type(1)'));
+    assert.ok(!k.includes('nav > a:nth-of-type(2)'));
+    assert.ok(!k.includes('main > div:nth-of-type(1) > button'));
+    assert.deepEqual(out.interactions.map((i) => i.key), ['#rows > tr > td > button']);
+  });
+
+  it('elementFilters run before ignoreSelectors; an include protects from them', () => {
+    const out = resolveCoverageData(data(), {
+      ignoreSelectors: ['nav', '.cookie-banner'],
+      elementFilters: [{ selector: 'nav a:first-of-type', include: true }],
+    });
+    const k = keys(out);
+    assert.ok(k.includes('nav > a:nth-of-type(1)'));
+    assert.ok(!k.includes('nav > a:nth-of-type(2)'));
+    assert.ok(!k.includes('main > div:nth-of-type(1) > button'));
+  });
+
+  it('ignoreSelectors (deprecated) behaves the same with or without elementFilters', () => {
+    const rules = { ignoreSelectors: ['.cookie-banner', 'nav *', 'section'] };
+    assert.deepEqual(
+      resolveCoverageData(data(), { ...rules, elementFilters: [{ selector: 'footer *', include: false }] }),
+      resolveCoverageData(data(), rules),
+    );
+  });
+
+  it('elements: pins key and label of an element the selector matches uniquely', () => {
+    const out = resolveCoverageData(data(), {
+      elements: [
+        { selector: '.cookie-banner button', name: 'Accept cookies' },
+        { selector: '#login [type=submit]' }, // no name: the selector is the key
+        { selector: '#rows button', name: 'Delete row' }, // two matches: doesn't apply
+      ],
+    });
+    const els = out.snapshots[0].elements;
+    const banner = els.find((e) => e.key === 'Accept cookies');
+    assert.equal(banner?.label, 'Accept cookies');
+    assert.equal(banner?.name, 'ok', 'the accessible name is kept');
+    const submit = els.find((e) => e.key === '#login [type=submit]');
+    assert.equal(submit?.label, 'button "submit"');
+    assert.equal(els.filter((e) => e.key === '#rows > tr > td > button').length, 2);
+    assert.deepEqual(out.interactions.map((i) => i.key), ['Accept cookies', '#rows > tr > td > button']);
+  });
+
+  it('elements: the last applicable rule wins; excluded elements do not count as matches', () => {
+    const out = resolveCoverageData(data(), {
+      elementFilters: [{ selector: '#rows tr:first-of-type button', include: false }],
+      elements: [
+        { selector: '.cookie-banner button', name: 'First' },
+        { selector: 'main > div > button', name: 'Second' }, // matches the banner button and the :r1: one: ambiguous
+        { selector: 'button[data-action=del]', name: 'Delete' }, // only one left after the filter
+        { selector: '.cookie-banner *', name: 'Last' },
+      ],
+    });
+    const k = keys(out);
+    assert.ok(k.includes('Last') && !k.includes('First') && !k.includes('Second'));
+    assert.ok(k.includes('Delete'));
+    assert.ok(k.includes('main > div:nth-of-type(2) > button'));
+  });
+
+  it('elements: an element only seen in interactions is pinned when the selector matches it', () => {
+    const out = resolveCoverageData(
+      data({ snapshots: [], interactions: [{ event: 'click', url: 'http://x/', element: { node: byId.del1 } }] }),
+      { elements: [{ selector: '[data-action=del]', name: 'Delete' }] },
+    );
+    assert.deepEqual(out.interactions.map((i) => i.key), ['Delete']);
+  });
+
+  it('validates elementFilters and elements', () => {
+    assert.throws(() => validateRules({ elementFilters: [{ selector: 'a' }] }), /elementFilters\[0\]\.include: is required/);
+    assert.throws(() => validateRules({ elementFilters: [{ selector: 'a:has(b)', include: false }] }), /elementFilters\[0\]\.selector: .*:has/);
+    assert.throws(
+      () => validateRules({ elements: [{ selector: 'a', name: 'X' }, { selector: 'b', name: 'X' }] }),
+      /elements\[1\]\.name: "X" is already used by elements\[0\]/,
+    );
+    assert.throws(() => validateRules({ elements: [{ selector: 'a', documentScope: 'x + y' }] }), /elements\[0\]\.selector/);
+    assert.throws(() => validateRules({ elements: [{ selector: 'a', name: ' ' }] }), /must not be empty/);
+    validateRules({
+      elementFilters: [{ selector: 'button', documentScope: 'iframe#pay', include: false, comment: 'x' }],
+      elements: [{ selector: '#main-nav [href="/"]', name: 'Logo home link', comment: 'x' }],
+    });
+  });
+
   it('merges recorded (deprecated) rules; reporter rules win', () => {
     const recorded = data({ rules: { significantAttributes: ['data-action'] } });
     assert.ok(keys(resolveCoverageData(recorded)).includes('[data-action="del"]'));

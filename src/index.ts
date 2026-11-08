@@ -39,11 +39,23 @@ export {
   BUILTIN_ATTRIBUTE_FILTERS,
   BUILTIN_IDENTITY_ATTRIBUTES,
   type AttributeFilter,
+  type ElementFilter,
+  type NamedElement,
   type AutoGroupOptions,
   type ElementGroupRule,
   type LinkRules,
   type UiCoverageRules,
 } from './model/rules';
+export {
+  compileUrlPattern,
+  createViewMapper,
+  defaultNormalizeUrl,
+  type NormalizeUrl,
+  type ViewFilter,
+  type ViewMapper,
+  type ViewOptions,
+  type ViewPattern,
+} from './model/views';
 export { RECORDED_CANDIDATES } from './model/elements';
 export { resolveCoverageData } from './model/resolve';
 export {

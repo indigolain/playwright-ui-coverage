@@ -3,7 +3,7 @@ import type { UiCoverageOptions } from './src';
 // The demo's UI coverage config (rules, recording options, profiles). The
 // recorder, the reporter and `npx playwright-ui-coverage report` find it
 // next to this file; it's imported here only for UICOV_DEMO_LEGACY below.
-import uiCoverageConfig from './ui-coverage.config';
+import uiCoverageConfig, { demoReportRules } from './ui-coverage.config';
 
 // Config for the bundled demo. In your own project, use
 // `import 'playwright-ui-coverage/register'` and
@@ -48,7 +48,8 @@ const reporter: ReporterDescription[] = [
   // set here win over the file (UICOV_COUNT_FAILED=1 lets failed tests'
   // interactions count, see demo/tests/failing.spec.ts).
   ['./src/reporter.ts', {
-    ...(legacy ? { configFile: false } : {}),
+    // Without a config file, the rules that can't go in use.uiCoverage go here.
+    ...(legacy ? { configFile: false, ...demoReportRules } : {}),
     ...(process.env.UICOV_COUNT_FAILED ? { countFailedTests: true } : {}),
     ...(demoBaseline ? { baseline: demoBaseline } : {}),
     // UICOV_DEMO_SUMMARY=1 appends a markdown summary to $GITHUB_STEP_SUMMARY (when set).

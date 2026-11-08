@@ -36,6 +36,11 @@ export interface InventoryElement {
   /** Grouping facts from the recorded structure (internal, see `grouping.ts`). */
   grouping?: GroupHints;
   /**
+   * Set when an `elements` rule named the element (and so replaced `key`):
+   * the key the identity rules give it. Suggested locators use it.
+   */
+  autoKey?: string;
+  /**
    * For `<a href>` / `<area href>`: the destination as the browser resolved it,
    * set only when a `<base>` element made it differ from the `href` attribute
    * resolved against the page URL. Absent otherwise (read `attrs.href`).
@@ -104,6 +109,8 @@ export interface Interaction {
   name?: string;
   nameFrom?: string;
   frames?: string[];
+  /** Same as `InventoryElement.autoKey`. */
+  autoKey?: string;
   grouping?: GroupHints;
   /** Same as `InventoryElement.href`. */
   href?: string;

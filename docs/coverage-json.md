@@ -72,7 +72,7 @@ rounded to one decimal; `100` when there are no units.
 
 ## `views[]`: `ViewCoverage`
 
-A view is a page URL normalized by `normalizeUrl` (`/users/42?tab=x` → `/users/:id`), or, with `viewBy: 'file'` (component tests), a spec file path.
+A view is a group of page URLs: named by the first matching `views` pattern (`/users/:username`), else by `normalizeUrl` or the automatic rules (`/users/42?tab=x` → `/users/:id`); URLs excluded by `viewFilters` are in no view. Or, with `viewBy: 'file'` (component tests), a spec file path.
 
 | Field | Type | |
 |---|---|---|

@@ -6,13 +6,14 @@ import { boxInImage, intersects } from './model/geometry';
 import { applyGrouping, type ElementGroup } from './grouping';
 
 /** Recorded role, accessible name and attributes of an element (see `InventoryElement`). */
-type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames'>;
+type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames' | 'autoKey'>;
 const details = (e: ElementDetails): ElementDetails => ({
   role: e.role,
   name: e.name,
   nameFrom: e.nameFrom,
   attrs: e.attrs,
   ...(e.frames ? { frames: e.frames } : {}),
+  ...(e.autoKey ? { autoKey: e.autoKey } : {}),
 });
 
 export interface ElementCoverage {
@@ -53,6 +54,8 @@ export interface ElementCoverage {
   attrs?: Record<string, string>;
   /** Keys of the `<iframe>` elements the element is inside, outermost first (see `InventoryElement.frames`). */
   frames?: string[];
+  /** Set for an element named by an `elements` rule: its key by the identity rules (for locators). */
+  autoKey?: string;
   /** A Playwright line that interacts with this element (see `locators.ts`). */
   suggestedLocator?: string;
   /** Informational accessibility hints (see `a11y.ts`). Don't affect coverage. */
@@ -156,28 +159,8 @@ export interface CoverageSummary {
   mostRepeated?: RepeatedElement[];
 }
 
-export type NormalizeUrl = (url: string) => string;
-
-const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})$/i;
-
-/** `/users/42?tab=x` → `/users/:id`. Hash routes (`#/foo/1`) are kept and normalized too. */
-export const defaultNormalizeUrl: NormalizeUrl = (url) => {
-  let u: URL;
-  try {
-    u = new URL(url);
-  } catch {
-    return url;
-  }
-  const norm = (p: string) =>
-    p
-      .split('/')
-      .map((seg) => (ID_SEGMENT.test(seg) ? ':id' : seg))
-      .join('/')
-      .replace(/\/index\.html?$/, '/');
-  let route = norm(u.pathname) || '/';
-  if (u.hash.startsWith('#/')) route += '#' + norm(u.hash.slice(1).split('?')[0]);
-  return route;
-};
+export { defaultNormalizeUrl, type NormalizeUrl } from './model/views';
+import { defaultNormalizeUrl, type NormalizeUrl, type ViewMapper } from './model/views';
 
 /**
  * How an entry's interactions count: `tested` marks elements tested, `failing`
@@ -211,13 +194,19 @@ export type LinkClass = { kind: 'link'; view: string; url: string } | { kind: 'e
  * Classifies a recorded element on the page at `pageUrl` (whose view is
  * `sourceView`). `viewOf` maps a URL to its view, the same function page URLs
  * go through; returning `undefined` drops the link (for URLs excluded from
- * the report). `internal` holds the origins of the visited pages.
+ * the report). `included` (the `viewFilters` predicate) drops links to
+ * excluded URLs on other sites too. `internal` holds the origins of the visited pages.
  */
 export function classifyLink(
   e: Pick<InventoryElement, 'tag' | 'attrs' | 'href' | 'frames'>,
   pageUrl: string,
   sourceView: string,
-  ctx: { viewOf: (url: string) => string | undefined; internal: Set<string>; rules: LinkRules },
+  ctx: {
+    viewOf: (url: string) => string | undefined;
+    included?: (url: string) => boolean;
+    internal: Set<string>;
+    rules: LinkRules;
+  },
 ): LinkClass {
   const raw = e.attrs?.href;
   if ((e.tag !== 'a' && e.tag !== 'area') || raw === undefined) return { kind: 'element' };
@@ -234,6 +223,7 @@ export function classifyLink(
     return { kind: 'element' };
   }
   if (dest.protocol !== page.protocol && !/^https?:$/.test(dest.protocol)) return { kind: 'element' };
+  if (ctx.included && !ctx.included(dest.href)) return { kind: 'ignore' };
   if (dest.origin !== page.origin && !ctx.internal.has(dest.origin))
     return ctx.rules.external === 'ignore' ? { kind: 'ignore' } : { kind: 'element' };
   const view = ctx.viewOf(dest.href);
@@ -255,7 +245,18 @@ const originOf = (url: string) => {
 
 export function aggregate(
   tests: TestEntry[],
-  opts: { normalizeUrl: NormalizeUrl; maxScreenshotsPerRoute: number; links?: UiCoverageRules['links'] },
+  opts: {
+    /**
+     * Maps page URLs and link destinations to views (`createViewMapper(options)`
+     * in `model/views.ts`): `view(url) === null` drops the page, its
+     * interactions and links to it; `included` drops links to excluded URLs.
+     */
+    viewMapper?: ViewMapper;
+    /** Used when `viewMapper` isn't given. */
+    normalizeUrl?: NormalizeUrl;
+    maxScreenshotsPerRoute: number;
+    links?: UiCoverageRules['links'];
+  },
 ): CoverageSummary {
   type RouteAcc = {
     elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string>; labels: Map<string, ElementDetails>; idSet: Set<string>; failingIdSet: Set<string> }>;
@@ -269,7 +270,10 @@ export function aggregate(
    * destinations alike. `undefined` drops the URL: the hook for filtering
    * views out of the report (pages and links to them).
    */
-  const viewOf = (url: string): string | undefined => opts.normalizeUrl(url);
+  const normalize = opts.normalizeUrl ?? defaultNormalizeUrl;
+  const viewOf = (url: string): string | undefined =>
+    opts.viewMapper ? (opts.viewMapper.view(url) ?? undefined) : normalize(url);
+  const included = opts.viewMapper?.included;
   /** `view` (set for `viewBy: 'file'`) puts all of an entry's data in one view, whatever the URL. */
   const routeName = (url: string, view?: string) => view ?? viewOf(url);
   const grouping = applyGrouping(tests, routeName);
@@ -294,7 +298,7 @@ export function aggregate(
   const linkRules = opts.links === false ? undefined : (opts.links ?? {});
   const classify = (acc: RouteAcc, route: string, e: Pick<InventoryElement, 'key' | 'tag' | 'attrs' | 'href' | 'frames'>, url: string, byFile: boolean) => {
     // Component tests (views by spec file): links lead to no view.
-    const c: LinkClass = linkRules && !byFile ? classifyLink(e, url, route, { viewOf, internal, rules: linkRules }) : { kind: 'element' };
+    const c: LinkClass = linkRules && !byFile ? classifyLink(e, url, route, { viewOf, included, internal, rules: linkRules }) : { kind: 'element' };
     let k = acc.kinds.get(e.key);
     if (!k) acc.kinds.set(e.key, (k = { element: false, links: new Map() }));
     if (c.kind === 'element') k.element = true;

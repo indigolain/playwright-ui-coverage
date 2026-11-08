@@ -125,7 +125,7 @@ Never counted:
 |---|---|
 | `include` | This element counts, even if no rule says so (e.g. a `<div>` drop zone with a click handler). Also exempt from the nesting rule. |
 | `exclude` | This element doesn't count (its descendants still can). |
-| `exclude-all` | Nothing in this subtree counts. `data-uicov-ignore` and `ignoreSelectors` are aliases. |
+| `exclude-all` | Nothing in this subtree counts. `data-uicov-ignore` and the deprecated `ignoreSelectors` are aliases. |
 | `reset` | Stop inheriting: inside an `exclude-all` subtree, the normal rules apply again. |
 
 ### Element identity
@@ -134,6 +134,7 @@ Elements are matched across tests by **attributes and position, never by visible
 
 | # | Source | Key in the report |
 |---|---|---|
+| 0 | an [`elements`](#named-elements) rule in the config | `Logo home link` (its `name` as-is) |
 | 1 | `data-uicov-id` (explicit override, never filtered) | `checkout-submit` (the value as-is) |
 | 2 | `significantAttributes` you configure, in order | `[data-component="avatar"]` |
 | 3 | `data-testid`, `data-test`, `data-test-id`, `data-cy`, `data-qa`, `row-id` | `[data-testid="save"]` |
@@ -190,7 +191,7 @@ Elements inside **iframes** (same-origin and cross-origin) and **open shadow roo
 
 - **Keys** are prefixed by the key of the frame element or shadow host and ` >> `, as many times as they are nested: `iframe[data-testid="payments"] >> [data-testid="card"]`, `promo-banner >> div > button:nth-of-type(2)`, `[data-testid="payments"] >> #pay > brand-picker >> div > button`. Each part is computed in its own document or shadow tree (a positional key stops at the shadow root). A `data-uicov-id` value is still used as-is, without a prefix. Elements in a frame also list the frame elements' keys in `coverage.json` (`frames`).
 - **Recording**: each frame runs its own copy of the tracker, and the recorder places the frame's elements under the frame element (`page.frames()`), with boxes mapped into the page's coordinates (frame element's content box, scroll positions), so overlays line up on the page screenshot. Elements scrolled out of their frame still count but get no box. In shadow roots, events are credited to the element they happened on (`composedPath()`), including events that don't leave the shadow root, like `change`.
-- **Markup overrides** apply across shadow boundaries: `data-uicov-ignore` on a host excludes its shadow content. Across frames they apply at report time: an ignored `<iframe>` (by `data-uicov-ignore` or `ignoreSelectors`) excludes everything inside it.
+- **Markup overrides** apply across shadow boundaries: `data-uicov-ignore` on a host excludes its shadow content. Across frames they apply at report time: an ignored `<iframe>` (by `data-uicov-ignore` or `ignoreSelectors`) excludes everything inside it. With [`elementFilters`](#report-time-rules), which match the element itself, exclude a frame's content with `{ selector: '*', documentScope: 'iframe#ads', include: false }`.
 - **Closed shadow roots** can't be read from the page, so their content isn't recorded; the host counts if it is interactive itself (e.g. `role="button"`, `tabindex="0"`), and events inside are credited to it.
 - **Suggested locators** use `page.frameLocator('<frame key>')` for elements in frames. Playwright's locators already pierce open shadow roots.
 
@@ -198,7 +199,7 @@ Elements inside **iframes** (same-origin and cross-origin) and **open shadow roo
 
 A link matters because of **where it goes**, so links are counted by destination rather than by clicks:
 
-- **Link units.** Each `<a href>` (and `<area href>`) is resolved (against `<base>` too) and mapped to a view by the same function as page URLs (`normalizeUrl`). The links of a view that go to the same other view are **one unit**: on `/users`, the three user rows (`/users/1`, `/users/2`, `/users/3`) are one link to `/users/:id`, and the nav "Home" link and a "Back home" button-link are one link to `/`.
+- **Link units.** Each `<a href>` (and `<area href>`) is resolved (against `<base>` too) and mapped to a view by the same function as page URLs ([`views`, `viewFilters`](#views), then `normalizeUrl`); links to URLs `viewFilters` exclude are dropped. The links of a view that go to the same other view are **one unit**: on `/users`, the three user rows (`/users/1`, `/users/2`, `/users/3`) are one link to `/users/:id`, and the nav "Home" link and a "Back home" button-link are one link to `/`.
 - **Tested** when any counted test visited the destination view, by any path (a `goto`, a redirect, another link), not necessarily through that link. "Counted" is the same as for interactions: the last passing attempt of each test, see [Retries and failed tests](#retries-and-failed-tests).
 - **No double counting.** An `<a>` that belongs to a link unit is not also an interactive element. Its clicks are still recorded (shown with the link) but don't change coverage.
 - **Still elements** (tested when clicked, as before): links within the same view (`#section`, `#`, a link to the page itself or to another page of the same view, like `/users/2` on `/users/:id`), `javascript:` and empty hrefs, links inside iframes (they navigate the frame), and every link in [component tests](#component-testing). `tel:`, `mailto:` and `sms:` links never count.
@@ -226,9 +227,14 @@ import { DEFAULT_INTERACTIONS, defineUiCoverageConfig } from 'playwright-ui-cove
 
 export default defineUiCoverageConfig({
   // Report-time rules: change them and rebuild the report without running tests.
-  ignoreSelectors: ['.cookie-banner', '#debug-toolbar *'],
+  elementFilters: [{ selector: '.cookie-banner *', include: false }],
+  elements: [{ selector: '#main-nav [href="/"]', name: 'Logo home link' }],
   significantAttributes: ['data-component'],
   attributeFilters: [{ attribute: 'id', value: 'tmp-.*', comment: 'ids from the legacy form builder' }],
+
+  // Views: which URLs are one page in the report, and which aren't part of it.
+  views: ['/users/:username', { pattern: '/docs/:section/*', groupBy: ['section'] }],
+  viewFilters: [{ pattern: 'https://auth.example.com/*', include: false }],
 
   // Reporter settings.
   outputFolder: 'ui-coverage-report',
@@ -251,11 +257,12 @@ With the file in place the reporter needs no options: `['playwright-ui-coverage/
 
 | Key | Applied | |
 |---|---|---|
-| `ignoreSelectors`, `significantAttributes`, `attributeFilters`, `elementGroups`, `autoGroup`, `links` | report time | [Report-time rules](#report-time-rules), [Element grouping](#element-grouping), [Links](#links-and-untested-views) |
-| `outputFolder`, `normalizeUrl`, `maxScreenshotsPerRoute`, `threshold`, `countFailedTests`, `viewBy`, `htmlReport`, `testIdAttribute`, `saveData`, `baseline`, `githubSummary` | report time | [Reporter settings](#reporter-settings) |
+| `elementFilters`, `elements`, `significantAttributes`, `attributeFilters`, `elementGroups`, `autoGroup`, `links` (and the deprecated `ignoreSelectors`) | report time | [Report-time rules](#report-time-rules), [Element grouping](#element-grouping), [Links](#links-and-untested-views) |
+| `views`, `viewFilters`, `normalizeUrl` | report time | [Views](#views) |
+| `outputFolder`, `maxScreenshotsPerRoute`, `threshold`, `countFailedTests`, `viewBy`, `htmlReport`, `testIdAttribute`, `saveData`, `baseline`, `githubSummary` | report time | [Reporter settings](#reporter-settings) |
 | `recording` | while tests run | [Recording options](#recording-options) |
 | `profiles` | | [Profiles](#profiles) |
-| `comment` | | Free text, ignored. Every rule object (`attributeFilters`, `elementGroups` and `allowedInteractions` entries, profiles) takes a `comment` too. |
+| `comment` | | Free text, ignored. Every rule object (`elementFilters`, `elements`, `attributeFilters`, `elementGroups`, `views`, `viewFilters` and `allowedInteractions` entries, profiles) takes a `comment` too. |
 
 Report-time keys are applied when the report is built, so you can change them and [rebuild the report](#rebuilding-the-report-report-cli) without running the tests. Recording options decide what is captured; changing them needs a new run.
 
@@ -282,7 +289,7 @@ Merging: a key that is set replaces the value below it. Lists replace (they're n
 
 ```ts
 profiles: [
-  { name: 'pr-critical', tags: ['@pr-critical'], config: { threshold: { overall: 90 }, ignoreSelectors: ['footer *'] } },
+  { name: 'pr-critical', tags: ['@pr-critical'], config: { threshold: { overall: 90 }, elementFilters: [{ selector: 'footer *', include: false }] } },
   { name: 'mobile', projects: ['mobile-chrome', 'mobile-safari'], config: { recording: { screenshots: 'off' } } },
   { name: 'nightly', comment: 'selected explicitly', config: { countFailedTests: true } },
 ],
@@ -308,9 +315,10 @@ The config is checked when the reporter starts, by the CLI, and by the recorder 
   - snapshotDelay: is a recording option: put it in `recording: { snapshotDelay }`
   - profiles[0].config.threshold.overall: must be ≤ 100, got 120
   - attributeFilters[1].value: invalid regular expression: …
+  - views[0].groupBy[0]: "sectoin" is not a named parameter of the pattern (it has "section")
 ```
 
-Unknown keys, wrong types, unknown interaction types, invalid regular expressions and selectors that can't be evaluated at report time are all errors.
+Unknown keys, wrong types, unknown interaction types, invalid regular expressions, URL patterns and selectors that can't be evaluated at report time, and duplicate `elements` names are all errors.
 
 ### The resolved config in `coverage.json`
 
@@ -331,7 +339,15 @@ Unknown keys, wrong types, unknown interaction types, invalid regular expression
 ```ts
 // ui-coverage.config.ts
 export default defineUiCoverageConfig({
-  ignoreSelectors: ['.cookie-banner', '#debug-toolbar *'], // default: []
+  elementFilters: [                                        // default: []
+    { selector: '.cookie-banner *', include: false },
+    { selector: 'footer a.important', include: true },     // protects it from the next rule
+    { selector: 'footer *', include: false },
+    { selector: 'button', documentScope: 'iframe#ads', include: false },
+  ],
+  elements: [                                              // default: []
+    { selector: '#main-nav [href="/"]', name: 'Logo home link' },
+  ],
   significantAttributes: ['data-component'],              // default: []
   attributeFilters: [                                      // default: []
     { attribute: 'id', value: 'tmp-.*' },                  // ignore id="tmp-…"
@@ -344,7 +360,12 @@ export default defineUiCoverageConfig({
 
 The type is exported as `UiCoverageRules`.
 
-- **`ignoreSelectors`**: elements matching one of these selectors, or inside an element that does (also inside a frame or shadow host that does), are excluded. An entry is a selector string or `{ selector, documentScope }`, see [`documentScope`](#documentscope). Same rules as `data-uicov-interactive="exclude-all"` (a `reset` inside stops it, an element's own `include` wins). Anything inside `data-uicov-ignore` is always excluded. Selectors are evaluated on the recorded structure, see [Report-time selectors](#report-time-selectors). One difference from excluding in the markup: the [nesting rule](#which-elements-count) is decided while recording, so excluding all inner widgets of a container widget doesn't make the container count.
+- **`elementFilters`**: `{ selector, include, documentScope?, comment? }` rules deciding which interactive elements count. The **first** rule whose selector matches an element decides: `include: false` excludes it, `include: true` keeps it, whatever later rules say. Elements no rule matches count. An entry's `documentScope` limits it to frames or shadow hosts, see [`documentScope`](#documentscope).
+
+  The selector matches **the interactive element itself**, not a container: `footer *` matches everything inside a `<footer>`, while `footer` matches only the footer element (which usually doesn't count anyway, so the rule does nothing). Like any selector it stays within one document or shadow tree: for a web component's shadow content inside the footer, add `{ selector: '*', documentScope: 'footer my-widget', include: false }`.
+
+  Markup directives (`data-uicov-ignore`, `data-uicov-interactive`) are applied while recording, so an `include: true` rule can't bring back an element the markup excludes, nor make a non-interactive element count. Selectors are evaluated on the recorded structure, see [Report-time selectors](#report-time-selectors). One difference from excluding in the markup: the [nesting rule](#which-elements-count) is decided while recording, so excluding all inner widgets of a container widget doesn't make the container count.
+- **`elements`** (named elements): see [below](#named-elements).
 - **`significantAttributes`**: attributes that identify an element, checked after `data-uicov-id` and before the built-in test-id attributes, in the order given.
 - **`attributeFilters`**: `{ attribute, value?, include?, comment? }` rules deciding whether an attribute value may be used as a key. `attribute` and `value` are regular expressions, anchored automatically (`'id'` means `^(?:id)$`). Attribute names match case-insensitively, values case-sensitively. Without `value`, the rule matches any value. The first matching rule wins: `include: false` (default) skips the value, `include: true` keeps it. Your rules run before the built-in ones, which skip:
   - React `useId` values (`:r1:`, `:R2kq:`, `«r1»`), UUIDs and hex strings of 16+ characters, in any attribute;
@@ -353,6 +374,24 @@ The type is exported as `UiCoverageRules`.
   The built-in lists are exported as `BUILTIN_IDENTITY_ATTRIBUTES` and `BUILTIN_ATTRIBUTE_FILTERS`.
 - **`elementGroups`**: `{ selector, name?, documentScope?, exclude?, comment? }` entries. The elements matching `selector`, or inside an element that does, are one element, even when there's only one; the first matching entry wins, and `data-uicov-group` in the markup wins over all of them. `name` is shown in the report (default: the selector); the key is the selector. `exclude: true`: matching elements are never grouped. See [Element grouping](#element-grouping).
 - **`autoGroup`**: `false` turns the automatic grouping heuristics off, or `{ rows, repeated, labels, forms }` turns them off one by one (each defaults to `true`). See [Element grouping](#element-grouping).
+- **`ignoreSelectors`** (deprecated, use `elementFilters`): selectors (strings or `{ selector, documentScope }`) that exclude the elements they match **and everything inside them**, also inside a frame or shadow host they match. Same rules as `data-uicov-interactive="exclude-all"` (a `reset` inside stops it, an element's own `include` wins). It keeps working exactly as before and is checked after `elementFilters`, so an `include: true` filter protects from it. `ignoreSelectors: ['.cookie-banner']` is `elementFilters: [{ selector: '.cookie-banner, .cookie-banner *', include: false }]`, except that the alias also reaches into frames and shadow roots inside `.cookie-banner` and honors those markup directives.
+
+#### Named elements
+
+`elements` pins the identity of single elements, and gives them a readable name in the report:
+
+```ts
+elements: [
+  { selector: '#main-nav [href="/"]', name: 'Logo home link' },
+  { selector: 'button.icon-star', name: 'Star (icon only)', comment: 'no accessible name yet' },
+  { selector: '[data-testid="card"]', documentScope: 'iframe#payments' }, // no name: the selector is the key
+],
+```
+
+- The element's key (and label) becomes `name`, used as-is like a `data-uicov-id` value: it no longer changes when the markup around the element moves. Without `name`, the key is the selector (prefixed by `documentScope >> `) and the label stays `role "accessible name"`.
+- A rule applies to an element when its selector matches it and **no other counted element in the same snapshot**, in every snapshot of the test that shows it (an element only seen in an interaction, never in a snapshot, just has to match). A selector that matches several elements (a button on every row) doesn't name any of them. Elements excluded by `elementFilters` don't count as matches.
+- When several rules apply to an element, the **last** one wins. Names must be unique (a duplicate is a config error).
+- Renaming changes the key, so the [baseline](#baseline-fail-only-on-new-untested-elements) sees the old key as resolved and the new one as new. Suggested locators keep using the element's own key, accessibility hints its accessible name.
 
 #### Report-time selectors
 
@@ -368,16 +407,17 @@ Like CSS in the browser, a selector matches within one document or shadow tree: 
 
 #### `documentScope`
 
-To target elements inside a frame or shadow host, give a host chain: selectors for the frame elements or shadow hosts, outermost first, separated by `>>`. Either as an object, or inline before the selector:
+To target elements inside a frame or shadow host, give a host chain (in `elementFilters`, `elements` and `ignoreSelectors`): selectors for the frame elements or shadow hosts, outermost first, separated by `>>`. Either as `documentScope`, or inline before the selector:
 
 ```ts
-ignoreSelectors: [
-  { selector: 'button', documentScope: 'iframe[data-testid="payments"]' },
-  'iframe#app >> date-picker >> button.today', // the same, inline
+elementFilters: [
+  { selector: 'button', documentScope: 'iframe[data-testid="payments"]', include: false },
+  { selector: 'button.today', documentScope: 'iframe#app >> date-picker', include: false },
+  { selector: 'iframe#app >> date-picker >> button.today', include: false }, // the same, inline
 ],
 ```
 
-Each host selector is matched in the host's own document or shadow tree. The hosts must appear in that order among the element's frames and shadow hosts, but not necessarily directly nested: `documentScope: 'my-widget'` covers every tree inside any `<my-widget>`, in the page or in a frame. A key from the report (`iframe[data-testid="pay"] >> [data-testid="card"]`) works as a selector, except a positional key's first part, which is relative to `<body>`. (Ignoring the host itself, `ignoreSelectors: ['iframe#ads']`, already excludes everything inside it.)
+Each host selector is matched in the host's own document or shadow tree. The hosts must appear in that order among the element's frames and shadow hosts, but not necessarily directly nested: `documentScope: 'my-widget'` covers every tree inside any `<my-widget>`, in the page or in a frame. A key from the report (`iframe[data-testid="pay"] >> [data-testid="card"]`) works as a selector, except a positional key's first part, which is relative to `<body>`. (With the deprecated `ignoreSelectors`, ignoring the host itself, `['iframe#ads']`, already excludes everything inside it; `elementFilters` match the element itself, so use `{ selector: '*', documentScope: 'iframe#ads', include: false }`.)
 
 #### Deprecated: rules in `use.uiCoverage`
 
@@ -387,6 +427,56 @@ Each host selector is matched in the host's own document or shadow tree. The hos
 - `ignoreSelectors` is applied while recording (as before, with any CSS the browser supports), so it can't be undone at report time.
 
 Move them to the config file to change them without re-running tests.
+
+### Views
+
+A view is one page of the app in the report: its elements, screenshots and coverage. By default URLs are grouped automatically: the query string is ignored, id-like path segments (numbers, UUIDs, long hex strings) become `:id` (`/users/42?tab=x` → `/users/:id`), and `#/` hash routes are kept and normalized the same way (`/#/orders/7` → `/#/orders/:id`). `views` and `viewFilters` change that:
+
+```ts
+// ui-coverage.config.ts
+export default defineUiCoverageConfig({
+  views: [
+    '/users/new',                                         // before the next one: first match wins
+    '/users/:username',                                   // /users/ada, /users/grace → one view "/users/:username"
+    { pattern: '/docs/:section/*', groupBy: ['section'] }, // /docs/guides/…, /docs/api/… → "/docs/guides/*", "/docs/api/*"
+    { pattern: '/#/settings/*', comment: 'hash routes' },
+  ],
+  viewFilters: [
+    { pattern: 'https://auth.example.com/*', include: false }, // the login provider
+    { pattern: '/admin/status', include: true },               // protected from the next rule
+    { pattern: '/admin/*', include: false },
+  ],
+});
+```
+
+**Which view a URL belongs to**, in this order:
+
+1. **`viewFilters`**: the first filter whose pattern matches decides. `include: false` drops the URL before views are built: no view, and the elements and interactions recorded on it don't count anywhere. `include: true` keeps it, whatever later filters say. URLs no filter matches are kept. Links pointing to an excluded URL are dropped too, on any origin: no link unit, and the `<a>` doesn't count as an element.
+2. **`views`**: the first matching pattern names the view (of a page, and of a link's destination, see [Links and untested views](#links-and-untested-views)). A string is `{ pattern }`. The view is named after the pattern as written (`/users/:username`); `groupBy` splits it into one view per value of those named parameters, with the values filled into the name.
+3. **`normalizeUrl`** (a function `(url) => viewName`, in a JS/TS config): for the URLs no pattern matches. It's the escape hatch for what patterns can't express, and replaces the automatic rules.
+4. **The automatic rules** described above, for everything else.
+
+Component tests grouped by spec file ([`viewBy: 'file'`](#component-testing)) don't use any of these.
+
+**Pattern syntax** (a subset of [URLPattern](https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API), implemented by the library, so any Node.js version works):
+
+| Pattern | Matches |
+|---|---|
+| `/users/:id` | `/users/42`, `/users/ada`: a named parameter is one path segment |
+| `/users/:id(\\d+)` | `/users/42`, not `/users/new`: a parameter restricted by a regular expression |
+| `/users/:id?` | `/users` and `/users/42`: an optional parameter (with its `/`) |
+| `/docs/*` | `/docs/`, `/docs/a/b/c`: `*` matches anything, also across `/` |
+| `/#/settings/:tab` | `/#/settings/profile?x=1`: after `#`, the hash route (its own `?…` is ignored) |
+| `https://auth.example.com/*` | only that origin; the protocol and host are matched case-insensitively |
+| `https://*.example.com/*` | any subdomain (`*` in the host matches any characters) |
+| `http://localhost:3000/*` | only that port; without a port any port matches |
+
+- A pattern **without protocol and host matches any origin** (`/admin/*` matches `https://app.example.com/admin/x` and `http://localhost:3000/admin/x`). A pattern with a host and no path matches every path there.
+- The **query string is never matched**; `?` in a pattern is an error (except after a parameter). Without `#`, the hash is ignored.
+- Paths are case-sensitive and matched as they appear in the URL (percent-encoded); parameter values are decoded for `groupBy` names. A trailing `/` is optional (`/users` matches `/users/`).
+- `\` escapes a special character (`/a\*b` matches `/a*b`; in a JS string, write `\\` for each `\`, as in the table). Not supported: `{…}` groups and the `+` / `*` repeat modifiers. Unsupported syntax is a config error.
+
+View names are what [thresholds](#thresholds) and the [baseline](#baseline-fail-only-on-new-untested-elements) match, so changing a pattern renames views: the baseline matches a renamed view by its untested elements (`view renamed?`). `createViewMapper(options)` (exported) gives you the same mapping, `view(url)` (the view name, or `null` for a filtered URL) and `included(url)`, for your own tooling.
 
 ### Recording options
 
@@ -461,7 +551,8 @@ Top-level keys of the config file (or reporter options):
 | Option | Default | Description |
 |---|---|---|
 | `outputFolder` | `ui-coverage-report` | Report location (relative to the config file). |
-| `normalizeUrl` | strips query, ids → `:id` | `(url) => routeName`, to group pages your own way. Link destinations go through it too. |
+| `views`, `viewFilters` | automatic | URL patterns that name views, and URLs to leave out. Link destinations go through them too. See [Views](#views). |
+| `normalizeUrl` | automatic rules | `(url) => viewName`, for URLs no `views` pattern matches. See [Views](#views). |
 | `maxScreenshotsPerRoute` | `3` | Screenshots chosen to cover the most elements. |
 | `threshold` | none | Fail the run if coverage % is below this: a number (overall), or `{ overall, views }` for per-view minimums. See below. |
 | `countFailedTests` | `false` | Let interactions from tests that didn't pass mark elements as tested. See below. |
@@ -471,7 +562,7 @@ Top-level keys of the config file (or reporter options):
 | `saveData` | `true` | Keep the raw data and every screenshot in `<outputFolder>/data/` for the [`report` CLI](#rebuilding-the-report-report-cli). |
 | `baseline` | none | Fail only on *new* untested elements, compared with a committed baseline file. See [Baseline](#baseline-fail-only-on-new-untested-elements). |
 | `githubSummary` | `false` | Append a markdown summary to `$GITHUB_STEP_SUMMARY` when it's set. See [Comparing runs](#comparing-runs-pr-comments-and-the-github-step-summary). |
-| `ignoreSelectors`, `significantAttributes`, `attributeFilters` | `[]` | [Report-time rules](#report-time-rules). |
+| `elementFilters`, `elements`, `significantAttributes`, `attributeFilters` (deprecated: `ignoreSelectors`) | `[]` | [Report-time rules](#report-time-rules). |
 | `links` | `{}` | How `<a href>` counts: link units by destination view. `{ external: 'ignore' }` drops links to other sites; `false`: every link is an element. See [Links and untested views](#links-and-untested-views). |
 
 Reporter options only: `configFile` and `profile`, see [Where the config comes from](#where-the-config-comes-from) and [Profiles](#profiles).
@@ -562,7 +653,7 @@ export default defineUiCoverageConfig({
 
 `threshold: 70` is shorthand for `{ overall: 70 }`. If any threshold isn't met, the reporter prints each failing view with its actual and required % and the run fails (exit code 1).
 
-- **View keys** are route names as they appear in the report (`/checkout`, `/users/:id`, after `normalizeUrl`).
+- **View keys** are route names as they appear in the report (`/checkout`, `/users/:id`, after [`views`](#views) and `normalizeUrl`).
 - **Patterns:** `*` matches within one path segment, `**` matches across segments. A pattern applies to each matching view on its own (`/admin/*: 50` means every admin view needs 50%, not their average).
 - **Precedence:** an exact key always wins over a pattern. Among patterns, the one with more literal characters wins, then the one with fewer `**`, then the one listed first.
 - **Missing views:** a key or pattern that matches no view in the run prints a warning (with a "did you mean" hint for likely typos) and doesn't fail the run. A filtered run (`--grep`, one spec file) may not visit every view.
@@ -786,7 +877,7 @@ npx playwright-ui-coverage report --data ci-artifacts/ui-coverage-report/data --
 
 `threshold` and `baseline` are checked like in the reporter: the CLI exits with code 1 if a threshold isn't met or there are new untested elements, and 2 on errors (bad flags, unreadable data, an invalid config, an unknown profile). Other commands: [`baseline`](#baseline-fail-only-on-new-untested-elements), [`compare` and `summary`](#comparing-runs-pr-comments-and-the-github-step-summary).
 
-**What a rebuild can change:** everything the reporter does with the data: [report-time rules](#report-time-rules), `normalizeUrl`, `viewBy`, `threshold`, `countFailedTests`, `maxScreenshotsPerRoute`. Links to the HTML report are kept and adjusted to `--out` (`htmlReport: false` drops them). **What it can't:** what was recorded. Which elements are interactive is decided in the browser (it needs the live page: computed styles, descendants, label targets), interaction types are recording options, and screenshots are what they are. The deprecated `use.uiCoverage.ignoreSelectors` was applied while recording.
+**What a rebuild can change:** everything the reporter does with the data: [report-time rules](#report-time-rules), [`views`, `viewFilters`](#views), `normalizeUrl`, `viewBy`, `threshold`, `countFailedTests`, `maxScreenshotsPerRoute`. Links to the HTML report are kept and adjusted to `--out` (`htmlReport: false` drops them). **What it can't:** what was recorded. Which elements are interactive is decided in the browser (it needs the live page: computed styles, descendants, label targets), interaction types are recording options, and screenshots are what they are. The deprecated `use.uiCoverage.ignoreSelectors` was applied while recording.
 
 **Data format.** `ui-coverage-data.json` has `formatVersion: 1` and an `attempts` array: one entry per test attempt and browser context with `testId`, `retry`, `passed`, `title`, `project`, `trace`, `tags`, `specFile` and `data`, the recording (`formatVersion: 3`, see `RawCoverageData` in [src/model/raw.ts](src/model/raw.ts); version 2 is still read):
 
@@ -836,7 +927,7 @@ export default defineConfig({
 Notes:
 
 - **Install `@playwright/test` at the same version as your CT package.** `playwright-ui-coverage` imports `@playwright/test`, and the CT packages are released on their own schedule (e.g. `@playwright/experimental-ct-react@1.62.1` needs `@playwright/test@1.62.1`). With mismatched versions npm installs two copies of Playwright, and the library hooks into the copy your tests don't run on. Check with `npm ls playwright-core`: there should be one version.
-- **Grouping:** the reporter's `viewBy` option is `'auto'` by default. It groups by file when the config comes from a CT `defineConfig`, or when the recorded data says it came from a component test (so `merge-reports` with a plain config groups by file too). Set `viewBy: 'file'` or `'url'` to choose yourself. With `'file'`, `normalizeUrl` isn't used, and `threshold.views` keys are file paths (`'components/**'` matches every spec under `components/`).
+- **Grouping:** the reporter's `viewBy` option is `'auto'` by default. It groups by file when the config comes from a CT `defineConfig`, or when the recorded data says it came from a component test (so `merge-reports` with a plain config groups by file too). Set `viewBy: 'file'` or `'url'` to choose yourself. With `'file'`, `views`, `viewFilters` and `normalizeUrl` aren't used, and `threshold.views` keys are file paths (`'components/**'` matches every spec under `components/`).
 - CT reuses one browser context for the tests of a worker. Both modes record each test separately anyway.
 
 [`examples/ct-react`](examples/ct-react) is a complete React example. Run it with `npm run example:ct` (fixture mode) or `npm run example:ct:register`.
@@ -850,7 +941,7 @@ Notes:
 - A UI state that lasts only a few milliseconds (shorter than a viewport screenshot takes, e.g. a panel a test opens and closes with no step in between) still counts its elements, but may not get a screenshot: the recorder only keeps a screenshot if the new elements are still there, unchanged, after it was taken. States whose new elements are outside the viewport wait for `snapshotDelay` as before.
 - Closed shadow roots aren't inventoried: only their host can count (see [Iframes and shadow DOM](#iframes-and-shadow-dom)).
 - Cross-origin iframes can run in their own process, and Chromium paints those in full-page screenshots only where they are inside the viewport. So elements of a cross-origin frame that are outside the viewport when a screenshot is taken still count, but get no box in it (a later screenshot taken while they are in view shows them).
-- The deprecated recording-time `use.uiCoverage.ignoreSelectors` doesn't reach into frames from the parent page (`iframe.ads button`); use the reporter's `ignoreSelectors`, which does.
+- The deprecated recording-time `use.uiCoverage.ignoreSelectors` doesn't reach into frames from the parent page (`iframe.ads button`); use the report-time `elementFilters` (`documentScope`), which do.
 - Hover-only interactions aren't counted.
 - With `scroll` enabled, Playwright's automatic scrolling-into-view before actions also counts as a `scroll` of the container. That's why `scroll` is off by default.
 - With `maxScreenshotHeight`, a page scrolled below the crop has its fixed elements (a fixed header) painted below the crop too, so they aren't drawn on that screenshot.

@@ -78,6 +78,16 @@ assert.match(loc({ instances: 3, role: 'button', name: 'Delete', nameFrom: 'text
 // The select's text (its options) is not its name.
 assert.equal(loc({ key: '#s', tag: 'select', role: 'combobox', name: 'A B', nameFrom: 'text' }), "await page.locator('#s').selectOption('…');");
 
+// A named element (an `elements` rule): its key is a name, the locator uses the identity rules' key.
+assert.equal(
+  loc({ key: 'Star user', autoKey: 'main > div:nth-of-type(2) > button', label: 'Star user', role: 'button', name: '', nameFrom: '' }),
+  "await page.locator('body > main > div:nth-of-type(2) > button').click();",
+);
+assert.equal(
+  loc({ key: 'Pay', autoKey: '[data-testid="payments"] >> #pay > button', frames: ['[data-testid="payments"]'], role: 'button', name: '', nameFrom: '' }),
+  "await page.frameLocator('[data-testid=\"payments\"]').locator('#pay > button').click();",
+);
+
 const skeleton = testSkeleton('/users/:id', ["await page.getByRole('button', { name: 'Edit' }).click();"]);
 assert.match(skeleton, /^test\('covers untested elements on \/users\/:id', async \(\{ page \}\) => \{\n  await page\.goto\('\/users\/:id' \/\* TODO/);
 assert.match(skeleton, /  await page\.getByRole\('button', \{ name: 'Edit' \}\)\.click\(\);\n  \/\/ TODO: assert the result\n\}\);\n$/);
