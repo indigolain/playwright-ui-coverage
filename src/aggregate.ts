@@ -8,6 +8,11 @@ export interface ElementCoverage {
   instances: number;
   tested: boolean;
   testedBy: string[];
+  /**
+   * Tests that touched this element only in attempts that didn't pass (and so
+   * don't count). Non-empty with `tested: false` means "touched by failing tests only".
+   */
+  testedByFailing: string[];
 }
 
 export interface ScreenshotBox {
@@ -30,6 +35,8 @@ export interface RouteCoverage {
   total: number;
   tested: number;
   percent: number;
+  /** Untested elements that failing tests touched. */
+  failingOnly: number;
   elements: ElementCoverage[];
   screenshots: RouteScreenshot[];
 }
@@ -39,6 +46,7 @@ export interface CoverageSummary {
   total: number;
   tested: number;
   percent: number;
+  failingOnly: number;
   routes: RouteCoverage[];
 }
 
@@ -65,9 +73,17 @@ export const defaultNormalizeUrl: NormalizeUrl = (url) => {
   return route;
 };
 
-interface TestEntry {
+/**
+ * How an entry's interactions count: `tested` marks elements tested, `failing`
+ * only records them in `testedByFailing`, `ignore` drops them. Inventories always count.
+ */
+export type InteractionUse = 'tested' | 'failing' | 'ignore';
+
+export interface TestEntry {
   title: string;
   data: TestCoverageData;
+  /** Default: `tested`. */
+  interactions?: InteractionUse;
 }
 
 const percent = (tested: number, total: number) =>
@@ -78,7 +94,7 @@ export function aggregate(
   opts: { normalizeUrl: NormalizeUrl; maxScreenshotsPerRoute: number },
 ): CoverageSummary {
   type RouteAcc = {
-    elements: Map<string, ElementCoverage & { testedBySet: Set<string> }>;
+    elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string> }>;
     snapshots: { snap: TestCoverageData['snapshots'][number]; test: string }[];
   };
   const routes = new Map<string, RouteAcc>();
@@ -107,32 +123,43 @@ export function aggregate(
             instances: n,
             tested: false,
             testedBy: [],
+            testedByFailing: [],
             testedBySet: new Set(),
+            failingSet: new Set(),
           });
       }
     }
   }
 
   // Pass 2: interactions.
-  for (const { title, data } of tests) {
+  for (const { title, data, interactions: use = 'tested' } of tests) {
+    if (use === 'ignore') continue;
     for (const i of data.interactions) {
       const acc = routeFor(i.url);
       let el = acc.elements.get(i.key);
       if (!el) {
         // Interacted with but never captured in an inventory (transient element).
-        el = { key: i.key, label: i.label, tag: '?', instances: 1, tested: false, testedBy: [], testedBySet: new Set() };
+        el = {
+          key: i.key, label: i.label, tag: '?', instances: 1, tested: false,
+          testedBy: [], testedByFailing: [], testedBySet: new Set(), failingSet: new Set(),
+        };
         acc.elements.set(i.key, el);
       }
-      el.tested = true;
-      el.testedBySet.add(title);
+      if (use === 'failing') {
+        el.failingSet.add(title);
+      } else {
+        el.tested = true;
+        el.testedBySet.add(title);
+      }
     }
   }
 
   const result: RouteCoverage[] = [];
   for (const [route, acc] of routes) {
-    const elements = [...acc.elements.values()].map(({ testedBySet, ...e }) => ({
+    const elements = [...acc.elements.values()].map(({ testedBySet, failingSet, ...e }) => ({
       ...e,
       testedBy: [...testedBySet],
+      testedByFailing: [...failingSet].filter((t) => !testedBySet.has(t)),
     }));
     if (elements.length === 0) continue;
 
@@ -162,12 +189,14 @@ export function aggregate(
     }
 
     const tested = elements.filter((e) => e.tested).length;
+    const failingOnly = elements.filter((e) => !e.tested && e.testedByFailing.length > 0).length;
     elements.sort((a, b) => Number(a.tested) - Number(b.tested) || a.label.localeCompare(b.label));
     result.push({
       route,
       total: elements.length,
       tested,
       percent: percent(tested, elements.length),
+      failingOnly,
       elements,
       screenshots: chosen,
     });
@@ -176,5 +205,13 @@ export function aggregate(
   result.sort((a, b) => a.route.localeCompare(b.route));
   const total = result.reduce((s, r) => s + r.total, 0);
   const tested = result.reduce((s, r) => s + r.tested, 0);
-  return { generatedAt: new Date().toISOString(), total, tested, percent: percent(tested, total), routes: result };
+  const failingOnly = result.reduce((s, r) => s + r.failingOnly, 0);
+  return {
+    generatedAt: new Date().toISOString(),
+    total,
+    tested,
+    percent: percent(tested, total),
+    failingOnly,
+    routes: result,
+  };
 }

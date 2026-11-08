@@ -113,6 +113,19 @@ Anything inside an element with `data-uicov-ignore` is always excluded.
 | `normalizeUrl` | strips query, ids → `:id` | `(url) => routeName`, to group pages your own way. |
 | `maxScreenshotsPerRoute` | `3` | Screenshots chosen to cover the most elements. |
 | `threshold` | none | Fail the run if overall coverage % is below this. |
+| `countFailedTests` | `false` | Let interactions from tests that didn't pass mark elements as tested. See below. |
+
+### Retries and failed tests
+
+Playwright runs a test again on retry, and every attempt records coverage. The reporter combines the attempts of each test like this:
+
+- **Element totals** use inventories from every attempt, passed or failed. A page a failing test reached still adds its elements to the total.
+- **Tested** comes from passing attempts only (by default). An attempt passes when its status is the one the test expects: `passed`, or `failed` for a `test.fail()` test. Skipped, timed-out and interrupted attempts don't pass.
+- **Retries:** if any attempt of a test passed, only the last passing attempt's interactions count. For a flaky test (fails, then passes on retry) that is the retry that passed. The earlier failed attempts add element totals only.
+- **Tests that never passed:** their interactions don't count as tested. Elements that only such tests touched are shown as **failing tests only** (amber) in the report. They count as untested in the percentage. In `coverage.json` these elements have `tested: false` and a non-empty `testedByFailing`, and each route and the summary have a `failingOnly` count.
+- **No duplicates:** a test is listed once under "Tested by", however many attempts it took.
+
+With `countFailedTests: true`, interactions from every attempt count as tested, whether it passed or not.
 
 ## Known limitations
 
@@ -128,6 +141,7 @@ npm install
 npx playwright install chromium
 npm run demo          # fixture mode: runs demo/tests, writes ui-coverage-report/
 npm run demo:register # register mode: same tests, config-only recording
+UICOV_DEMO_FAIL=1 npx playwright test --retries=1  # adds a failing and a flaky test (demo/tests/failing.spec.ts)
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
 npm run typecheck
 npm run build         # compiles to dist/

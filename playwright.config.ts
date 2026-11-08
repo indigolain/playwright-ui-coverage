@@ -14,7 +14,11 @@ const port = Number(process.env.PORT || 4173);
 export default defineConfig({
   testDir: 'demo/tests',
   fullyParallel: true,
-  reporter: [['list'], ['./src/reporter.ts', { outputFolder: 'ui-coverage-report' }]],
+  reporter: [
+    ['list'],
+    // UICOV_COUNT_FAILED=1 lets failed tests' interactions count (see demo/tests/failing.spec.ts).
+    ['./src/reporter.ts', { outputFolder: 'ui-coverage-report', countFailedTests: !!process.env.UICOV_COUNT_FAILED }],
+  ],
   use: {
     baseURL: `http://localhost:${port}`,
   },

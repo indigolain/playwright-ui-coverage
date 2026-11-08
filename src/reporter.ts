@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { FullConfig, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
 import { aggregate, defaultNormalizeUrl, type NormalizeUrl } from './aggregate';
+import { isPassingResult, selectAttempts, type AttemptEntry } from './attempts';
 import { renderHtml } from './html';
 import { ATTACHMENT_NAME, type TestCoverageData } from './types';
 
@@ -14,10 +15,17 @@ export interface UiCoverageReporterOptions {
   maxScreenshotsPerRoute?: number;
   /** Fail the run (exit code 1) if overall coverage is below this percent. */
   threshold?: number;
+  /**
+   * Let interactions from attempts that didn't pass mark elements as tested.
+   * Default: false (only the last passing attempt of each test counts; element
+   * totals still include inventories from every attempt).
+   */
+  countFailedTests?: boolean;
 }
 
 class UiCoverageReporter implements Reporter {
-  private tests: { title: string; data: TestCoverageData }[] = [];
+  /** One entry per attachment per attempt; retries are resolved in onEnd. */
+  private tests: AttemptEntry[] = [];
   private outputFolder = 'ui-coverage-report';
 
   constructor(private options: UiCoverageReporterOptions = {}) {}
@@ -33,8 +41,11 @@ class UiCoverageReporter implements Reporter {
       if (a.name !== ATTACHMENT_NAME || !a.body) continue;
       try {
         this.tests.push({
+          testId: test.id,
+          retry: result.retry,
+          passed: isPassingResult(test, result),
           title: test.titlePath().filter(Boolean).slice(1).join(' › '),
-          data: JSON.parse(a.body.toString('utf8')),
+          data: JSON.parse(a.body.toString('utf8')) as TestCoverageData,
         });
       } catch {
         /* malformed attachment */
@@ -44,7 +55,8 @@ class UiCoverageReporter implements Reporter {
 
   async onEnd() {
     if (this.tests.length === 0) return;
-    const summary = aggregate(this.tests, {
+    const entries = selectAttempts(this.tests, { countFailedTests: this.options.countFailedTests ?? false });
+    const summary = aggregate(entries, {
       normalizeUrl: this.options.normalizeUrl ?? defaultNormalizeUrl,
       maxScreenshotsPerRoute: this.options.maxScreenshotsPerRoute ?? 3,
     });
@@ -75,6 +87,9 @@ class UiCoverageReporter implements Reporter {
     console.log(`\nUI coverage: ${summary.percent}% (${summary.tested}/${summary.total} elements)`);
     for (const r of summary.routes) {
       console.log(`  ${pad(r.route, width)}  ${String(r.percent).padStart(5)}%  ${r.tested}/${r.total}`);
+    }
+    if (summary.failingOnly > 0) {
+      console.log(`  ${summary.failingOnly} more element(s) touched only by failing tests (not counted)`);
     }
     const rel = path.relative(process.cwd(), path.join(this.outputFolder, 'index.html'));
     console.log(`  Report: ${rel}\n`);
