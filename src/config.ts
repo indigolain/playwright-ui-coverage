@@ -328,14 +328,26 @@ const dynamicImport = new Function('specifier', 'return import(specifier)') as (
 
 /** Playwright's own loader (TypeScript, extensionless imports), if this Playwright version exposes it. */
 function playwrightLoader(): ((file: string) => Promise<any>) | undefined {
+  let paths: string[];
   try {
-    const testPkg = require.resolve('@playwright/test/package.json');
-    const common = require(require.resolve('playwright/lib/common', { paths: [path.dirname(testPkg)] }));
-    const fn = common?.transform?.requireOrImport;
-    return typeof fn === 'function' ? fn : undefined;
+    paths = [path.dirname(require.resolve('@playwright/test/package.json'))];
   } catch {
     return undefined;
   }
+  // Bundled into lib/common in recent versions; lib/transform/transform before.
+  const candidates: [string, (m: any) => unknown][] = [
+    ['playwright/lib/common', (m) => m?.transform?.requireOrImport],
+    ['playwright/lib/transform/transform', (m) => m?.requireOrImport],
+  ];
+  for (const [id, pick] of candidates) {
+    try {
+      const fn = pick(require(require.resolve(id, { paths })));
+      if (typeof fn === 'function') return fn as (file: string) => Promise<any>;
+    } catch {
+      /* try the next one */
+    }
+  }
+  return undefined;
 }
 
 /**
