@@ -103,8 +103,9 @@ export function aggregate(
     snapshots: { snap: TestCoverageData['snapshots'][number]; test: string }[];
   };
   const routes = new Map<string, RouteAcc>();
-  const routeFor = (url: string) => {
-    const r = opts.normalizeUrl(url);
+  /** `view` (set for `viewBy: 'file'`) puts all of an entry's data in one view, whatever the URL. */
+  const routeFor = (url: string, view?: string) => {
+    const r = view ?? opts.normalizeUrl(url);
     if (!routes.has(r)) routes.set(r, { elements: new Map(), snapshots: [] });
     return routes.get(r)!;
   };
@@ -112,7 +113,7 @@ export function aggregate(
   // Pass 1: inventories.
   for (const { title, data } of tests) {
     for (const snap of data.snapshots) {
-      const acc = routeFor(snap.url);
+      const acc = routeFor(snap.url, data.view);
       acc.snapshots.push({ snap, test: title });
       const counts = new Map<string, number>();
       for (const el of snap.elements) counts.set(el.key, (counts.get(el.key) ?? 0) + 1);
@@ -144,7 +145,7 @@ export function aggregate(
   for (const { title, data, interactions: use = 'tested' } of tests) {
     if (use === 'ignore') continue;
     for (const i of data.interactions) {
-      const acc = routeFor(i.url);
+      const acc = routeFor(i.url, data.view);
       let el = acc.elements.get(i.key);
       if (!el) {
         // Interacted with but never captured in an inventory (transient element).
