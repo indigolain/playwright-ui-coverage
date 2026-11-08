@@ -21,6 +21,10 @@
       "types": "./dist/register.d.ts",
       "default": "./dist/register.js"
     },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
     "./coverage.schema.json": "./schema/coverage.schema.json",
     "./package.json": "./package.json"
   },

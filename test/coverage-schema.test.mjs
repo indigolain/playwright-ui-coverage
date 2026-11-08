@@ -146,8 +146,9 @@ describe('coverage.json', () => {
     broken.schemaVersion = 2;
     const errors = validate(broken, schema);
     assert.equal(errors.length, 4, errors.join('\n'));
-    // Reserved for the effective configuration: any object.
-    assertValid({ ...report, config: { viewBy: 'url', nested: { a: 1 } } });
+    // The resolved config: `resolved` is free-form; the rest is checked.
+    assertValid({ ...report, config: { source: { file: null, inline: [] }, profile: null, resolved: { viewBy: 'url', nested: { a: 1 } } } });
+    assert.equal(validate({ ...report, config: { viewBy: 'url' } }, schema).length, 4);
   });
 
   it('a baseline check result matches the schema', () => {
@@ -237,7 +238,7 @@ describe('schema/coverage.schema.json vs src/coverage-report.ts', () => {
     const text = type.getText();
     const expected = {
       string: ['string'], number: ['number', 'integer'], boolean: ['boolean'],
-      'number | null': ['number,null'], 'typeof COVERAGE_SCHEMA_VERSION': ['const'],
+      'number | null': ['number,null'], 'string | null': ['string,null'], 'typeof COVERAGE_SCHEMA_VERSION': ['const'],
     }[text];
     const actual = s.const !== undefined ? 'const' : s.enum ? 'enum' : [s.type].flat().join(',');
     if (/^'[^']*'( \| '[^']*')*$/.test(text)) {

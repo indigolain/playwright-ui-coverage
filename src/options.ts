@@ -1,17 +1,19 @@
 import type { AttributeFilter, UiCoverageRules } from './model/rules';
-import { DEFAULT_INTERACTIONS, type AllowedInteraction, type InteractionType } from './interactions';
+import { DEFAULT_INTERACTIONS, INTERACTION_TYPES, type AllowedInteraction, type InteractionType } from './interactions';
+import { s, type SchemaFields } from './schema';
 
 /**
- * Recording options (`use.uiCoverage`), read by both the fixture and register
- * mode. Rules that can change after recording (`ignoreSelectors`,
- * `significantAttributes`, `attributeFilters`) belong in the reporter options
- * (`UiCoverageRules`); here they are deprecated but still honored.
+ * Recording options (`recording` in the config file, or `use.uiCoverage`),
+ * read by both the fixture and register mode. Rules that can change after
+ * recording (`ignoreSelectors`, `significantAttributes`, `attributeFilters`)
+ * belong at the top level of the config (`UiCoverageRules`); in
+ * `use.uiCoverage` they are deprecated but still honored.
  */
 export interface UiCoverageOptions {
   /** Turn recording off (e.g. `enabled: !!process.env.UI_COVERAGE`). Default: true. */
   enabled: boolean;
   /**
-   * @deprecated Set `ignoreSelectors` in the reporter options instead, so it can
+   * @deprecated Set `ignoreSelectors` in the config file (top level) instead, so it can
    * change without re-running tests. Still honored: applied while recording
    * (like `data-uicov-interactive="exclude-all"`), so it can't be undone at report time.
    */
@@ -19,15 +21,15 @@ export interface UiCoverageOptions {
   /** ms to wait after an interaction before snapshotting. Default: 250. */
   snapshotDelay: number;
   /**
-   * @deprecated Set `significantAttributes` in the reporter options instead.
+   * @deprecated Set `significantAttributes` in the config file (top level) instead.
    * Still honored: recorded with the data and applied at report time, unless
-   * the reporter options set `significantAttributes` themselves.
+   * the config sets `significantAttributes` itself.
    */
   significantAttributes: string[];
   /**
-   * @deprecated Set `attributeFilters` in the reporter options instead.
+   * @deprecated Set `attributeFilters` in the config file (top level) instead.
    * Still honored: recorded with the data and applied at report time, unless
-   * the reporter options set `attributeFilters` themselves.
+   * the config sets `attributeFilters` itself.
    */
   attributeFilters: AttributeFilter[];
   /**
@@ -72,6 +74,29 @@ export const defaultUiCoverageOptions: UiCoverageOptions = {
   interactions: DEFAULT_INTERACTIONS,
   allowedInteractions: [],
 };
+
+/** The deprecated rule keys of `use.uiCoverage` (not accepted in the config file's `recording`). */
+type DeprecatedRecordingKeys = 'ignoreSelectors' | 'significantAttributes' | 'attributeFilters';
+
+/** `recording` in the config file: the recording options without the deprecated rules. */
+export type UiCoverageRecordingConfig = Partial<Omit<UiCoverageOptions, DeprecatedRecordingKeys>>;
+
+const interaction = () => s.oneOf(...INTERACTION_TYPES);
+
+/** Schema of `recording` in the config file: one entry per key (checked by the compiler). */
+export const RECORDING_SCHEMA = {
+  enabled: s.boolean(),
+  snapshotDelay: s.number({ min: 0 }),
+  screenshots: s.oneOf('on', 'off', 'first-only'),
+  format: s.oneOf('png', 'jpeg'),
+  quality: s.number({ min: 0, max: 100 }),
+  maxScreenshotHeight: s.number({ min: 0 }),
+  interactions: s.array(interaction(), 'an array of interaction types'),
+  allowedInteractions: s.array(
+    s.rule({ selector: s.required(s.string()), events: s.required(s.array(interaction(), 'an array of interaction types')) }),
+    'an array of { selector, events } rules',
+  ),
+} satisfies SchemaFields<UiCoverageRecordingConfig>;
 
 export function resolveOptions(partial?: Partial<UiCoverageOptions>): UiCoverageOptions {
   return { ...defaultUiCoverageOptions, ...partial };

@@ -73,14 +73,14 @@ try {
   fs.rmSync(path.join(root, 'test-results'), { recursive: true, force: true });
   fs.rmSync(report, { recursive: true, force: true });
 
-  // A merge config passes the report-time rules (demo/ui-coverage.config.json),
-  // like the demo's playwright.config.ts does; `--reporter` alone would drop them.
-  const rules = JSON.parse(fs.readFileSync(path.join(root, 'demo', 'ui-coverage.config.json'), 'utf8'));
+  // A merge config passes the reporter options; `--reporter` alone would drop
+  // them. The UI coverage config file is next to playwright.config.ts, not the
+  // merge config, so point the reporter at it.
   const mergeConfig = path.join(tmp, 'merge.config.mjs');
   fs.writeFileSync(
     mergeConfig,
     `export default ${JSON.stringify({
-      reporter: [[path.join(root, 'src', 'reporter.ts'), { ...rules, outputFolder: report }]],
+      reporter: [[path.join(root, 'src', 'reporter.ts'), { configFile: path.join(root, 'ui-coverage.config.ts'), outputFolder: report }]],
     })};\n`,
   );
   run(['merge-reports', '--config', mergeConfig, merged]);
@@ -102,6 +102,8 @@ try {
       for (const e of theirs) if (!mine.has(e)) errors.push(`  unsharded only (${r.name}): ${e}`);
     }
   }
+  if (result.config?.source?.file !== 'ui-coverage.config.ts')
+    errors.push(`merged report's config source is ${JSON.stringify(result.config?.source)}, expected ui-coverage.config.ts`);
   for (const v of result.views) {
     for (const s of v.screenshots) {
       const file = path.join(report, s.file);

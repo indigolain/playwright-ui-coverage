@@ -2,11 +2,16 @@
  * Report-time rules: which recorded elements count, and how they are
  * identified. Pure data + validation; applied by `model/resolve.ts`.
  *
- * `UiCoverageRules` is the single typed object for these rules. The reporter
- * accepts it as part of its options, the `report` CLI reads it from a config
- * file, and the deprecated `use.uiCoverage` fields are recorded with the data
- * and merged in with `mergeRules`.
+ * `UiCoverageRules` is the single typed object for these rules: top-level keys
+ * of the config file (`config.ts`), the reporter options and profiles. The
+ * deprecated `use.uiCoverage` fields are recorded with the data and merged in
+ * with `mergeRules`.
+ *
+ * Adding a rule: a property on `UiCoverageRules` plus its entry in
+ * `RULES_SCHEMA` (the compiler checks both match); it is then accepted and
+ * validated everywhere the rules are.
  */
+import { s, validate, type Schema, type SchemaFields } from '../schema';
 import { compileSelector, SelectorError, type CompiledSelector } from './selector';
 
 /**
@@ -26,6 +31,8 @@ export interface AttributeFilter {
    * including the built-in ones).
    */
   include?: boolean;
+  /** Free text, ignored (every rule object accepts one). */
+  comment?: string;
 }
 
 /**
@@ -66,8 +73,64 @@ export interface UiCoverageRules {
   attributeFilters?: AttributeFilter[];
 }
 
+const regexProblem = (src: string): string | undefined => {
+  try {
+    new RegExp(src);
+    return undefined;
+  } catch (e) {
+    return `invalid regular expression: ${(e as Error).message}`;
+  }
+};
+
+const selectorProblem = (selector: RuleSelector): string | undefined => {
+  try {
+    compileRuleSelector(selector);
+    return undefined;
+  } catch (e) {
+    if (e instanceof SelectorError) return `${JSON.stringify(selector)}: ${e.message}`;
+    throw e;
+  }
+};
+
+const scopedSelectorSchema = s.rule(
+  { selector: s.required(s.string()), documentScope: s.string() },
+  'an object { selector, documentScope? }',
+);
+
+/**
+ * A selector evaluated at report time (README "Report-time selectors"): a
+ * string (it may contain a `>>` host chain) or `{ selector, documentScope? }`.
+ */
+export const reportSelector = (): Schema => {
+  const shape = s.union(s.string(), scopedSelectorSchema);
+  return {
+    ...shape,
+    check(value, path, errors) {
+      const before = errors.length;
+      shape.check(value, path, errors);
+      if (errors.length > before) return;
+      const problem = selectorProblem(value as RuleSelector);
+      if (problem) errors.push(path ? `${path}: ${problem}` : problem);
+    },
+  };
+};
+
+/**
+ * Schema of the report-time rules: one entry per `UiCoverageRules` key (the
+ * compiler checks both lists match). These keys are accepted at the top level
+ * of the config file, in the reporter options and in profiles.
+ */
+export const RULES_SCHEMA = {
+  ignoreSelectors: s.array(reportSelector(), 'an array of selectors'),
+  significantAttributes: s.array(s.string(), 'an array of attribute names'),
+  attributeFilters: s.array(
+    s.rule({ attribute: s.required(s.string(regexProblem)), value: s.string(regexProblem), include: s.boolean() }),
+    'an array of { attribute, value?, include? } rules',
+  ),
+} satisfies SchemaFields<UiCoverageRules>;
+
 /** The keys of `UiCoverageRules`, e.g. to pick them out of a larger options object. */
-export const RULE_KEYS = ['ignoreSelectors', 'significantAttributes', 'attributeFilters'] as const;
+export const RULE_KEYS = Object.keys(RULES_SCHEMA) as (keyof UiCoverageRules)[];
 
 /** Picks the rule fields that are set (`undefined` fields are left out). */
 export function pickRules(source: Partial<Record<string, unknown>> | undefined): UiCoverageRules {
@@ -173,23 +236,10 @@ export function compileRuleSelector(s: RuleSelector): CompiledSelector {
 }
 
 /**
- * Throws a descriptive error for rules that can't be applied: invalid regexes,
- * or selectors that can't be evaluated at report time. Call it early (reporter
- * constructor, CLI start) so mistakes fail fast.
+ * Throws a descriptive error for rules that can't be applied: wrong types,
+ * invalid regexes, or selectors that can't be evaluated at report time. Call
+ * it early (reporter constructor, CLI start) so mistakes fail fast.
  */
 export function validateRules(rules: UiCoverageRules, where = 'options'): void {
-  for (const k of ['ignoreSelectors', 'significantAttributes', 'attributeFilters'] as const) {
-    const v = rules[k];
-    if (v !== undefined && !Array.isArray(v)) throw new Error(`[playwright-ui-coverage] ${where}: ${k} must be an array`);
-  }
-  compileAttributeFilters(rules);
-  for (const s of rules.ignoreSelectors ?? []) {
-    try {
-      compileRuleSelector(s);
-    } catch (e) {
-      if (e instanceof SelectorError)
-        throw new Error(`[playwright-ui-coverage] ${where}: ignoreSelectors entry ${JSON.stringify(s)}: ${e.message}`);
-      throw e;
-    }
-  }
+  validate(s.object(RULES_SCHEMA), pickRules(rules as Record<string, unknown>), where);
 }

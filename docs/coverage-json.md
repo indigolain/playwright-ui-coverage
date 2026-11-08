@@ -48,7 +48,7 @@ rounded to one decimal; `100` when there are no units.
 | `thresholds` | [`ThresholdCheck`](#thresholds-thresholdcheck)`[]` | Results of the `threshold` option; empty when it isn't set. |
 | `insights` | `{ mostRepeated }` | See [Insights](#insights). |
 | `playwrightReport` | `{ path, attachmentsBaseURL }`, optional | Playwright's HTML report, when linked: `path` is its folder relative to the folder of `coverage.json` (`/` separators), `attachmentsBaseURL` where `tests[].trace` files are, relative to `path`. |
-| `config` | object, optional | **Reserved** for the effective report configuration. Treat its contents as informational. |
+| `config` | object, optional | The UI coverage config that built the report: `source` (`file`: the config file relative to the working directory, or `null`; `inline`: keys set in the reporter options), `profile` (name or `null`) and `resolved` (the merged config; informational, its keys follow the [config file](../README.md#configuration), not this schema's versioning). |
 | `baseline` | [`BaselineCheck`](#baseline-baselinecheck), optional | Result of the `baseline` option; absent when it isn't set. |
 
 ## `summary`: `ReportSummary` / `CoverageCounts`
