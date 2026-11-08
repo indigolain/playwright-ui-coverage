@@ -1,0 +1,48 @@
+{
+  "interactions": [
+    { "key": "[data-testid=\"add-user\"]", "label": "button \"Add user\"", "event": "click", "url": "http://localhost:4173/users" },
+    { "key": "#new-name", "label": "textbox \"Name\"", "event": "input", "url": "http://localhost:4173/users" },
+    { "key": "button \"Save\"", "label": "button \"Save\"", "event": "click", "url": "http://localhost:4173/users" },
+    { "key": "button \"Dismiss\"", "label": "button \"Dismiss\"", "event": "click", "url": "http://localhost:4173/users" },
+    { "key": "link \"Katherine Johnson\"", "label": "link \"Katherine Johnson\"", "event": "click", "url": "http://localhost:4173/users" },
+    { "key": "link \"← Back to users\"", "label": "link \"← Back to users\"", "event": "click", "url": "http://localhost:4173/users/4" }
+  ],
+  "snapshots": [
+    {
+      "url": "http://localhost:4173/users",
+      "dpr": 2,
+      "screenshot": "ui-coverage-screenshot-0",
+      "elements": [
+        { "key": "#search", "label": "searchbox \"Search users\"", "tag": "input", "x": 10, "y": 10, "w": 200, "h": 30 },
+        { "key": "[data-testid=\"add-user\"]", "label": "button \"Add user\"", "tag": "button", "x": 220, "y": 10, "w": 80, "h": 30 },
+        { "key": "link \"Ada Lovelace\"", "label": "link \"Ada Lovelace\"", "tag": "a", "x": 10, "y": 50, "w": 100, "h": 20 },
+        { "key": "link \"Grace Hopper\"", "label": "link \"Grace Hopper\"", "tag": "a", "x": 10, "y": 80, "w": 100, "h": 20 },
+        { "key": "button \"Delete\"", "label": "button \"Delete\"", "tag": "button", "x": 300, "y": 50, "w": 60, "h": 20 },
+        { "key": "button \"Delete\"", "label": "button \"Delete\"", "tag": "button", "x": 300, "y": 80, "w": 60, "h": 20 }
+      ]
+    },
+    {
+      "url": "http://localhost:4173/users",
+      "dpr": 2,
+      "screenshot": "ui-coverage-screenshot-1",
+      "elements": [
+        { "key": "#new-name", "label": "textbox \"Name\"", "tag": "input", "x": 400, "y": 200, "w": 180, "h": 30 },
+        { "key": "button \"Save\"", "label": "button \"Save\"", "tag": "button", "x": 400, "y": 250, "w": 60, "h": 30 },
+        { "key": "button \"Cancel\"", "label": "button \"Cancel\"", "tag": "button", "x": 470, "y": 250, "w": 60, "h": 30 }
+      ]
+    },
+    {
+      "url": "http://localhost:4173/users",
+      "dpr": 2,
+      "elements": [
+        { "key": "#search", "label": "searchbox \"Search users\"", "tag": "input", "x": 10, "y": 10, "w": 200, "h": 30 },
+        { "key": "link \"Ada Lovelace\"", "label": "link \"Ada Lovelace\"", "tag": "a", "x": 10, "y": 50, "w": 100, "h": 20 },
+        { "key": "link \"Grace Hopper\"", "label": "link \"Grace Hopper\"", "tag": "a", "x": 10, "y": 80, "w": 100, "h": 20 },
+        { "key": "link \"Katherine Johnson\"", "label": "link \"Katherine Johnson\"", "tag": "a", "x": 10, "y": 110, "w": 100, "h": 20 },
+        { "key": "button \"Delete\"", "label": "button \"Delete\"", "tag": "button", "x": 300, "y": 50, "w": 60, "h": 20 },
+        { "key": "button \"Delete\"", "label": "button \"Delete\"", "tag": "button", "x": 300, "y": 80, "w": 60, "h": 20 },
+        { "key": "button \"Delete\"", "label": "button \"Delete\"", "tag": "button", "x": 300, "y": 110, "w": 60, "h": 20 }
+      ]
+    }
+  ]
+}

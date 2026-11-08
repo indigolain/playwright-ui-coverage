@@ -1,15 +1,10 @@
 // Unit tests for the node-side model (selector engine, identity, report-time
-// rules). Self-contained; runs against the build:
-//
-//   npm run build && node --test test/model.test.mjs
+// rules). Run with the other unit tests: `npm test`.
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { describe, it } from 'node:test';
-
-const require = createRequire(import.meta.url);
-const { compileSelector, SelectorError } = require('../dist/model/selector.js');
-const { resolveCoverageData } = require('../dist/model/resolve.js');
-const { mergeRules, validateRules } = require('../dist/model/rules.js');
+import { describe, it } from 'vitest';
+import { compileSelector, SelectorError } from '../src/model/selector';
+import { resolveCoverageData } from '../src/model/resolve';
+import { mergeRules, validateRules } from '../src/model/rules';
 
 /** Builds a raw node table from a compact tree: [tag, attrs?, children?]. */
 function table(tree) {

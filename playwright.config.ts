@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices, type ReporterDescription } from '@playwright/test';
 import { DEFAULT_INTERACTIONS, type UiCoverageOptions } from './src';
 // Report-time rules, shared with the CLI: `npx playwright-ui-coverage report --config demo/ui-coverage.config.json`.
 import uiCoverageRules from './demo/ui-coverage.config.json';
@@ -27,21 +27,35 @@ const demoThresholds =
 // of in the reporter options; the report must be the same (scripts/check-rebuild.mjs).
 const legacyRules = !!process.env.UICOV_DEMO_LEGACY;
 
+// BROWSER=firefox|webkit runs the demo in another engine (CI runs all three).
+const browser = process.env.BROWSER || 'chromium';
+const deviceFor: Record<string, string> = {
+  chromium: 'Desktop Chrome',
+  firefox: 'Desktop Firefox',
+  webkit: 'Desktop Safari',
+};
+const device = deviceFor[browser];
+if (!device) throw new Error(`Unknown BROWSER "${browser}" (use chromium, firefox or webkit)`);
+
+const reporter: ReporterDescription[] = [
+  ['list'],
+  // Playwright's HTML report: "Tested by" in the UI coverage report links to it.
+  ['html', { open: 'never' }],
+  // UICOV_COUNT_FAILED=1 lets failed tests' interactions count (see demo/tests/failing.spec.ts).
+  ['./src/reporter.ts', {
+    outputFolder: 'ui-coverage-report',
+    ...(legacyRules ? {} : uiCoverageRules),
+    countFailedTests: !!process.env.UICOV_COUNT_FAILED,
+    threshold: demoThresholds,
+  }],
+];
+// CI checks that recording adds no steps to the user's report.
+if (process.env.UICOV_CHECK_STEPS) reporter.push(['./scripts/no-steps-reporter.js']);
+
 export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
   testDir: 'demo/tests',
   fullyParallel: true,
-  reporter: [
-    ['list'],
-    // Playwright's HTML report: "Tested by" in the UI coverage report links to it.
-    ['html', { open: 'never' }],
-    // UICOV_COUNT_FAILED=1 lets failed tests' interactions count (see demo/tests/failing.spec.ts).
-    ['./src/reporter.ts', {
-      outputFolder: 'ui-coverage-report',
-      ...(legacyRules ? {} : uiCoverageRules),
-      countFailedTests: !!process.env.UICOV_COUNT_FAILED,
-      threshold: demoThresholds,
-    }],
-  ],
+  reporter,
   use: {
     baseURL: `http://localhost:${port}`,
     // UICOV_TRACE=1 records traces, which the UI coverage report links to.
@@ -59,7 +73,7 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
       interactions: [...DEFAULT_INTERACTIONS, 'scroll'],
     },
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [{ name: browser, use: { ...devices[device] } }],
   webServer: {
     command: `PORT=${port} node demo/server.mjs`,
     url: `http://localhost:${port}`,

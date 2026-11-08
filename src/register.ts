@@ -12,8 +12,8 @@
  * a context is created and to flush before it closes.
  *
  * `_instrumentation` is a private API. If a Playwright release changes it,
- * this mode turns itself off with a warning; the `uiCoverage` fixture keeps
- * working.
+ * this mode turns itself off with a warning (an error with UICOV_STRICT=1);
+ * the `uiCoverage` fixture keeps working.
  */
 import path from 'node:path';
 import { test, type BrowserContext } from '@playwright/test';
@@ -50,10 +50,12 @@ function register() {
     /* handled below */
   }
   if (typeof instrumentation?.addListener !== 'function') {
-    console.warn(
+    const message =
       '[playwright-ui-coverage] register mode is not supported by this Playwright version; ' +
-        'use the `uiCoverage` fixture instead.',
-    );
+      'use the `uiCoverage` fixture instead.';
+    // UICOV_STRICT=1 (used in CI) makes this an error instead of a warning.
+    if (process.env.UICOV_STRICT) throw new Error(message);
+    console.warn(message);
     return;
   }
 

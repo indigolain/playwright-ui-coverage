@@ -1,0 +1,24 @@
+{
+  "interactions": [
+    { "key": "#save", "label": "button \"Save\"", "event": "click", "url": "http://localhost:4173/app/index.html#/items/550e8400-e29b-41d4-a716-446655440000?tab=details" }
+  ],
+  "snapshots": [
+    {
+      "url": "http://localhost:4173/app/index.html#/items/550e8400-e29b-41d4-a716-446655440000?tab=details",
+      "dpr": 1,
+      "elements": [
+        { "key": "#save", "label": "button \"Save\"", "tag": "button", "x": 0, "y": 0, "w": 50, "h": 20 },
+        { "key": "#cancel", "label": "button \"Cancel\"", "tag": "button", "x": 60, "y": 0, "w": 50, "h": 20 }
+      ]
+    },
+    {
+      "url": "http://localhost:4173/app/#/items/42",
+      "dpr": 1,
+      "elements": [
+        { "key": "#save", "label": "button \"Save\"", "tag": "button", "x": 0, "y": 0, "w": 50, "h": 20 },
+        { "key": "#cancel", "label": "button \"Cancel\"", "tag": "button", "x": 60, "y": 0, "w": 50, "h": 20 },
+        { "key": "#archive", "label": "button \"Archive\"", "tag": "button", "x": 120, "y": 0, "w": 60, "h": 20 }
+      ]
+    }
+  ]
+}

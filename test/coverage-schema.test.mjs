@@ -1,8 +1,8 @@
 // Checks the public coverage.json contract: schema/coverage.schema.json against
 // the TypeScript types in src/coverage-report.ts, and real output against the
-// schema. Runs against the build:
+// schema. Run with the other unit tests:
 //
-//   npm run build && node --test test/coverage-schema.test.mjs
+//   npm test
 //
 // The demo's report (ui-coverage-report/coverage.json, from `npm run demo`) is
 // validated too when it exists.
@@ -10,15 +10,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
+import { toCoverageReport, COVERAGE_SCHEMA_VERSION } from '../src/coverage-report';
+import { evaluateThresholds } from '../src/thresholds';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schema = JSON.parse(fs.readFileSync(path.join(root, 'schema', 'coverage.schema.json'), 'utf8'));
-const { toCoverageReport, COVERAGE_SCHEMA_VERSION } = require('../dist/coverage-report.js');
-const { evaluateThresholds } = require('../dist/thresholds.js');
 
 // ---- A tiny JSON Schema validator (the subset the schema uses) ------------
 // Strict: objects reject properties the schema doesn't list unless it sets
@@ -149,9 +149,9 @@ describe('coverage.json', () => {
     assertValid({ ...report, config: { viewBy: 'url', nested: { a: 1 } } });
   });
 
-  it('the demo report matches the schema', (t) => {
+  it('the demo report matches the schema', (ctx) => {
     const file = path.join(root, 'ui-coverage-report', 'coverage.json');
-    if (!fs.existsSync(file)) return t.skip('no ui-coverage-report/coverage.json (run `npm run demo`)');
+    if (!fs.existsSync(file)) return ctx.skip();
     const report = JSON.parse(fs.readFileSync(file, 'utf8'));
     assertValid(report);
     const s = report.summary;

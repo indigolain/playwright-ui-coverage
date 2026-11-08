@@ -55,7 +55,7 @@ export default defineConfig({
 });
 ```
 
-This is the quickest way to try it on an existing suite. It hooks into Playwright's internal instrumentation, the same hook Playwright's trace recorder uses. That API is private, so if a Playwright release changes it, register mode switches itself off with a warning. Option B keeps working either way.
+This is the quickest way to try it on an existing suite. It hooks into Playwright's internal instrumentation, the same hook Playwright's trace recorder uses. That API is private, so if a Playwright release changes it, register mode switches itself off with a warning (set `UICOV_STRICT=1` to make that an error, e.g. in CI). Option B keeps working either way.
 
 ### Option B: fixture (stable, recommended for long-term use)
 
@@ -513,6 +513,10 @@ Notes:
 
 [`examples/ct-react`](examples/ct-react) is a complete React example. Run it with `npm run example:ct` (fixture mode) or `npm run example:ct:register`.
 
+## Compatibility
+
+- **`@playwright/test` 1.50 or later.** CI runs the demo in both modes on Chromium, Firefox and WebKit with 1.50.0 and the latest release, and weekly against `@playwright/test@next`. Older versions still record coverage, but show an extra `attach "ui-coverage"` step in each test's report.
+
 ## Known limitations
 
 - UI states that last shorter than `snapshotDelay` (e.g. a modal a test opens and closes instantly) still count their elements, but may not get a screenshot.
@@ -542,6 +546,8 @@ npm run docs:screenshots  # regenerates the README images in docs/ (run demo fir
 npm run perf          # builds a 300-route synthetic report in perf-report/ and times it in Chromium
 npm run typecheck
 npm run build         # compiles to dist/
+npm test              # unit tests (vitest)
+BROWSER=firefox scripts/demo-both-modes.sh  # what CI runs: both modes, same coverage, no extra steps
 ```
 
 ## License
