@@ -23,6 +23,7 @@ import { DOCUMENT_TAG } from './model/selector';
 import { intersects, viewportClip } from './model/geometry';
 import type { UiCoverageRules } from './model/rules';
 import { ATTACHMENT_NAME, SCREENSHOT_ATTACHMENT_PREFIX } from './types';
+import { inputGate, type InputGate } from './input-gate';
 
 /**
  * Runs `fn` as an "internal" Playwright call when possible, so our evaluate /
@@ -176,6 +177,8 @@ export class ContextRecorder {
   private navigations = new WeakMap<Page, number>();
   /** Pages with a short-lived-state screenshot in progress. */
   private transientBusy = new WeakSet<Page>();
+  /** Keeps full-page captures and the test's input apart (Chromium only, see input-gate.ts). */
+  private gate?: InputGate;
   private finished = false;
 
   private constructor(
@@ -185,6 +188,9 @@ export class ContextRecorder {
   ) {
     this.rules = recordedRules(options);
     this.resolver = new Resolver({ nodes: this.nodes }, compileRules(this.rules));
+    // Firefox and WebKit full-page captures don't resize the viewport, and don't lose input.
+    const engine = context.browser()?.browserType().name() ?? (context as any)._browserType?.name?.();
+    if (!engine || engine === 'chromium') this.gate = inputGate(context);
   }
 
   /** Starts recording `context`. Returns undefined if it is already being recorded. */
@@ -558,9 +564,13 @@ export class ContextRecorder {
   }
 
   /** A screenshot in the configured format. */
-  private shoot(page: Page, opts: { fullPage: boolean; clip?: RawClip; timeout?: number }): Promise<Buffer> {
+  private shoot(
+    page: Page,
+    opts: { fullPage: boolean; clip?: RawClip; timeout?: number },
+    beyondViewport = opts.fullPage,
+  ): Promise<Buffer> {
     const { format, quality } = this.options;
-    return internal(page, () =>
+    const shoot = () =>
       page.screenshot({
         animations: 'disabled',
         type: format,
@@ -569,8 +579,11 @@ export class ContextRecorder {
         // state just gets no image) instead of holding up the test.
         timeout: 5000,
         ...opts,
-      }),
-    );
+      });
+    // A full-page capture of a page larger than the viewport resizes Chromium's
+    // viewport, and input sent meanwhile can get lost: run it while the test
+    // sends no input to the page.
+    return internal(page, () => (beyondViewport && this.gate ? this.gate.exclusive(page, shoot) : shoot()));
   }
 
   /** Full-page screenshot in the configured format, cropped to `maxScreenshotHeight`. */
@@ -578,19 +591,24 @@ export class ContextRecorder {
     const { maxScreenshotHeight: cap } = this.options;
     return internal(page, async () => {
       let clip: { x: number; y: number; width: number; height: number } | undefined;
-      if (cap > 0) {
+      // Whether the page is larger than the viewport, so the capture resizes it (see `shoot`).
+      let beyondViewport = true;
+      if (cap > 0 || this.gate) {
         const size = await page.evaluate(() => {
           const d = document.documentElement;
           const b = document.body;
           return {
             w: Math.max(d.scrollWidth, b ? b.scrollWidth : 0),
             h: Math.max(d.scrollHeight, b ? b.scrollHeight : 0),
+            vw: innerWidth,
+            vh: innerHeight,
           };
         });
         // aggregate() ignores elements below the crop; the report clips boxes to the image.
-        if (size.h > cap) clip = { x: 0, y: 0, width: size.w, height: cap };
+        if (cap > 0 && size.h > cap) clip = { x: 0, y: 0, width: size.w, height: cap };
+        beyondViewport = size.w > size.vw || size.h > size.vh;
       }
-      const image = await this.shoot(page, { fullPage: true, clip });
+      const image = await this.shoot(page, { fullPage: true, clip }, beyondViewport);
       return { image, height: clip?.height };
     });
   }
