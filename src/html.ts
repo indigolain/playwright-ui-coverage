@@ -27,7 +27,7 @@ function compact(summary: CoverageSummary) {
           ...(e.tested || !suggestedLocator ? {} : { suggestedLocator }),
           ...(a11yHints?.length ? { a11yHints: a11yHints.map((h) => h.message) } : {}),
         })),
-        screenshots: r.screenshots.map((s) => ({
+        screenshots: r.screenshots.map(({ testId: _, ...s }) => ({
           ...s,
           boxes: s.boxes.map((b) => {
             const i = index.get(b.key);

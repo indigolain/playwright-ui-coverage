@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/indigolain/playwright-ui-coverage/schema/coverage.schema.json",
+  "title": "playwright-ui-coverage coverage.json",
+  "description": "UI coverage report written by playwright-ui-coverage (ui-coverage-report/coverage.json). schemaVersion changes only on breaking changes; new properties may be added at any time, so readers must ignore properties they don't know. Properties marked x-internal are not covered by the schemaVersion guarantee. See docs/coverage-json.md.",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "generator", "summary", "views", "tests", "thresholds", "insights"],
+  "properties": {
+    "schemaVersion": { "const": 1, "description": "Bumped only on breaking changes." },
+    "generatedAt": { "type": "string", "format": "date-time", "description": "ISO 8601 time the report was built." },
+    "generator": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "playwright-ui-coverage" },
+        "version": { "type": "string", "description": "Package version that wrote the file." }
+      }
+    },
+    "summary": { "$ref": "#/$defs/ReportSummary" },
+    "views": { "type": "array", "items": { "$ref": "#/$defs/ViewCoverage" }, "description": "Sorted by name." },
+    "tests": { "type": "array", "items": { "$ref": "#/$defs/TestRef" }, "description": "Every test with recorded data, sorted by title." },
+    "thresholds": { "type": "array", "items": { "$ref": "#/$defs/ThresholdCheck" }, "description": "Empty when no threshold is configured." },
+    "insights": {
+      "type": "object",
+      "required": ["mostRepeated"],
+      "properties": {
+        "mostRepeated": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RepeatedElement" },
+          "description": "Up to 10 elements used by at least 2 tests, most first."
+        }
+      }
+    },
+    "playwrightReport": {
+      "type": "object",
+      "description": "Playwright's HTML report, when linked: where tests[].trace files are.",
+      "required": ["path", "attachmentsBaseURL"],
+      "properties": {
+        "path": { "type": "string", "description": "Folder, relative to the folder of coverage.json ('/' separators)." },
+        "attachmentsBaseURL": { "type": "string", "description": "Its attachmentsBaseURL, relative to path." }
+      }
+    },
+    "config": {
+      "type": "object",
+      "description": "Reserved: the effective report configuration.",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "CoverageCounts": {
+      "type": "object",
+      "description": "Coverage counts. Denominator of coverage: testedElementsCount + untestedElementsCount + testedLinksCount + untestedLinksCount.",
+      "required": [
+        "coverage",
+        "testedElementsCount",
+        "untestedElementsCount",
+        "testedLinksCount",
+        "untestedLinksCount",
+        "failingOnlyElementsCount",
+        "a11yHintsCount"
+      ],
+      "properties": {
+        "coverage": { "type": "number", "minimum": 0, "maximum": 100, "description": "Percent of units tested, rounded to one decimal; 100 when there are no units." },
+        "testedElementsCount": { "type": "integer", "minimum": 0 },
+        "untestedElementsCount": { "type": "integer", "minimum": 0, "description": "Includes failingOnlyElementsCount." },
+        "testedLinksCount": { "type": "integer", "minimum": 0, "description": "Links whose destination view was visited. 0 until link tracking is available." },
+        "untestedLinksCount": { "type": "integer", "minimum": 0, "description": "Links whose destination view was never visited. 0 until link tracking is available." },
+        "failingOnlyElementsCount": { "type": "integer", "minimum": 0, "description": "Untested elements that only attempts that didn't pass interacted with." },
+        "a11yHintsCount": { "type": "integer", "minimum": 0, "description": "Informational; never affects coverage." }
+      }
+    },
+    "ReportSummary": {
+      "type": "object",
+      "description": "Overall counts: CoverageCounts plus viewCount.",
+      "required": [
+        "viewCount",
+        "coverage",
+        "testedElementsCount",
+        "untestedElementsCount",
+        "testedLinksCount",
+        "untestedLinksCount",
+        "failingOnlyElementsCount",
+        "a11yHintsCount"
+      ],
+      "properties": {
+        "viewCount": { "type": "integer", "minimum": 0, "description": "Number of entries in views." },
+        "coverage": { "$ref": "#/$defs/CoverageCounts/properties/coverage" },
+        "testedElementsCount": { "$ref": "#/$defs/CoverageCounts/properties/testedElementsCount" },
+        "untestedElementsCount": { "$ref": "#/$defs/CoverageCounts/properties/untestedElementsCount" },
+        "testedLinksCount": { "$ref": "#/$defs/CoverageCounts/properties/testedLinksCount" },
+        "untestedLinksCount": { "$ref": "#/$defs/CoverageCounts/properties/untestedLinksCount" },
+        "failingOnlyElementsCount": { "$ref": "#/$defs/CoverageCounts/properties/failingOnlyElementsCount" },
+        "a11yHintsCount": { "$ref": "#/$defs/CoverageCounts/properties/a11yHintsCount" }
+      }
+    },
+    "ViewCoverage": {
+      "type": "object",
+      "description": "One view: a normalized URL (/users/:id) or, for component tests, a spec file.",
+      "required": ["name", "reportUrl", "summary", "elements", "screenshots"],
+      "properties": {
+        "name": { "type": "string", "description": "View name as shown in the report and used in threshold.views." },
+        "reportUrl": { "type": "string", "description": "This view in the HTML report, relative to the folder of coverage.json: 'index.html#' + encodeURIComponent(name)." },
+        "summary": { "$ref": "#/$defs/CoverageCounts" },
+        "elements": { "type": "array", "items": { "$ref": "#/$defs/ElementCoverage" }, "description": "Untested first, then by label." },
+        "screenshots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ViewScreenshot" },
+          "x-internal": true,
+          "description": "Screenshots shown in the HTML report. Internal: the picks depend on timing and the shape may change without a schemaVersion change."
+        }
+      }
+    },
+    "ElementCoverage": {
+      "type": "object",
+      "description": "One interactive element. (view name, key) identifies it across runs while the identity rules don't change.",
+      "required": ["key", "label", "tag", "instances", "tested", "testIds", "failingTestIds", "interactionCounts"],
+      "properties": {
+        "key": { "type": "string", "description": "Identity: a structural selector, unique within the view." },
+        "label": { "type": "string", "description": "role \"name\"; '(+N variants)' when instances sharing the key had different labels." },
+        "tag": { "type": "string", "description": "Lowercase tag name; '?' for an element seen only in an interaction." },
+        "instances": { "type": "integer", "minimum": 1, "description": "Max number of instances seen at once." },
+        "tested": { "type": "boolean" },
+        "testIds": { "type": "array", "items": { "type": "string" }, "description": "Ids (see tests) of the tests whose interactions counted." },
+        "failingTestIds": { "type": "array", "items": { "type": "string" }, "description": "Ids of tests that interacted only in attempts that didn't pass." },
+        "interactionCounts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 },
+          "description": "Counted interactions by type, e.g. {\"click\": 3}. Empty when untested."
+        },
+        "role": { "type": "string" },
+        "name": { "type": "string", "description": "Recorded accessible name." },
+        "nameFrom": { "type": "string", "description": "aria-labelledby, aria-label, label, placeholder, title, alt, value, text or name." },
+        "attrs": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Identifying attributes." },
+        "suggestedLocator": { "type": "string", "description": "One line of Playwright code that interacts with the element. Heuristic: the text may change between versions." },
+        "a11yHints": { "type": "array", "items": { "$ref": "#/$defs/A11yHint" }, "description": "Absent when there are none." }
+      }
+    },
+    "A11yHint": {
+      "type": "object",
+      "required": ["rule", "message"],
+      "properties": {
+        "rule": { "type": "string", "description": "no-name, placeholder-only, duplicate-name, not-focusable or no-role; more may be added." },
+        "message": { "type": "string", "description": "Human-readable; wording may change between versions." }
+      }
+    },
+    "ViewScreenshot": {
+      "type": "object",
+      "x-internal": true,
+      "required": ["file", "dpr", "boxes"],
+      "properties": {
+        "file": { "type": "string", "description": "Image, relative to the folder of coverage.json." },
+        "dpr": { "type": "number", "description": "Device pixel ratio; boxes are CSS pixels." },
+        "testId": { "type": "string" },
+        "boxes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "x", "y", "w", "h"],
+            "properties": {
+              "key": { "type": "string" },
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "w": { "type": "number" },
+              "h": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "TestRef": {
+      "type": "object",
+      "required": ["id", "title", "passed", "retry"],
+      "properties": {
+        "id": { "type": "string", "description": "TestCase.id: stable across runs for the same file, title and project." },
+        "title": { "type": "string", "description": "Spec file and title path, e.g. 'users.spec.ts › add a user'." },
+        "project": { "type": "string" },
+        "passed": { "type": "boolean", "description": "Whether the attempt the report used passed (had the expected status)." },
+        "retry": { "type": "integer", "minimum": 0, "description": "TestResult.retry of that attempt: the last passing one, else the last one." },
+        "trace": { "type": "string", "description": "Trace file inside the Playwright HTML report's attachments folder, when linked." }
+      }
+    },
+    "ThresholdCheck": {
+      "type": "object",
+      "required": ["scope", "required", "actual", "status"],
+      "properties": {
+        "scope": { "enum": ["overall", "view"] },
+        "view": { "type": "string", "description": "View name (scope view); for a pattern that matched no view, the pattern." },
+        "pattern": { "type": "string", "description": "The threshold.views glob that set this requirement." },
+        "required": { "type": "number", "description": "Required coverage percent." },
+        "actual": { "type": ["number", "null"], "description": "Actual coverage percent; null when the view wasn't seen." },
+        "status": { "enum": ["passed", "failed", "missing"], "description": "missing only warns." }
+      }
+    },
+    "RepeatedElement": {
+      "type": "object",
+      "required": ["view", "key", "label", "testCount", "interactionCount", "testShare"],
+      "properties": {
+        "view": { "type": "string" },
+        "key": { "type": "string" },
+        "label": { "type": "string" },
+        "testCount": { "type": "integer", "minimum": 0, "description": "Distinct tests whose interactions counted." },
+        "interactionCount": { "type": "integer", "minimum": 0 },
+        "testShare": { "type": "number", "description": "testCount as a percent of all tests." }
+      }
+    }
+  }
+}

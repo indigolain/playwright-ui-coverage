@@ -8,7 +8,9 @@ import type { CoverageSummary } from './aggregate';
 export type ThresholdOption = number | { overall?: number; views?: Record<string, number> };
 
 export interface ThresholdResult {
-  /** `overall`, or the route name. */
+  /** Whether this is the overall requirement or one for a view. */
+  scope: 'overall' | 'view';
+  /** `overall`, or the route name (the pattern, for a pattern that matched no view). */
   target: string;
   /** The `views` key that set this requirement, when it was a pattern. */
   pattern?: string;
@@ -51,12 +53,12 @@ export function evaluateThresholds(summary: CoverageSummary, option: ThresholdOp
   if (option === undefined) return [];
   const { overall, views = {} } = typeof option === 'number' ? { overall: option } : option;
   const results: ThresholdResult[] = [];
-  const check = (target: string, required: number, actual: number, pattern?: string): ThresholdResult => {
+  const check = (target: string, required: number, actual: number, pattern?: string, scope: ThresholdResult['scope'] = 'view'): ThresholdResult => {
     const passed = actual >= required;
-    return { target, ...(pattern ? { pattern } : {}), required, actual, passed, status: passed ? 'passed' : 'failed' };
+    return { scope, target, ...(pattern ? { pattern } : {}), required, actual, passed, status: passed ? 'passed' : 'failed' };
   };
 
-  if (overall !== undefined) results.push(check('overall', overall, summary.percent));
+  if (overall !== undefined) results.push(check('overall', overall, summary.percent, undefined, 'overall'));
 
   const routes = new Map(summary.routes.map((r) => [r.route, r]));
   const entries = Object.entries(views);
@@ -71,7 +73,7 @@ export function evaluateThresholds(summary: CoverageSummary, option: ThresholdOp
     results.push(
       route
         ? check(key, required, route.percent)
-        : { target: key, required, actual: null, passed: true, status: 'missing' },
+        : { scope: 'view', target: key, required, actual: null, passed: true, status: 'missing' },
     );
   }
 
@@ -82,7 +84,7 @@ export function evaluateThresholds(summary: CoverageSummary, option: ThresholdOp
   }
   for (const p of patterns) {
     if (!summary.routes.some((r) => p.re.test(r.route))) {
-      results.push({ target: p.key, pattern: p.key, required: p.required, actual: null, passed: true, status: 'missing' });
+      results.push({ scope: 'view', target: p.key, pattern: p.key, required: p.required, actual: null, passed: true, status: 'missing' });
     }
   }
   return results;

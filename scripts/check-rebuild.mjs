@@ -49,22 +49,23 @@ const exact = (s) => JSON.stringify(s);
  * Playwright's HTML report is relative, so compare where it points instead.
  */
 const relocated = (s, dir) =>
-  JSON.stringify({ ...s, htmlReport: s.htmlReport && { ...s.htmlReport, path: path.resolve(dir, s.htmlReport.path) } });
+  JSON.stringify({
+    ...s,
+    playwrightReport: s.playwrightReport && { ...s.playwrightReport, path: path.resolve(dir, s.playwrightReport.path) },
+  });
 // Like check-sharding: identity and results, not labels or screenshot picks (timing-dependent).
 const comparable = (s) =>
   JSON.stringify({
-    total: s.total,
-    tested: s.tested,
-    routes: s.routes.map((r) => ({
-      route: r.route,
-      total: r.total,
-      tested: r.tested,
-      elements: r.elements
-        .map((e) => ({ key: e.key, tested: e.tested, instances: e.instances, testedBy: [...e.testedBy].sort() }))
+    summary: s.summary,
+    views: s.views.map((v) => ({
+      name: v.name,
+      summary: v.summary,
+      elements: v.elements
+        .map((e) => ({ key: e.key, tested: e.tested, instances: e.instances, testIds: [...e.testIds].sort() }))
         .sort((a, b) => a.key.localeCompare(b.key)),
     })),
   });
-const keys = (s) => s.routes.flatMap((r) => r.elements.map((e) => `${r.route} ${e.key}`));
+const keys = (s) => s.views.flatMap((v) => v.elements.map((e) => `${v.name} ${e.key}`));
 const writeConfig = (name, content) => {
   const file = path.join(tmp, name);
   fs.writeFileSync(file, content);
@@ -100,9 +101,10 @@ try {
     const left = keys(filtered).filter((k) => removed.includes(k));
     if (removed.length === 0) errors.push('filter check is vacuous: no nav links / delete buttons in the baseline');
     if (left.length) errors.push(`ignored elements still in the report: ${left.join(', ')}`);
-    if (filtered.total !== baseline.total - removed.length)
-      errors.push(`filtered total ${filtered.total}, expected ${baseline.total} - ${removed.length}`);
-    else console.log(`filter check: ${baseline.total} → ${filtered.total} elements`);
+    const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
+    if (total(filtered) !== total(baseline) - removed.length)
+      errors.push(`filtered total ${total(filtered)}, expected ${total(baseline)} - ${removed.length}`);
+    else console.log(`filter check: ${total(baseline)} → ${total(filtered)} elements`);
   }
 
   // 3. Thresholds (.cjs config): exit code 1 when not met.
@@ -130,7 +132,8 @@ try {
     console.error(`\nRebuild check FAILED:\n  ${errors.join('\n  ')}`);
     process.exitCode = 1;
   } else {
-    console.log(`\nRebuild check passed: ${baseline.percent}% (${baseline.tested}/${baseline.total}).`);
+    const { coverage, testedElementsCount: tested, untestedElementsCount: untested } = baseline.summary;
+    console.log(`\nRebuild check passed: ${coverage}% (${tested}/${tested + untested}).`);
   }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

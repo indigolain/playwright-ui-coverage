@@ -27,27 +27,28 @@ function run(args, env = {}) {
   if (r.status !== 0) throw new Error(`playwright ${args[0]} exited with ${r.status}`);
 }
 
+const brief = (r) => {
+  const { coverage, testedElementsCount: tested, untestedElementsCount: untested } = r.summary;
+  return `${coverage}% (${tested}/${tested + untested})`;
+};
 const readReport = () => JSON.parse(fs.readFileSync(path.join(report, 'coverage.json'), 'utf8'));
 
 // Everything except generatedAt and the screenshot picks (which depend on timing).
 const comparable = (summary) =>
   JSON.stringify({
-    total: summary.total,
-    tested: summary.tested,
-    percent: summary.percent,
-    routes: summary.routes.map((r) => ({
-      route: r.route,
-      total: r.total,
-      tested: r.tested,
+    summary: summary.summary,
+    views: summary.views.map((r) => ({
+      name: r.name,
+      summary: r.summary,
       // Compare identity and results, not display labels: labels may contain
       // per-run text (counters, timestamps) by design.
       elements: r.elements
-        .map((e) => ({ key: e.key, tested: e.tested, instances: e.instances, testedBy: [...e.testedBy].sort() }))
+        .map((e) => ({ key: e.key, tested: e.tested, instances: e.instances, testIds: [...e.testIds].sort() }))
         .sort((a, b) => a.key.localeCompare(b.key)),
     })),
   });
 
-const countShots = (summary) => summary.routes.reduce((n, r) => n + r.screenshots.length, 0);
+const countShots = (report) => report.views.reduce((n, v) => n + v.screenshots.length, 0);
 
 try {
   // 1. Unsharded baseline.
@@ -89,23 +90,22 @@ try {
   const errors = [];
   if (comparable(result) !== comparable(baseline)) {
     errors.push(
-      `coverage differs: merged ${result.percent}% (${result.tested}/${result.total}), ` +
-        `unsharded ${baseline.percent}% (${baseline.tested}/${baseline.total})`,
+      `coverage differs: merged ${brief(result)}, unsharded ${brief(baseline)}`,
     );
-    const a = JSON.parse(comparable(result)).routes;
-    const b = JSON.parse(comparable(baseline)).routes;
+    const a = JSON.parse(comparable(result)).views;
+    const b = JSON.parse(comparable(baseline)).views;
     for (const r of a) {
-      const other = b.find((x) => x.route === r.route);
+      const other = b.find((x) => x.name === r.name);
       const text = (els) => new Set((els ?? []).map((e) => JSON.stringify(e)));
       const [mine, theirs] = [text(r.elements), text(other?.elements)];
-      for (const e of mine) if (!theirs.has(e)) errors.push(`  merged only (${r.route}): ${e}`);
-      for (const e of theirs) if (!mine.has(e)) errors.push(`  unsharded only (${r.route}): ${e}`);
+      for (const e of mine) if (!theirs.has(e)) errors.push(`  merged only (${r.name}): ${e}`);
+      for (const e of theirs) if (!mine.has(e)) errors.push(`  unsharded only (${r.name}): ${e}`);
     }
   }
-  for (const r of result.routes) {
-    for (const s of r.screenshots) {
-      const file = path.join(report, s.source);
-      if (!fs.existsSync(file) || fs.statSync(file).size === 0) errors.push(`missing screenshot ${s.source} (${r.route})`);
+  for (const v of result.views) {
+    for (const s of v.screenshots) {
+      const file = path.join(report, s.file);
+      if (!fs.existsSync(file) || fs.statSync(file).size === 0) errors.push(`missing screenshot ${s.file} (${v.name})`);
     }
   }
   // The merged report also keeps the raw data, for `playwright-ui-coverage report`.
@@ -129,7 +129,7 @@ try {
     console.error(`\nSharding check FAILED:\n  ${errors.join('\n  ')}`);
     process.exitCode = 1;
   } else {
-    console.log(`\nSharding check passed: ${result.percent}% (${result.tested}/${result.total}), ${got} screenshots.`);
+    console.log(`\nSharding check passed: ${brief(result)}, ${got} screenshots.`);
   }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
