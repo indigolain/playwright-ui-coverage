@@ -1,0 +1,46 @@
+/* Home hero: the report screenshot (theme/HeroShot.vue) instead of a square logo. */
+.VPHome .VPHero .image-container {
+  width: 100%;
+  height: auto;
+  transform: none;
+}
+.VPHome .VPHero .image-bg {
+  display: none;
+}
+.hero-shot img {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  box-shadow: var(--vp-shadow-3);
+}
+.hero-shot-dark,
+.dark .hero-shot-light {
+  display: none !important;
+}
+.dark .hero-shot-dark {
+  display: block !important;
+}
+/* Below 960px the hero stacks: show the screenshot after the text and buttons. */
+@media (max-width: 959px) {
+  .VPHome .VPHero .image {
+    order: 3;
+    margin: 40px 0 0;
+  }
+}
+@media (min-width: 960px) {
+  .VPHome .VPHero.has-image .main {
+    max-width: 440px;
+    flex-shrink: 0;
+  }
+  .VPHome .VPHero .image {
+    margin-left: 48px;
+    align-self: center;
+  }
+}
+
+/* Report screenshots in pages: a frame, so white screenshots stand out in light mode. */
+.vp-doc img[src*='report-'] {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+}

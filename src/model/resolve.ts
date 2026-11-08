@@ -337,7 +337,7 @@ export class Resolver {
   }
 
   /**
-   * Grouping facts for `grouping.ts` (README "Element grouping"). Explicit
+   * Grouping facts for `grouping.ts` (docs "Element grouping"). Explicit
    * groups come first: the closest `data-uicov-group` (self or ancestor, also
    * across frames and shadow roots; an empty value turns grouping off), then
    * the first `elementGroups` entry matching the element or an ancestor.

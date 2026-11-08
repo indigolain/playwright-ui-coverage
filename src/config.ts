@@ -2,7 +2,7 @@
  * The UI coverage config: one typed, schema-validated object shared by the
  * recorder (fixture and register mode), the reporter and the `report` CLI.
  *
- * Sources, lowest precedence first (see README "Configuration"):
+ * Sources, lowest precedence first (see docs "Configuration"):
  *   report-time keys: config file → reporter options (inline) → selected profile
  *   recording keys:   config file `recording` → profile `recording` → `use.uiCoverage`
  *

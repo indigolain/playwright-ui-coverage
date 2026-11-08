@@ -1,0 +1,14 @@
+{
+  "name": "playwright-ui-coverage-docs",
+  "private": true,
+  "description": "Documentation site for playwright-ui-coverage (VitePress). Kept apart from the library's dependencies so the main install stays small.",
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build && node .vitepress/check-anchors.mjs",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}

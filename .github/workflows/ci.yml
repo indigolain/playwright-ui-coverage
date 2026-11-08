@@ -20,10 +20,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            docs/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+      # The documentation site (docs/, own dependencies): fails on dead links and missing #anchors.
+      - name: docs:build
+        run: npm run docs:build
 
   demo:
     # Each job runs the demo in both recording modes (fixture and register)

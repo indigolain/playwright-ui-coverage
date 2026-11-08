@@ -123,7 +123,7 @@ export function tracker(args: TrackerArgs): void {
   };
 
   // ---- Interactivity rules ---------------------------------------------
-  // Which elements count (README "Which elements count"). Kept apart from
+  // Which elements count (docs "Which elements count"). Kept apart from
   // identity and event recording so the rules can be moved on their own.
 
   /** An invalid selector would throw in matches()/closest(); drop it with a warning. */

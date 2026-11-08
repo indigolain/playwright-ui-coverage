@@ -215,7 +215,7 @@ try {
     console.log(`views and element rules check: ${baseline.views.length} → ${changed.views.length} views, ${total(baseline)} → ${total(changed)} elements`);
   }
 
-  // 2c. Grouping rules (README "Element grouping"): an elementGroups entry merges
+  // 2c. Grouping rules (docs "Element grouping"): an elementGroups entry merges
   //     the controls of every product card on /shop into one element;
   //     autoGroup: false undoes the automatic groups there (repeated cards, the label).
   const shop = (s) => s.views.find((v) => v.name === '/shop');

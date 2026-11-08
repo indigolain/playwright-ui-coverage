@@ -85,7 +85,7 @@ export interface UiCoverageRules {
    * rules, the first matching one decides. The selector matches the element
    * itself (`footer *`, not `footer`). `include: true` protects elements from
    * later excludes, including `ignoreSelectors`. Evaluated on the recorded DOM
-   * structure, see README "Report-time selectors".
+   * structure, see docs "Report-time selectors".
    */
   elementFilters?: ElementFilter[];
   /**
@@ -118,17 +118,17 @@ export interface UiCoverageRules {
    * Named groups: elements matching `selector` (or inside an element that
    * does) count as one element, even with a single match. The first entry
    * that matches wins; `data-uicov-group` in the markup wins over every
-   * entry. See README "Element grouping".
+   * entry. See docs "Element grouping".
    */
   elementGroups?: ElementGroupRule[];
   /**
-   * Automatic grouping heuristics (README "Element grouping"). `false` turns
+   * Automatic grouping heuristics (docs "Element grouping"). `false` turns
    * them all off; an object turns single heuristics off. Default: all on.
    * Explicit groups (`data-uicov-group`, `elementGroups`) always apply.
    */
   autoGroup?: boolean | AutoGroupOptions;
   /**
-   * How `<a href>` elements count (README "Links and untested views"). By
+   * How `<a href>` elements count (docs "Links and untested views"). By
    * default a link to another view is a *link unit*, tested when any counted
    * test visited its destination view, instead of an interactive element.
    * Same-view links (`#x`, `#`, a link to the page itself), `javascript:` and
@@ -209,7 +209,7 @@ const scopedSelectorSchema = s.rule(
 );
 
 /**
- * A selector evaluated at report time (README "Report-time selectors"): a
+ * A selector evaluated at report time (docs "Report-time selectors"): a
  * string (it may contain a `>>` host chain) or `{ selector, documentScope? }`.
  */
 export const reportSelector = (): Schema => {

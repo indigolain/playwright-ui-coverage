@@ -9,3 +9,5 @@ perf-report/
 .ui-coverage-ci/
 demo/ui-coverage-baseline.json
 *.next.json
+docs/.vitepress/dist/
+docs/.vitepress/cache/

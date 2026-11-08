@@ -147,7 +147,7 @@ try {
       const n = await new Function('page', `return ${expr}`)(page).count();
       const ok = expr.endsWith('.first()') ? n >= 1 : n === 1;
       // The demo's "Export CSV · as of <time>" button has per-run text that a single
-      // run sees only once: a known limit of name-based locators (see README).
+      // run sees only once: a known limit of name-based locators (see the docs).
       const known = /as of \d/.test(e.name || '');
       if (!ok && !known) {
         bad++;

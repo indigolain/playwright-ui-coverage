@@ -47,7 +47,7 @@ export type NormalizeUrl = (url: string) => string;
  * (`/docs/:section/*` with `groupBy: ['section']` → `/docs/guides/*`, `/docs/api/*`).
  */
 export interface ViewPattern {
-  /** URL pattern, see the module docs / README "Views". */
+  /** URL pattern, see the module docs / docs "Views". */
   pattern: string;
   /** Named parameters of `pattern` whose values split it into separate views. */
   groupBy?: string[];

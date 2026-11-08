@@ -1,9 +1,9 @@
 # `coverage.json` reference (schema version 1)
 
-The reporter and the `playwright-ui-coverage report` CLI write `coverage.json` next to `index.html` in the report folder (`ui-coverage-report/` by default). It's the integration point for CI gates, dashboards, baselines and PR comments.
+This page is the field-by-field reference for `coverage.json`, the machine-readable result of a run. The reporter and the `playwright-ui-coverage report` CLI write `coverage.json` next to `index.html` in the report folder (`ui-coverage-report/` by default). It's the integration point for CI gates, dashboards, baselines and PR comments.
 
-- **TypeScript types:** `import type { CoverageReport } from 'playwright-ui-coverage'` (source: [src/coverage-report.ts](../src/coverage-report.ts)).
-- **JSON Schema** (draft 2020-12): [schema/coverage.schema.json](../schema/coverage.schema.json), shipped in the package and importable as `playwright-ui-coverage/coverage.schema.json`.
+- **TypeScript types:** `import type { CoverageReport } from 'playwright-ui-coverage'` (source: [src/coverage-report.ts](https://github.com/indigolain/playwright-ui-coverage/blob/main/src/coverage-report.ts)).
+- **JSON Schema** (draft 2020-12): [schema/coverage.schema.json](https://github.com/indigolain/playwright-ui-coverage/blob/main/schema/coverage.schema.json), shipped in the package and importable as `playwright-ui-coverage/coverage.schema.json`.
 - The raw data folder (`data/ui-coverage-data.json`, `formatVersion`) is a different file: input for rebuilding the report, not part of this contract.
 
 ## Compatibility
@@ -29,7 +29,7 @@ coverage = (testedElementsCount + testedLinksCount)
 
 rounded to one decimal; `100` when there are no units.
 
-- An **element** is an interactive element of a view (see "Which elements count" in the README), identified by its `key` within the view. Elements sharing a key (a "Delete" button on every row) are one unit, whatever `instances` says, and so is a group (see "Element grouping" in the README): the "Add to cart" button of every product card, a `data-uicov-group`. A group is tested when any member is.
+- An **element** is an interactive element of a view (see [Which elements count](./guide/which-elements-count.md)), identified by its `key` within the view. Elements sharing a key (a "Delete" button on every row) are one unit, whatever `instances` says, and so is a group (see [Element grouping](./guide/element-grouping.md)): the "Add to cart" button of every product card, a `data-uicov-group`. A group is tested when any member is.
 - An element is **tested** when a counted test interacted with it in that view. By default only each test's last passing attempt counts (`countFailedTests: true` counts every attempt). Elements touched only by attempts that didn't pass are untested and also counted in `failingOnlyElementsCount`.
 - A **link unit** is the set of `<a href>` elements of a view that lead to one other view (destination URLs mapped to views by the same function as page URLs, `normalizeUrl`), identified by the destination view's name (`key`). It is **tested** when a counted test visited the destination view, by any path. An `<a>` in a link unit is not also counted as an element.
 - Links that stay **elements** (tested when clicked): links within the same view (`#fragment`, `#`, the page itself or another page of the same view), `javascript:` and empty hrefs, links inside iframes, all links in component tests (`viewBy: 'file'`), and links to other origins (unless `links: { external: 'ignore' }`, which drops them). `links: false` makes every link an element, as in reports written before link units.
@@ -51,7 +51,7 @@ rounded to one decimal; `100` when there are no units.
 | `thresholds` | [`ThresholdCheck`](#thresholds-thresholdcheck)`[]` | Results of the `threshold` option; empty when it isn't set. |
 | `insights` | `{ mostRepeated }` | See [Insights](#insights). |
 | `playwrightReport` | `{ path, attachmentsBaseURL }`, optional | Playwright's HTML report, when linked: `path` is its folder relative to the folder of `coverage.json` (`/` separators), `attachmentsBaseURL` where `tests[].trace` files are, relative to `path`. |
-| `config` | object, optional | The UI coverage config that built the report: `source` (`file`: the config file relative to the working directory, or `null`; `inline`: keys set in the reporter options), `profile` (name or `null`) and `resolved` (the merged config; informational, its keys follow the [config file](../README.md#configuration), not this schema's versioning). |
+| `config` | object, optional | The UI coverage config that built the report: `source` (`file`: the config file relative to the working directory, or `null`; `inline`: keys set in the reporter options), `profile` (name or `null`) and `resolved` (the merged config; informational, its keys follow the [config file](./reference/configuration.md), not this schema's versioning). |
 | `baseline` | [`BaselineCheck`](#baseline-baselinecheck), optional | Result of the `baseline` option; absent when it isn't set. |
 
 ## `summary`: `ReportSummary` / `CoverageCounts`
@@ -176,6 +176,24 @@ The baseline file itself (`ui-coverage-baseline.json`) is `{ "baselineVersion": 
 ## Insights
 
 `insights.mostRepeated`: up to 10 elements used by at least 2 tests, most first. Each is `{ view, key, label, testCount, interactionCount, testShare }`, where `testShare` is `testCount` as a percent of `tests.length`. These are often setup steps repeated in every test.
+
+## Using it in a script
+
+A custom gate, e.g. failing when any view under `/admin` is below 60%:
+
+```js
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync('ui-coverage-report/coverage.json', 'utf8'));
+if (report.schemaVersion !== 1) throw new Error(`unsupported coverage.json schemaVersion ${report.schemaVersion}`);
+const low = report.views.filter((v) => v.name.startsWith('/admin') && v.summary.coverage < 60);
+if (low.length) {
+  console.error(low.map((v) => `${v.name}: ${v.summary.coverage}%`).join('\n'));
+  process.exit(1);
+}
+```
+
+For the common cases there are built-in gates: [thresholds](./ci/thresholds.md) and the [baseline](./ci/baseline.md).
 
 ## Example
 

@@ -1,5 +1,5 @@
 /**
- * Element grouping, per view (README "Element grouping"). Runs on resolved
+ * Element grouping, per view (docs "Element grouping"). Runs on resolved
  * data before `aggregate` counts elements: it rewrites the keys of group
  * members to the group's key, so a group is one element (counted once,
  * tested when any member is). Pure.

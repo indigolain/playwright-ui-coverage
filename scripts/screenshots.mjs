@@ -1,4 +1,4 @@
-// Regenerates the README screenshots in docs/ from ui-coverage-report/.
+// Regenerates the documentation screenshots in docs/images/ from ui-coverage-report/.
 // Run `npm run demo` first, then `npm run docs:screenshots`.
 import { chromium } from '@playwright/test';
 import path from 'node:path';
@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const report = pathToFileURL(path.join(root, 'ui-coverage-report', 'index.html')).href;
-const out = path.join(root, 'docs');
+const out = path.join(root, 'docs', 'images');
 fs.mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch();
@@ -26,6 +26,8 @@ await page.screenshot({ path: path.join(out, 'report-overview.png') });
 
 // 2. Hovering a table row highlights the element on the screenshot.
 await page.locator('tr[data-key="[data-action=\\"delete-user\\"]"]').hover();
+// A full-page capture would paint the sticky header at the scroll position, mid-image.
+await page.locator('header').evaluate((h) => (h.style.position = 'static'));
 await page.screenshot({ path: path.join(out, 'report-hover.png'), fullPage: true });
 
 // 3. "Untested only" on the settings page.
@@ -53,4 +55,4 @@ await open('/');
 await page.screenshot({ path: path.join(out, 'report-dark.png') });
 
 await browser.close();
-console.log('Wrote screenshots to docs/');
+console.log('Wrote screenshots to docs/images/');
