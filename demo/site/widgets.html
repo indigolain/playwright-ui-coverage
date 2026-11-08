@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme — Widgets</title><link rel="stylesheet" href="/style.css">
+<style>
+  .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; margin: 8px 0; cursor: pointer; }
+  .fake-button { display: inline-block; padding: 6px 14px; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+  .list { height: 90px; overflow: auto; border: 1px solid #d1d5db; border-radius: 6px; padding: 0 12px; }
+  .zone { min-height: 48px; border: 2px dashed #9ca3af; border-radius: 8px; padding: 8px; margin-top: 8px; }
+  .chip { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #e5e7eb; cursor: grab; }
+  .muted { color: #6b7280; }
+</style>
+</head>
+<body>
+<nav><a href="/">Home</a><a href="/users">Users</a><a href="/settings">Settings</a></nav>
+<main>
+  <h1>Widgets</h1>
+  <p class="muted">Elements that exercise the interactivity rules (see README "Which elements count").</p>
+
+  <h2>ARIA role and tabindex</h2>
+  <!-- Counted: ARIA widget role. -->
+  <div role="button" tabindex="0" class="fake-button" data-testid="fake-button"
+       onclick="this.textContent = 'Clicked'" onkeydown="if (event.key === 'Enter') this.click()">Role button</div>
+  <!-- Counted: tabindex >= 0 makes a plain element interactive. -->
+  <div class="card" tabindex="0" data-testid="plain-card" onclick="this.querySelector('span').textContent = 'opened'">
+    Focusable card <span class="muted">(closed)</span>
+  </div>
+  <!-- Not counted: tabindex=-1 is not in the tab order. -->
+  <div class="card" tabindex="-1">Programmatically focusable only</div>
+
+  <h2>Nested widgets</h2>
+  <!-- Counted once, as the checkbox: the outer role=button contains exactly one widget. -->
+  <div role="button" tabindex="0" class="card" data-testid="star-card">
+    <input type="checkbox" aria-label="Star" data-testid="star"> Star this item
+  </div>
+  <!-- The card is not counted; its two buttons are. -->
+  <div class="card" tabindex="0" data-testid="article-card">
+    Article card
+    <button data-testid="article-like">Like</button>
+    <button data-testid="article-share">Share</button>
+  </div>
+
+  <h2>Links</h2>
+  <!-- Not counted: hand off to another app. -->
+  <p><a href="mailto:hello@example.com">Email us</a> · <a href="tel:+15550100">Call us</a> · <a href="/">Back home</a></p>
+
+  <h2>Markup overrides</h2>
+  <!-- Counted: forced with include (plain div with a click handler). -->
+  <div class="card" data-uicov-interactive="include" data-testid="custom-tile" onclick="this.textContent = 'Tile picked'">Custom tile</div>
+  <!-- Not counted: exclude applies to this button only. -->
+  <button data-uicov-interactive="exclude">Debug</button>
+  <!-- exclude-all hides the subtree; reset re-enables the normal rules inside it. -->
+  <div data-uicov-interactive="exclude-all">
+    <button>Hidden admin action</button>
+    <div data-uicov-interactive="reset"><button data-testid="restored">Restored action</button></div>
+  </div>
+
+  <h2>More interaction types</h2>
+  <!-- Only double-clicks count for it (allowedInteractions in playwright.config.ts). -->
+  <p><span tabindex="0" data-testid="rename" ondblclick="this.textContent = 'Renamed'">Double-click to rename</span></p>
+  <!-- A scroll container: counted when `scroll` is recorded. -->
+  <div class="list" data-testid="log">
+    <p>Line 1</p><p>Line 2</p><p>Line 3</p><p>Line 4</p><p>Line 5</p><p>Line 6</p><p>Line 7</p><p>Line 8</p>
+  </div>
+  <p><span class="chip" draggable="true" data-testid="chip" ondragstart="event.dataTransfer.setData('text/plain', 'chip')">Drag me</span></p>
+  <div class="zone" data-uicov-interactive="include" data-testid="drop-zone"
+       ondragover="event.preventDefault()" ondrop="event.preventDefault(); this.textContent = 'Dropped!'">Drop here</div>
+  <details><summary>Details</summary><p>Hidden content.</p></details>
+</main>
+</body>
+</html>

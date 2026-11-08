@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { BrowserContext, Page, TestInfo } from '@playwright/test';
 import { tracker } from './tracker';
 import { identityArgs } from './identity';
+import { interactionArgs } from './interactions';
 import type { UiCoverageOptions } from './options';
 import { ATTACHMENT_NAME, SCREENSHOT_ATTACHMENT_PREFIX, type Interaction, type Inventory, type Snapshot } from './types';
 
@@ -75,6 +76,7 @@ export class ContextRecorder {
       await this.context.addInitScript(tracker, {
         ignoreSelectors: this.options.ignoreSelectors,
         ...identityArgs(this.options),
+        ...interactionArgs(this.options),
       });
     });
     this.context.on('page', (page) => this.watch(page));

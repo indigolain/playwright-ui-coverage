@@ -38,4 +38,10 @@ export {
   BUILTIN_IDENTITY_ATTRIBUTES,
   type AttributeFilter,
 } from './identity';
+export {
+  DEFAULT_INTERACTIONS,
+  INTERACTION_TYPES,
+  type AllowedInteraction,
+  type InteractionType,
+} from './interactions';
 export type { TestCoverageData, Interaction, Snapshot, InventoryElement } from './types';

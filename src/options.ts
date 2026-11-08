@@ -1,9 +1,10 @@
 import type { AttributeFilter } from './identity';
+import { DEFAULT_INTERACTIONS, type AllowedInteraction, type InteractionType } from './interactions';
 
 export interface UiCoverageOptions {
   /** Turn recording off (e.g. `enabled: !!process.env.UI_COVERAGE`). Default: true. */
   enabled: boolean;
-  /** Extra selectors to exclude (elements inside `[data-uicov-ignore]` are always excluded). */
+  /** Extra selectors whose subtrees are excluded, like `data-uicov-interactive="exclude-all"`. Default: []. */
   ignoreSelectors: string[];
   /** ms to wait after an interaction before snapshotting. Default: 250. */
   snapshotDelay: number;
@@ -35,6 +36,16 @@ export interface UiCoverageOptions {
    * `0` disables the cap. Default: 8000.
    */
   maxScreenshotHeight: number;
+  /**
+   * DOM events that count as interactions. Default: every supported type
+   * except `focus` and `blur` (see `INTERACTION_TYPES`).
+   */
+  interactions: InteractionType[];
+  /**
+   * Per-element restrictions: for elements matching `selector`, only `events`
+   * count (the first matching rule wins). Default: [].
+   */
+  allowedInteractions: AllowedInteraction[];
 }
 
 export const defaultUiCoverageOptions: UiCoverageOptions = {
@@ -47,6 +58,8 @@ export const defaultUiCoverageOptions: UiCoverageOptions = {
   format: 'png',
   quality: 80,
   maxScreenshotHeight: 8000,
+  interactions: DEFAULT_INTERACTIONS,
+  allowedInteractions: [],
 };
 
 export function resolveOptions(partial?: Partial<UiCoverageOptions>): UiCoverageOptions {

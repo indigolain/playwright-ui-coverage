@@ -13,6 +13,11 @@ export interface ElementCoverage {
    * don't count). Non-empty with `tested: false` means "touched by failing tests only".
    */
   testedByFailing: string[];
+  /**
+   * Interactions that counted as tested, by event type (e.g. `{ click: 3, input: 1 }`).
+   * Empty for untested elements.
+   */
+  interactionCounts: Record<string, number>;
 }
 
 export interface ScreenshotBox {
@@ -126,6 +131,7 @@ export function aggregate(
             tested: false,
             testedBy: [],
             testedByFailing: [],
+            interactionCounts: {},
             testedBySet: new Set(),
             failingSet: new Set(),
             labels: new Set([el.label]),
@@ -144,7 +150,7 @@ export function aggregate(
         // Interacted with but never captured in an inventory (transient element).
         el = {
           key: i.key, label: i.label, tag: '?', instances: 1, tested: false,
-          testedBy: [], testedByFailing: [], testedBySet: new Set(), failingSet: new Set(), labels: new Set([i.label]),
+          testedBy: [], testedByFailing: [], interactionCounts: {}, testedBySet: new Set(), failingSet: new Set(), labels: new Set([i.label]),
         };
         acc.elements.set(i.key, el);
       }
@@ -153,6 +159,7 @@ export function aggregate(
       } else {
         el.tested = true;
         el.testedBySet.add(title);
+        el.interactionCounts[i.event] = (el.interactionCounts[i.event] ?? 0) + 1;
       }
     }
   }
@@ -168,6 +175,10 @@ export function aggregate(
         label: sorted.length > 1 ? `${sorted[0]} (+${sorted.length - 1} variants)` : sorted[0],
         testedBy: [...testedBySet].sort(),
         testedByFailing: [...failingSet].filter((t) => !testedBySet.has(t)).sort(),
+        // Sorted by type so the JSON doesn't depend on test order.
+        interactionCounts: Object.fromEntries(
+          Object.entries(e.interactionCounts).sort(([a], [b]) => a.localeCompare(b)),
+        ),
       };
     });
     if (elements.length === 0) continue;

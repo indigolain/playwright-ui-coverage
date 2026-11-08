@@ -41,6 +41,8 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
       significantAttributes: ['data-action'],
       // UICOV_FORMAT=jpeg records JPEG screenshots instead of PNG.
       ...(process.env.UICOV_FORMAT === 'jpeg' ? { format: 'jpeg' as const } : {}),
+      // On /widgets, "Double-click to rename" only counts when double-clicked.
+      allowedInteractions: [{ selector: '[data-testid="rename"]', events: ['dblclick'] }],
     },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
