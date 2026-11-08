@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme — Users</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<nav><a href="/">Home</a><a href="/users">Users</a><a href="/settings">Settings</a></nav>
+<main>
+  <h1>Users</h1>
+  <div class="row">
+    <input type="search" aria-label="Search users" placeholder="Search…" oninput="filter(this.value)">
+    <button class="primary" onclick="document.getElementById('add').showModal()">Add user</button>
+    <button onclick="alert('exported')">Export CSV</button>
+  </div>
+  <table>
+    <thead><tr><th>Name</th><th></th></tr></thead>
+    <tbody id="rows">
+      <tr><td><a href="/users/1">Ada Lovelace</a></td><td><button onclick="this.closest('tr').remove()">Delete</button></td></tr>
+      <tr><td><a href="/users/2">Grace Hopper</a></td><td><button onclick="this.closest('tr').remove()">Delete</button></td></tr>
+      <tr><td><a href="/users/3">Alan Turing</a></td><td><button onclick="this.closest('tr').remove()">Delete</button></td></tr>
+    </tbody>
+  </table>
+</main>
+
+<dialog id="add">
+  <h2>Add user</h2>
+  <form method="dialog">
+    <label for="new-name">Name</label>
+    <input id="new-name">
+    <label for="new-role">Role</label>
+    <select id="new-role"><option>Member</option><option>Admin</option></select>
+    <div class="row" style="margin-top:16px">
+      <button value="save" class="primary">Save</button>
+      <button value="cancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+<script>
+  function filter(q) {
+    for (const tr of document.querySelectorAll('#rows tr'))
+      tr.hidden = !tr.textContent.toLowerCase().includes(q.toLowerCase());
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme — User</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<nav><a href="/">Home</a><a href="/users">Users</a><a href="/settings">Settings</a></nav>
+<main>
+  <h1 id="title">User</h1>
+  <p>Profile details would go here.</p>
+  <div class="row">
+    <a href="/users">← Back to users</a>
+    <button onclick="document.getElementById('title').contentEditable = true">Edit</button>
+    <button onclick="confirm('Really?')">Deactivate</button>
+  </div>
+</main>
+<script>document.getElementById('title').textContent = 'User #' + location.pathname.split('/').pop();</script>
+</body>
+</html>

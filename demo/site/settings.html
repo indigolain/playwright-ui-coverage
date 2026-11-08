@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme — Settings</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<nav><a href="/">Home</a><a href="/users">Users</a><a href="/settings">Settings</a></nav>
+<main>
+  <h1>Settings</h1>
+  <form onsubmit="event.preventDefault(); document.getElementById('saved').hidden = false">
+    <label><input type="checkbox" id="notify"> Email notifications</label>
+    <label for="theme">Theme</label>
+    <select id="theme"><option>System</option><option>Light</option><option>Dark</option></select>
+    <label for="bio">Bio</label>
+    <textarea id="bio" rows="3" cols="40"></textarea>
+    <div class="row" style="margin-top:16px">
+      <button type="submit" class="primary">Save settings</button>
+      <button type="reset">Reset</button>
+    </div>
+  </form>
+  <p id="saved" hidden>Saved.</p>
+  <h2>Danger zone</h2>
+  <button data-testid="delete-account" onclick="confirm('Delete?')">Delete account</button>
+</main>
+</body>
+</html>

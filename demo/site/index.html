@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme — Home</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<nav><a href="/">Home</a><a href="/users">Users</a><a href="/settings">Settings</a></nav>
+<main>
+  <h1>Welcome to Acme</h1>
+  <p>The demo app for playwright-ui-coverage.</p>
+  <div class="row">
+    <button class="primary" data-testid="get-started" onclick="location.href='/users'">Get started</button>
+    <button onclick="document.getElementById('more').hidden = false">Learn more</button>
+  </div>
+  <p id="more" hidden>More info, with a <a href="https://playwright.dev">link to Playwright</a>.</p>
+
+  <h2>Newsletter</h2>
+  <form class="row" onsubmit="event.preventDefault(); document.getElementById('thanks').hidden = false">
+    <input type="email" aria-label="Email" placeholder="you@example.com" required>
+    <button type="submit">Subscribe</button>
+  </form>
+  <p id="thanks" hidden>Thanks for subscribing!</p>
+</main>
+<footer data-uicov-ignore>© Acme · <a href="#">Privacy</a> · <a href="#">Terms</a></footer>
+</body>
+</html>

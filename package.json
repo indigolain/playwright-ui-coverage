@@ -1,0 +1,43 @@
+{
+  "name": "playwright-ui-coverage",
+  "version": "0.1.0",
+  "description": "See which buttons, links and inputs your Playwright E2E tests actually touch — screenshots with tested/untested overlays.",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./reporter": {
+      "types": "./dist/reporter.d.ts",
+      "default": "./dist/reporter.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "demo": "playwright test",
+    "demo:serve": "node demo/server.mjs"
+  },
+  "keywords": [
+    "playwright",
+    "e2e",
+    "coverage",
+    "ui-coverage",
+    "testing",
+    "reporter"
+  ],
+  "peerDependencies": {
+    "@playwright/test": ">=1.40.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,13 @@
+body { font: 15px/1.5 system-ui, sans-serif; margin: 0; color: #1f2937; background: #fff; }
+nav { display: flex; gap: 16px; padding: 12px 24px; background: #111827; }
+nav a { color: #e5e7eb; text-decoration: none; }
+main { max-width: 720px; margin: 0 auto; padding: 24px; }
+button { padding: 6px 14px; border-radius: 6px; border: 1px solid #d1d5db; background: #f9fafb; cursor: pointer; }
+button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+input, select, textarea { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font: inherit; }
+label { display: block; margin: 12px 0 4px; font-weight: 600; }
+table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+td, th { padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+dialog { border: 1px solid #d1d5db; border-radius: 10px; padding: 20px; min-width: 320px; }
+footer { margin-top: 48px; padding: 16px 24px; color: #6b7280; font-size: 13px; border-top: 1px solid #e5e7eb; }
+.row { display: flex; gap: 8px; align-items: center; }
