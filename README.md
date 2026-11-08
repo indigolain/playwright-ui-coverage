@@ -81,9 +81,37 @@ UI coverage: 38.9% (14/36 elements)
 
 ## How it works
 
-1. **Tracker** (`addInitScript`): a capture-phase listener records every `click` / `input` / `change` / `submit` on an interactive element, whichever Playwright API (or a real user) caused it.
+1. **Tracker** (`addInitScript`): capture-phase listeners record every interaction (`click`, `input`, `change`, `submit`, `dblclick`, `contextmenu`, keyboard activation, drag and drop, opt-in `scroll`/`focus`/`blur`, see [Interaction types](#interaction-types)) on an [interactive element](#which-elements-count), whichever Playwright API (or a real user) caused it.
 2. **Inventory + screenshot**: when a page loads and shortly after interactions, the recorder lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear.
 3. **Reporter**: merges data from all workers, groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it, and renders the HTML report and `coverage.json`.
+
+### Which elements count
+
+An element counts if it is visible in at least one inventory and one of these applies:
+
+- **Interactive HTML** ([WHATWG interactive content](https://html.spec.whatwg.org/multipage/dom.html#interactive-content)): `a[href]`, `button`, `input` (not `type=hidden`), `select`, `textarea`, `<summary>` of a `<details>`, `audio`/`video` with `controls`, and contenteditable editing hosts.
+- **ARIA widget roles**: `button`, `checkbox`, `combobox`, `link`, `listbox`, `menuitem`, `menuitemcheckbox`, `menuitemradio`, `option`, `radio`, `scrollbar`, `searchbox`, `slider`, `spinbutton`, `switch`, `tab`, `textbox`, `treeitem`. Composite containers (`menu`, `tablist`, `tree`, `grid`, …) don't count themselves; their items do.
+- **`tabindex` ≥ 0** (e.g. a clickable `<div class="card" tabindex="0">`). `tabindex="-1"` alone doesn't count.
+- **`draggable="true"`**.
+- **Scroll containers** (`overflow: auto|scroll` with content that overflows), when `scroll` interactions are recorded. They only receive `scroll` credit; a click on text inside a scrollable panel doesn't mark the panel tested.
+
+Never counted:
+
+- `<a href="tel:…">`, `mailto:` and `sms:` links: they hand off to another app.
+- `<label>`: clicking a label activates its control, and the control is what gets credited (once, the browser forwards the click). Other events on a label (`dblclick`, `contextmenu`, …) are credited to the control too.
+- `<iframe>`, `<embed>`, `<object>`: their content is a separate document, and clicks inside it never reach the parent page.
+- `<option>` inside a `<select>` (the `select` counts), and elements inside a contenteditable editor (the editor counts).
+
+**Nested widgets count once, as the inner ones.** A widget that contains other widgets (a `tabindex=0` card with a "Like" and a "Share" button, a `role=combobox` wrapper around an `<input>`) is not counted itself. The inner elements are the actual controls, the ones `getByRole` finds, and counting only the outer one would merge distinct controls into one element. A click on the outer element's own area credits its inner widget if it has exactly one (it's the same control), and nothing if it has several. Widgets inside a grouping role (`group`, `menu`, `listbox`, `tree`, …) are separate widgets: a tree item with a nested group of child items still counts.
+
+**Markup overrides.** `data-uicov-interactive` on an element or an ancestor changes the rules. The closest element with a directive that applies wins:
+
+| Value | Effect |
+|---|---|
+| `include` | This element counts, even if no rule says so (e.g. a `<div>` drop zone with a click handler). Also exempt from the nesting rule. |
+| `exclude` | This element doesn't count (its descendants still can). |
+| `exclude-all` | Nothing in this subtree counts. `data-uicov-ignore` and `ignoreSelectors` are aliases. |
+| `reset` | Stop inheriting: inside an `exclude-all` subtree, the normal rules apply again. |
 
 ### Element identity
 
@@ -108,7 +136,7 @@ Positional keys read like CSS selectors and only use an index when there are sev
 
 ```ts
 import { defineConfig } from '@playwright/test';
-import type { UiCoverageOptions } from 'playwright-ui-coverage';
+import { DEFAULT_INTERACTIONS, type UiCoverageOptions } from 'playwright-ui-coverage';
 
 export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
   use: {
@@ -125,12 +153,16 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
       format: 'jpeg',                      // 'png' | 'jpeg', default: 'png'
       quality: 80,                         // JPEG quality 0-100, default: 80
       maxScreenshotHeight: 8000,           // CSS px, 0 = no cap, default: 8000
+      interactions: [...DEFAULT_INTERACTIONS, 'focus'], // default: DEFAULT_INTERACTIONS
+      allowedInteractions: [               // default: []
+        { selector: '.date-picker input', events: ['change'] }, // focusing or clicking it doesn't count
+      ],
     },
   },
 });
 ```
 
-Anything inside an element with `data-uicov-ignore` is always excluded.
+Anything inside an element with `data-uicov-ignore` (or `data-uicov-interactive="exclude-all"`) is excluded, see [Which elements count](#which-elements-count).
 
 - **`significantAttributes`**: attributes that identify an element, checked after `data-uicov-id` and before the built-in test-id attributes, in the order given.
 - **`attributeFilters`**: `{ attribute, value?, include? }` rules deciding whether an attribute value may be used as a key. `attribute` and `value` are regular expressions, anchored automatically (`'id'` means `^(?:id)$`). Attribute names match case-insensitively, values case-sensitively. Without `value`, the rule matches any value. The first matching rule wins: `include: false` (default) skips the value, `include: true` keeps it. Your rules run before the built-in ones, which skip:
@@ -138,6 +170,23 @@ Anything inside an element with `data-uicov-ignore` is always excluded.
   - in `id` and `name`: framework counters (`ember123`, `mui-12345`, `radix-…`, `headlessui-…`, `react-aria-…`, `downshift-…`, `react-select-…`, `mat-…-0`, `cdk-…-3`, `ui-id-4`, `ext-gen12`, `gwt-uid-3`, `yui_…`, `j_id…`), purely numeric values and values with 3+ consecutive digits.
 
   The built-in lists are exported as `BUILTIN_IDENTITY_ATTRIBUTES` and `BUILTIN_ATTRIBUTE_FILTERS`.
+
+- **`interactions`**: the events that count, see below. Unknown names fail the run with the list of supported ones.
+- **`allowedInteractions`**: `{ selector, events }` rules. For an element matching `selector` (the first matching rule wins), only `events` count, replacing `interactions`. The events listed here are recorded even if `interactions` leaves them out.
+
+#### Interaction types
+
+| Event | Counts when | Default |
+|---|---|---|
+| `click`, `dblclick`, `contextmenu` | the element is clicked, double-clicked, right-clicked | on |
+| `input`, `change` | text is typed, an option picked, a checkbox toggled, a file selected | on |
+| `submit` | a form is submitted; credited to its submit button (`SubmitEvent.submitter`), also when submitted with Enter | on |
+| `keydown` | **Enter** or **Space** is pressed on a focused element (keyboard activation). Typing in a text field doesn't count here (that's `input`) | on |
+| `scroll` | a scroll container is scrolled. A burst of scroll events (less than 500 ms apart) counts once | **off**: Playwright scrolls elements into view before acting on them, which would mark scroll containers tested |
+| `dragstart`, `drop` | an element is dragged; an element receives a drop. Mark a plain `<div>` drop zone with `data-uicov-interactive="include"` so it counts | on |
+| `focus`, `blur` | the element gains or loses focus | **off**: tabbing through a form would mark every field tested |
+
+`DEFAULT_INTERACTIONS` and `INTERACTION_TYPES` are exported. A Playwright `dblclick()` also fires two `click`s, and `press('Enter')` on a button fires `keydown` and `click`; each is recorded under its own type.
 
 Each recorded element also keeps its raw identifying attributes (`attrs`: `id`, `name`, `role`, `type`, `aria-label`, `href`, `data-*` and your `significantAttributes`) in the test attachment.
 
@@ -149,6 +198,8 @@ Screenshot options:
 | `format` | `'png'` | `'jpeg'` files are usually several times smaller. |
 | `quality` | `80` | JPEG quality (ignored for PNG). |
 | `maxScreenshotHeight` | `8000` | Full-page screenshots of taller pages are cropped to this height. Elements below the crop are still counted, just not drawn on the image. `0` disables the cap. |
+
+In `coverage.json`, each element has `interactionCounts`: the interactions that counted as tested, by type (`{ "click": 3, "input": 1 }`). The report shows them as the tooltip of the *tested* label.
 
 ### Reporter
 
@@ -227,6 +278,7 @@ Each screenshot is a file attachment named `ui-coverage-screenshot-<n>`, next to
 - UI states that last shorter than `snapshotDelay` (e.g. a modal a test opens and closes instantly) still count their elements, but may not get a screenshot.
 - Inventory covers the main frame only. Iframes and shadow DOM aren't inventoried yet.
 - Hover-only interactions aren't counted.
+- With `scroll` enabled, Playwright's automatic scrolling-into-view before actions also counts as a `scroll` of the container. That's why `scroll` is off by default.
 - Elements with `position: fixed` may be offset in full-page screenshots.
 
 ## Development
@@ -239,6 +291,7 @@ npm run demo:register # register mode: same tests, config-only recording
 UICOV_DEMO_THRESHOLDS=1 npm run demo     # per-view thresholds that fail (exit code 1)
 UICOV_DEMO_THRESHOLDS=pass npm run demo  # per-view thresholds that pass
 UICOV_DEMO_FAIL=1 npx playwright test --retries=1  # adds a failing and a flaky test (demo/tests/failing.spec.ts)
+npm run check:interactivity  # in-browser check of the interactivity rules and interaction types
 npm run demo:sharded  # runs 2 blob shards + merge-reports, checks it matches an unsharded run
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
 npm run perf          # builds a 300-route synthetic report in perf-report/ and times it in Chromium

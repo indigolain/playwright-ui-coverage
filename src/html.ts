@@ -259,9 +259,11 @@ function show(i, fromUser) {
   const shots = r.screenshots.map((s, si) =>
     '<figure><div class="shot" data-si="' + si + '"><img loading="lazy" decoding="async" src="' + esc(s.source) + '" alt="Screenshot of ' + esc(r.route) + '"></div>' +
     '<figcaption>from: ' + esc(s.test) + '</figcaption></figure>').join('');
+  // "click ×3, input ×1", shown as the tooltip of the "tested" pill.
+  const countsText = (e) => Object.entries(e.interactionCounts || {}).map(([t, n]) => t + ' ×' + n).join(', ');
   const rows = r.elements.map(e =>
     '<tr class="' + (e.tested ? 'ok' : 'bad') + '" data-key="' + esc(e.key) + '">' +
-      '<td><span class="pill ' + (e.tested ? 'ok">tested' : failingOnly(e) ? 'warn" title="Touched only by tests that did not pass; not counted as tested">failing tests only' : 'bad">untested') + '</span></td>' +
+      '<td><span class="pill ' + (e.tested ? 'ok" title="' + esc(countsText(e)) + '">tested' : failingOnly(e) ? 'warn" title="Touched only by tests that did not pass; not counted as tested">failing tests only' : 'bad">untested') + '</span></td>' +
       '<td>' + esc(e.label) + (e.instances > 1 ? ' <span class="muted">×' + e.instances + '</span>' : '') + (e.key !== e.label ? '<br><code class="muted">' + esc(e.key) + '</code>' : '') + '</td>' +
       '<td class="muted">' + (e.testedBy.map(esc).concat((e.testedByFailing || []).map(t => esc(t) + ' (failed)')).join('<br>') || '—') + '</td>' +
     '</tr>').join('');
