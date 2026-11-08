@@ -18,7 +18,7 @@
  * its own body (type-only imports are fine).
  */
 import type { InteractionArgs } from './interactions';
-import type { RawElementRef, RawFrameHost, RawInteractionEvent, RawInventory, RawNode } from './model/raw';
+import type { RawElementRef, RawFrameHost, RawInteractionEvent, RawInventory, RawNode, RawViewport } from './model/raw';
 
 export interface TrackerArgs extends InteractionArgs {
   /**
@@ -29,6 +29,12 @@ export interface TrackerArgs extends InteractionArgs {
   ignoreSelectors: string[];
   /** Extra elements to record although they aren't interactive (`RECORDED_CANDIDATES`). */
   extraCandidates: string;
+  /**
+   * Send an inventory (`__uicovRecord(null, inventory)`) right after an interaction's handlers
+   * ran, if they changed the DOM, so short-lived states can be screenshotted
+   * (`captureTransientStates`).
+   */
+  settleInventory?: boolean;
 }
 
 export function tracker(args: TrackerArgs): void {
@@ -454,6 +460,60 @@ export function tracker(args: TrackerArgs): void {
     } catch {
       /* binding not available (e.g. about:blank) */
     }
+    if (type !== 'scroll') settleAfter();
+  };
+
+  // ---- Short-lived states ----------------------------------------------
+  // The inventory sent with a click is taken before the page's handlers run
+  // (capture phase), so it can't show what the click opens. When the handlers
+  // change the DOM, send another inventory once they're done; the recorder
+  // screenshots it right away if it shows something new, before the test can
+  // close it again (a modal opened, filled and saved within a few ms).
+
+  /** Set by DOM mutations; cleared when an interaction starts. */
+  let mutated = false;
+  let settlePending = false;
+  /**
+   * Playwright's own screenshot preparation touches the DOM: it adds and
+   * removes a <style> element and sets `caret-color` on text fields. Those
+   * aren't the page reacting to an interaction.
+   */
+  const stripCaret = (v: string | null) => (v || '').replace(/caret-color\s*:[^;]*;?/g, '').trim();
+  const isOwnChange = (r: MutationRecord) =>
+    r.type === 'childList'
+      ? [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)].every((n) => n.nodeName === 'STYLE')
+      : r.attributeName === 'style' && stripCaret(r.oldValue) === stripCaret((r.target as Element).getAttribute('style'));
+  if (args.settleInventory && typeof MutationObserver === 'function') {
+    new MutationObserver((records) => {
+      if (!mutated && !records.every(isOwnChange)) mutated = true;
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeOldValue: true });
+  }
+  const sendSettled = () => {
+    try {
+      w.__uicovRecord?.(null, w.__uicovInventory());
+    } catch {
+      /* binding not available */
+    }
+  };
+  /**
+   * After the current event's handlers (a task later), and once more shortly
+   * after for frameworks that render asynchronously, if nothing changed yet.
+   */
+  const settleAfter = () => {
+    if (!args.settleInventory || settlePending) return;
+    settlePending = true;
+    mutated = false;
+    setTimeout(() => {
+      if (mutated) {
+        settlePending = false;
+        sendSettled();
+        return;
+      }
+      setTimeout(() => {
+        settlePending = false;
+        if (mutated) sendSettled();
+      }, 50);
+    }, 0);
   };
 
   const TEXT_INPUTS = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date',
@@ -509,6 +569,41 @@ export function tracker(args: TrackerArgs): void {
     return r.width > 0 && r.height > 0;
   };
 
+  // ---- Positioning and viewport ------------------------------------------
+
+  /**
+   * Effective positioning of elements (`RawElement.pos`), memoized for one
+   * inventory since ancestors are shared: `fixed` if the element or any
+   * ancestor is fixed (modal dialogs and popovers in the top layer are),
+   * else `sticky` if it or an ancestor is sticky, else ''.
+   */
+  const positioning = () => {
+    const memo = new Map<Element, '' | 'fixed' | 'sticky'>();
+    const of = (el: Element | null): '' | 'fixed' | 'sticky' => {
+      if (!el || el === document.documentElement) return '';
+      const known = memo.get(el);
+      if (known !== undefined) return known;
+      const own = getComputedStyle(el).position;
+      const inherited = own === 'fixed' ? 'fixed' : of(el.parentElement);
+      const v = inherited === 'fixed' ? 'fixed' : own === 'sticky' ? 'sticky' : inherited;
+      memo.set(el, v);
+      return v;
+    };
+    return of;
+  };
+
+  /** Scroll offset and layout viewport size (document CSS px). */
+  const viewportOf = (): RawViewport => {
+    const d = document.documentElement;
+    return {
+      x: Math.round(window.scrollX),
+      y: Math.round(window.scrollY),
+      w: (d && d.clientWidth) || window.innerWidth,
+      h: (d && d.clientHeight) || window.innerHeight,
+      ...(window.visualViewport && window.visualViewport.scale !== 1 ? { zoom: window.visualViewport.scale } : {}),
+    };
+  };
+
   const EXTRA = args.extraCandidates || '';
   /** Visible interactive elements and visible extra candidates, flagged, in document order. */
   w.__uicovInventory = (): RawInventory => {
@@ -521,8 +616,10 @@ export function tracker(args: TrackerArgs): void {
       ordered = all.filter((el) => flagged.has(el) || extra.has(el));
     }
     const { nodes, add } = nodeTable();
+    const posOf = positioning();
     const elements = ordered.filter(isVisible).map((el) => {
       const r = el.getBoundingClientRect();
+      const pos = posOf(el);
       return {
         ...ref(el, add),
         ...(flagged.has(el) ? {} : { candidateOnly: true as const }),
@@ -530,11 +627,13 @@ export function tracker(args: TrackerArgs): void {
         y: Math.round(r.y + window.scrollY),
         w: Math.round(r.width),
         h: Math.round(r.height),
+        ...(pos ? { pos } : {}),
       };
     });
     return {
       url: location.href,
       dpr: window.devicePixelRatio || 1,
+      viewport: viewportOf(),
       nodes,
       elements,
       scrollX: window.scrollX,

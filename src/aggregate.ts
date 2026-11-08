@@ -1,6 +1,7 @@
 import type { HtmlReportLink, RepeatedElement, TestInfo } from './insights';
 import type { A11yHint } from './a11y';
 import type { InventoryElement, TestCoverageData } from './types';
+import { boxInImage, intersects } from './model/geometry';
 
 /** Recorded role, accessible name and attributes of an element (see `InventoryElement`). */
 type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames'>;
@@ -53,10 +54,13 @@ export interface ElementCoverage {
 
 export interface ScreenshotBox {
   key: string;
+  /** In image CSS pixels: document coordinates, or relative to the clip of a viewport screenshot. */
   x: number;
   y: number;
   w: number;
   h: number;
+  /** `position: fixed` / `sticky` (itself or an ancestor). */
+  pos?: 'fixed' | 'sticky';
 }
 
 export interface RouteScreenshot {
@@ -65,6 +69,8 @@ export interface RouteScreenshot {
   test: string;
   /** `TestCase.id` of `test`, when known. */
   testId?: string;
+  /** A viewport screenshot of a short-lived state (`captureTransientStates`), not the full page. */
+  viewport?: true;
   boxes: ScreenshotBox[];
 }
 
@@ -241,10 +247,22 @@ export function aggregate(
     });
     if (elements.length === 0) continue;
 
-    // Elements actually in the image (a cropped screenshot hides those below its height).
-    // Zero-size boxes: frame content scrolled out of its frame's viewport.
+    // Elements actually in the image: a cropped screenshot hides those below its
+    // height, a viewport screenshot those outside the viewport. Zero-size boxes:
+    // frame content scrolled out of its frame's viewport.
     const visible = (snap: TestCoverageData['snapshots'][number]) =>
-      snap.elements.filter((e) => e.w > 0 && e.h > 0 && (!snap.screenshotHeight || e.y < snap.screenshotHeight));
+      snap.elements.filter(
+        (e) =>
+          e.w > 0 &&
+          e.h > 0 &&
+          (snap.screenshotClip
+            ? intersects(e, snap.screenshotClip)
+            : !snap.screenshotHeight || e.y < snap.screenshotHeight),
+      );
+    const box = (snap: TestCoverageData['snapshots'][number], e: TestCoverageData['snapshots'][number]['elements'][number]): ScreenshotBox => {
+      const { key, x, y, w, h, pos } = snap.screenshotClip ? boxInImage(e, snap.screenshotClip)! : e;
+      return pos ? { key, x, y, w, h, pos } : { key, x, y, w, h };
+    };
     // Greedy set cover: pick screenshots that show the most not-yet-shown elements.
     const chosen: RouteScreenshot[] = [];
     const shown = new Set<string>();
@@ -268,7 +286,8 @@ export function aggregate(
         dpr: snap.dpr,
         test,
         ...(testId ? { testId } : {}),
-        boxes: inImage.map(({ key, x, y, w, h }) => ({ key, x, y, w, h })),
+        ...(snap.screenshotClip ? { viewport: true as const } : {}),
+        boxes: inImage.map((e) => box(snap, e)),
       });
     }
 

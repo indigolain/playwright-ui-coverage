@@ -73,6 +73,35 @@ export interface RawElement extends RawElementRef {
   y: number;
   w: number;
   h: number;
+  /**
+   * Effective positioning: `fixed` when the element or an ancestor is
+   * `position: fixed` (modal dialogs and popovers in the top layer too),
+   * `sticky` when the nearest such ancestor is `position: sticky`. Absent:
+   * scrolls with the document. The box is where the element was on screen
+   * (viewport box + scroll offset), which is also where full-page screenshots
+   * paint it, as long as the page doesn't scroll in between.
+   */
+  pos?: 'fixed' | 'sticky';
+}
+
+/** The visible part of the document when an inventory was taken, in document CSS pixels. */
+export interface RawViewport {
+  /** Scroll offset (`scrollX`/`scrollY`, rounded). */
+  x: number;
+  y: number;
+  /** Layout viewport size without scrollbars (`documentElement.clientWidth/clientHeight`). */
+  w: number;
+  h: number;
+  /** `visualViewport.scale` when it isn't 1 (pinch zoom, or a mobile page without a viewport meta tag). */
+  zoom?: number;
+}
+
+/** Region of the document a screenshot shows, in document CSS pixels. */
+export interface RawClip {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface RawSnapshot {
@@ -86,6 +115,14 @@ export interface RawSnapshot {
   screenshot?: string;
   /** Height in CSS px of the screenshot when it was cropped (`maxScreenshotHeight`). */
   screenshotHeight?: number;
+  /**
+   * The document region the screenshot shows, when it isn't the full page
+   * from the top-left corner: a viewport screenshot of a short-lived state
+   * (`captureTransientStates`). Element boxes stay in document coordinates.
+   */
+  screenshotClip?: RawClip;
+  /** Scroll offset and viewport size when the inventory was taken. */
+  viewport?: RawViewport;
   /** Visible recorded elements, in document order. */
   elements: RawElement[];
 }
@@ -127,6 +164,7 @@ export interface RawCoverageData {
 export interface RawInventory {
   url: string;
   dpr: number;
+  viewport?: RawViewport;
   nodes: RawNode[];
   elements: RawElement[];
   /** The document's scroll offset (`scrollX`/`scrollY`), to map a frame's boxes into the page. */

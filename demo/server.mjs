@@ -17,6 +17,7 @@ const routes = [
   [/^\/embedded\/?$/, 'embedded.html'],
   [/^\/frames\/help\/?$/, 'frame-help.html'],
   [/^\/frames\/card\/?$/, 'frame-card.html'],
+  [/^\/long\/?$/, 'long.html'],
 ];
 
 http

@@ -21,6 +21,14 @@ export interface UiCoverageOptions {
   /** ms to wait after an interaction before snapshotting. Default: 250. */
   snapshotDelay: number;
   /**
+   * Screenshot short-lived UI states right away: when an interaction changes
+   * the page so it shows elements no screenshot has shown yet (a modal the
+   * test opens, fills and closes within `snapshotDelay`), take a viewport
+   * screenshot immediately instead of waiting for `snapshotDelay`. Only with
+   * `screenshots: 'on'`. Default: true.
+   */
+  captureTransientStates: boolean;
+  /**
    * @deprecated Set `significantAttributes` in the config file (top level) instead.
    * Still honored: recorded with the data and applied at report time, unless
    * the config sets `significantAttributes` itself.
@@ -65,6 +73,7 @@ export const defaultUiCoverageOptions: UiCoverageOptions = {
   enabled: true,
   ignoreSelectors: [],
   snapshotDelay: 250,
+  captureTransientStates: true,
   significantAttributes: [],
   attributeFilters: [],
   screenshots: 'on',
@@ -87,6 +96,7 @@ const interaction = () => s.oneOf(...INTERACTION_TYPES);
 export const RECORDING_SCHEMA = {
   enabled: s.boolean(),
   snapshotDelay: s.number({ min: 0 }),
+  captureTransientStates: s.boolean(),
   screenshots: s.oneOf('on', 'off', 'first-only'),
   format: s.oneOf('png', 'jpeg'),
   quality: s.number({ min: 0, max: 100 }),

@@ -269,11 +269,20 @@ export function resolveCoverageData(
     for (const el of snap.elements) {
       const node = r.node(el);
       if (!node || el.candidateOnly || r.isIgnored(node)) continue;
-      elements.push({ ...r.describe(el, node), tag: node.tag, x: el.x, y: el.y, w: el.w, h: el.h });
+      elements.push({
+        ...r.describe(el, node),
+        tag: node.tag,
+        x: el.x,
+        y: el.y,
+        w: el.w,
+        h: el.h,
+        ...(el.pos ? { pos: el.pos } : {}),
+      });
     }
     const out: Snapshot = { url: snap.url, dpr: snap.dpr, elements };
     if (snap.screenshot) out.screenshot = snap.screenshot;
     if (snap.screenshotHeight) out.screenshotHeight = snap.screenshotHeight;
+    if (snap.screenshotClip) out.screenshotClip = snap.screenshotClip;
     return out;
   });
 

@@ -6,6 +6,7 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /**
  * Shrinks the embedded data: screenshot boxes become `[elementIndex, x, y, w, h]`
+ * (plus `'fixed'`/`'sticky'` for fixed and sticky elements)
  * (instead of repeating each element key per box) with coordinates rounded to
  * 0.1 px. coverage.json keeps the full format.
  */
@@ -31,7 +32,10 @@ function compact(summary: CoverageSummary) {
           ...s,
           boxes: s.boxes.map((b) => {
             const i = index.get(b.key);
-            return i === undefined ? b : [i, round1(b.x), round1(b.y), round1(b.w), round1(b.h)];
+            if (i === undefined) return b;
+            const out: (number | string)[] = [i, round1(b.x), round1(b.y), round1(b.w), round1(b.h)];
+            if (b.pos) out.push(b.pos);
+            return out;
           }),
         })),
       };
@@ -122,6 +126,7 @@ figcaption { padding: 6px 10px; font-size: 12px; color: var(--muted); border-top
 .shot.missing::after { content: 'Screenshot not found'; }
 .box { position: absolute; border: 2px solid var(--bad); background: var(--bad-bg); border-radius: 3px; cursor: pointer; }
 .box.ok { border-color: var(--ok); background: var(--ok-bg); }
+.box.pinned { border-style: dashed; }
 .box.hl { outline: 3px solid var(--hl); outline-offset: 1px; z-index: 2; }
 .only-untested .box.ok, .only-untested tr.ok { display: none; }
 table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
@@ -308,16 +313,18 @@ function placeBoxes(el, r, s, tested) {
   el.querySelectorAll('.box').forEach(b => b.remove());
   const frag = document.createDocumentFragment();
   for (const raw of s.boxes) {
-    const b = Array.isArray(raw) ? { key: r.elements[raw[0]].key, x: raw[1], y: raw[2], w: raw[3], h: raw[4] } : raw;
+    const b = Array.isArray(raw) ? { key: r.elements[raw[0]].key, x: raw[1], y: raw[2], w: raw[3], h: raw[4], pos: raw[5] } : raw;
     // The screenshot may be cropped (maxScreenshotHeight): drop or clip boxes outside it.
     if (b.y >= cssH || b.x >= cssW) continue;
     const w = Math.min(b.w, cssW - b.x);
     const h = Math.min(b.h, cssH - b.y);
     const info = tested.get(b.key);
     const d = document.createElement('div');
-    d.className = 'box' + (info && info.tested ? ' ok' : info && failingOnly(info) ? ' warn' : '');
+    // Fixed and sticky elements are drawn where they were on screen when the screenshot was taken.
+    d.className = 'box' + (info && info.tested ? ' ok' : info && failingOnly(info) ? ' warn' : '') + (b.pos ? ' pinned' : '');
     d.dataset.key = b.key;
     d.title = (info ? info.label : b.key) + (info && info.tested ? ' — tested' : info && failingOnly(info) ? ' — failing tests only' : ' — untested') +
+      (b.pos ? ' (position: ' + b.pos + ', shown where it was on screen)' : '') +
       (info && info.suggestedLocator ? '\\n' + info.suggestedLocator + '\\n(click to show it in the table)' : '');
     d.style.cssText = 'left:' + (b.x / cssW * 100) + '%;top:' + (b.y / cssH * 100) + '%;width:' + (w / cssW * 100) + '%;height:' + (h / cssH * 100) + '%';
     frag.appendChild(d);
@@ -339,7 +346,7 @@ function show(i, fromUser, focusKey) {
   const tested = new Map(r.elements.map(e => [e.key, e]));
   const shots = r.screenshots.map((s, si) =>
     '<figure><div class="shot" data-si="' + si + '"><img loading="lazy" decoding="async" src="' + esc(s.source) + '" alt="Screenshot of ' + esc(r.route) + '"></div>' +
-    '<figcaption>from: ' + esc(s.test) + '</figcaption></figure>').join('');
+    '<figcaption>' + (s.viewport ? 'viewport, right after an interaction · ' : '') + 'from: ' + esc(s.test) + '</figcaption></figure>').join('');
   const rows = sortedElements(r.elements).map(e =>
     '<tr class="' + (e.tested ? 'ok' : 'bad') + '" data-key="' + esc(e.key) + '">' +
       '<td><span class="pill ' + (e.tested ? 'ok" title="' + esc(countsText(e)) + '">tested' : failingOnly(e) ? 'warn" title="Touched only by tests that did not pass; not counted as tested">failing tests only' : 'bad">untested') + '</span></td>' +

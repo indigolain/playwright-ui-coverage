@@ -170,6 +170,7 @@
         "file": { "type": "string", "description": "Image, relative to the folder of coverage.json." },
         "dpr": { "type": "number", "description": "Device pixel ratio; boxes are CSS pixels." },
         "testId": { "type": "string" },
+        "viewport": { "type": "boolean", "description": "True for a viewport screenshot of a short-lived state rather than the full page; boxes are relative to the image. Absent otherwise." },
         "boxes": {
           "type": "array",
           "items": {
@@ -180,7 +181,8 @@
               "x": { "type": "number" },
               "y": { "type": "number" },
               "w": { "type": "number" },
-              "h": { "type": "number" }
+              "h": { "type": "number" },
+              "pos": { "enum": ["fixed", "sticky"], "description": "The element or an ancestor is position: fixed / sticky; drawn where it was on screen." }
             }
           }
         }
