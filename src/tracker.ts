@@ -235,27 +235,33 @@ export function tracker(args: TrackerArgs): void {
     return IMPLICIT_ROLES[tag] || tag;
   };
 
-  const nameOf = (el: Element): string => {
+  /** Accessible name and where it came from (`nameFrom`, used for locators and a11y hints). */
+  const nameOf = (el: Element): { name: string; nameFrom: string } => {
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
       const text = labelledBy
         .split(/\s+/)
         .map((id) => document.getElementById(id)?.textContent || '')
         .join(' ');
-      if (clean(text)) return clean(text);
+      if (clean(text)) return { name: clean(text), nameFrom: 'aria-labelledby' };
     }
     const input = el as HTMLInputElement;
     const isButtonInput = el.tagName === 'INPUT' && ['submit', 'button', 'reset'].includes(input.type);
-    return (
-      clean(el.getAttribute('aria-label')) ||
-      clean(input.labels?.[0]?.textContent) ||
-      clean(el.getAttribute('placeholder')) ||
-      clean(el.getAttribute('title')) ||
-      clean(el.getAttribute('alt')) ||
-      (isButtonInput ? clean(input.value) : '') ||
-      clean((el as HTMLElement).innerText) ||
-      clean(el.getAttribute('name'))
-    );
+    const sources: [string, () => unknown][] = [
+      ['aria-label', () => el.getAttribute('aria-label')],
+      ['label', () => input.labels?.[0]?.textContent],
+      ['placeholder', () => el.getAttribute('placeholder')],
+      ['title', () => el.getAttribute('title')],
+      ['alt', () => el.getAttribute('alt')],
+      ['value', () => (isButtonInput ? input.value : '')],
+      ['text', () => (el as HTMLElement).innerText],
+      ['name', () => el.getAttribute('name')], // not an accessible name; display only
+    ];
+    for (const [from, get] of sources) {
+      const v = clean(get());
+      if (v) return { name: v, nameFrom: from };
+    }
+    return { name: '', nameFrom: '' };
   };
 
   // ---- Identity -------------------------------------------------------
@@ -336,7 +342,7 @@ export function tracker(args: TrackerArgs): void {
     return steps.join(' > ');
   };
 
-  const RAW_ATTRS = ['id', 'name', 'role', 'type', 'aria-label', 'href'];
+  const RAW_ATTRS = ['id', 'name', 'role', 'type', 'aria-label', 'href', 'tabindex', 'contenteditable'];
   /** Raw identifying attributes, so identity can be recomputed later with other rules. */
   const rawAttrs = (el: Element): Record<string, string> => {
     const out: Record<string, string> = {};
@@ -352,10 +358,10 @@ export function tracker(args: TrackerArgs): void {
 
   const describe = (el: Element) => {
     const role = roleOf(el);
-    const name = nameOf(el);
+    const { name, nameFrom } = nameOf(el);
     const label = name ? `${role} "${name}"` : role;
     const key = identityOf(el) || structuralKey(el);
-    return { key, label, attrs: rawAttrs(el) };
+    return { key, label, attrs: rawAttrs(el), role, name, nameFrom };
   };
 
   // ---- Event recording -------------------------------------------------
@@ -376,13 +382,13 @@ export function tracker(args: TrackerArgs): void {
   const lastScroll = new WeakMap<Element, number>();
 
   const send = (el: Element, type: string) => {
-    const { key, label, attrs } = describe(el);
+    const d = describe(el);
     // These may navigate away before a delayed snapshot can run, so ship the
     // current inventory with them (synchronously, before navigation).
     const withInventory = type === 'click' || type === 'submit' || type === 'keydown';
     try {
       w.__uicovRecord?.(
-        { key, label, attrs, event: type, url: location.href },
+        { ...d, event: type, url: location.href },
         withInventory ? w.__uicovInventory() : undefined,
       );
     } catch {
@@ -440,11 +446,8 @@ export function tracker(args: TrackerArgs): void {
       .filter(isVisible)
       .map((el) => {
         const r = el.getBoundingClientRect();
-        const { key, label, attrs } = describe(el);
         return {
-          key,
-          label,
-          attrs,
+          ...describe(el),
           tag: el.tagName.toLowerCase(),
           x: Math.round(r.x + window.scrollX),
           y: Math.round(r.y + window.scrollY),

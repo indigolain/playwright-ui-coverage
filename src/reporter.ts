@@ -2,10 +2,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FullConfig, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
+import { addA11yHints } from './a11y';
 import { aggregate, defaultNormalizeUrl, type NormalizeUrl } from './aggregate';
 import { isPassingResult, selectAttempts, type AttemptEntry } from './attempts';
 import { renderHtml } from './html';
 import { indexTests, mostRepeated, resolveHtmlReport, type HtmlReportLink } from './insights';
+import { addSuggestedLocators } from './locators';
 import { evaluateThresholds, formatThresholdResults, type ThresholdOption } from './thresholds';
 import { ATTACHMENT_NAME, type TestCoverageData } from './types';
 
@@ -44,6 +46,11 @@ export interface UiCoverageReporterOptions {
    * from the `html` reporter in the config. `false`: no links.
    */
   htmlReport?: string | false;
+  /**
+   * Attribute used for `page.getByTestId()` in suggested locators. Default: the
+   * `use.testIdAttribute` of the first project that sets it, else `data-testid`.
+   */
+  testIdAttribute?: string;
 }
 
 const CT_CONFIG_KEY = '@playwright/experimental-ct-core';
@@ -95,6 +102,7 @@ class UiCoverageReporter implements Reporter {
   private specViews = new Map<TestCoverageData, string>();
   private componentTestConfig = false;
   private htmlReport: HtmlReportLink | undefined;
+  private testIdAttribute = 'data-testid';
 
   constructor(private options: UiCoverageReporterOptions = {}) {}
 
@@ -104,6 +112,10 @@ class UiCoverageReporter implements Reporter {
     this.outputFolder = path.resolve(configDir, this.options.outputFolder ?? 'ui-coverage-report');
     this.componentTestConfig = CT_CONFIG_KEY in config;
     this.htmlReport = resolveHtmlReport(config.reporter, configDir, this.outputFolder, this.options.htmlReport);
+    this.testIdAttribute =
+      this.options.testIdAttribute ??
+      config.projects.map((p) => p.use?.testIdAttribute).find((a): a is string => !!a) ??
+      'data-testid';
   }
 
   onTestEnd(test: TestCase, result: TestResult) {
@@ -148,6 +160,8 @@ class UiCoverageReporter implements Reporter {
     summary.tests = indexTests(this.tests);
     if (this.htmlReport) summary.htmlReport = this.htmlReport;
     summary.mostRepeated = mostRepeated(summary);
+    addSuggestedLocators(summary, { testIdAttribute: this.testIdAttribute });
+    addA11yHints(summary);
 
     fs.rmSync(this.outputFolder, { recursive: true, force: true });
     const screensDir = path.join(this.outputFolder, 'screens');
@@ -180,6 +194,9 @@ class UiCoverageReporter implements Reporter {
     }
     if (summary.failingOnly > 0) {
       console.log(`  ${summary.failingOnly} more element(s) touched only by failing tests (not counted)`);
+    }
+    if (summary.a11yHints) {
+      console.log(`  ${summary.a11yHints} accessibility hint(s), informational (see the report)`);
     }
     const rel = path.relative(process.cwd(), path.join(this.outputFolder, 'index.html'));
     console.log(`  Report: ${rel}\n`);
