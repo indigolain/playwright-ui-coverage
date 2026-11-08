@@ -56,6 +56,8 @@ tr.hl td { background: var(--bg); }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .pill.ok { color: var(--ok); background: var(--ok-bg); }
 .pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.warn { color: var(--hl); background: rgba(245,158,11,.18); }
+.box.warn { border-color: var(--hl); background: rgba(245,158,11,.18); }
 .table-wrap { overflow-x: auto; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 </style>
@@ -102,11 +104,13 @@ function show(i) {
   const shots = r.screenshots.map((s, si) =>
     '<figure><div class="shot" data-si="' + si + '"><img src="' + esc(s.source) + '" alt="Screenshot of ' + esc(r.route) + '"></div>' +
     '<figcaption>from: ' + esc(s.test) + '</figcaption></figure>').join('');
+  // Untested but touched by failing tests: shown as its own state, not counted.
+  const failingOnly = (e) => !e.tested && (e.testedByFailing || []).length > 0;
   const rows = r.elements.map(e =>
     '<tr class="' + (e.tested ? 'ok' : 'bad') + '" data-key="' + esc(e.key) + '">' +
-      '<td><span class="pill ' + (e.tested ? 'ok">tested' : 'bad">untested') + '</span></td>' +
+      '<td><span class="pill ' + (e.tested ? 'ok">tested' : failingOnly(e) ? 'warn" title="Touched only by tests that did not pass; not counted as tested">failing tests only' : 'bad">untested') + '</span></td>' +
       '<td>' + esc(e.label) + (e.instances > 1 ? ' <span class="muted">×' + e.instances + '</span>' : '') + (e.key !== e.label ? '<br><code class="muted">' + esc(e.key) + '</code>' : '') + '</td>' +
-      '<td class="muted">' + (e.testedBy.map(esc).join('<br>') || '—') + '</td>' +
+      '<td class="muted">' + (e.testedBy.map(esc).concat((e.testedByFailing || []).map(t => esc(t) + ' (failed)')).join('<br>') || '—') + '</td>' +
     '</tr>').join('');
   $('#main').className = onlyUntested ? 'only-untested' : '';
   $('#main').innerHTML =
@@ -133,9 +137,9 @@ function show(i) {
       for (const b of s.boxes) {
         const info = tested.get(b.key);
         const d = document.createElement('div');
-        d.className = 'box' + (info && info.tested ? ' ok' : '');
+        d.className = 'box' + (info && info.tested ? ' ok' : info && failingOnly(info) ? ' warn' : '');
         d.dataset.key = b.key;
-        d.title = (info ? info.label : b.key) + (info && info.tested ? ' — tested' : ' — untested');
+        d.title = (info ? info.label : b.key) + (info && info.tested ? ' — tested' : info && failingOnly(info) ? ' — failing tests only' : ' — untested');
         d.style.left = (b.x / cssW * 100) + '%';
         d.style.top = (b.y / cssH * 100) + '%';
         d.style.width = (b.w / cssW * 100) + '%';
