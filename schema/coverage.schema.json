@@ -40,14 +40,31 @@
         "attachmentsBaseURL": { "type": "string", "description": "Its attachmentsBaseURL, relative to path." }
       }
     },
-    "config": {
-      "type": "object",
-      "description": "Reserved: the effective report configuration.",
-      "additionalProperties": true
-    },
+    "config": { "$ref": "#/$defs/ReportConfig", "description": "The UI coverage config that built the report." },
     "baseline": { "$ref": "#/$defs/BaselineCheck", "description": "Result of the baseline option; absent when it isn't set." }
   },
   "$defs": {
+    "ReportConfig": {
+      "type": "object",
+      "description": "Where the config of the report came from (ui-coverage.config.*, reporter options, profile).",
+      "required": ["source", "profile", "resolved"],
+      "properties": {
+        "source": {
+          "type": "object",
+          "required": ["file", "inline"],
+          "properties": {
+            "file": { "type": ["string", "null"], "description": "The config file, relative to the working directory ('/' separators); null without one." },
+            "inline": { "type": "array", "items": { "type": "string" }, "description": "Top-level keys set in the reporter options." }
+          }
+        },
+        "profile": { "type": ["string", "null"], "description": "The selected profile, or null." },
+        "resolved": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "The merged config without profiles. Functions appear as \"[function name]\". Informational: its keys follow the config file, not this schema's versioning."
+        }
+      }
+    },
     "CoverageCounts": {
       "type": "object",
       "description": "Coverage counts. Denominator of coverage: testedElementsCount + untestedElementsCount + testedLinksCount + untestedLinksCount.",

@@ -46,6 +46,8 @@ export interface AllowedInteraction {
   selector: string;
   /** Events that count for matching elements. Replaces the global `interactions` list for them. */
   events: InteractionType[];
+  /** Free text, ignored (every rule object accepts one). */
+  comment?: string;
 }
 
 /** Arguments passed to the in-page tracker (must be JSON-serializable). */

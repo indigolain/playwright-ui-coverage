@@ -18,7 +18,7 @@
 import path from 'node:path';
 import { test, type BrowserContext } from '@playwright/test';
 import { ContextRecorder } from './recorder';
-import { resolveOptions } from './options';
+import { recordingOptionsFor } from './config';
 
 const FLAG = Symbol.for('playwright-ui-coverage.registered');
 
@@ -63,7 +63,7 @@ function register() {
     runAfterCreateBrowserContext: async (context: BrowserContext) => {
       const testInfo = currentTestInfo();
       if (!testInfo) return;
-      const options = resolveOptions((testInfo.project.use as any).uiCoverage);
+      const options = recordingOptionsFor(testInfo, (testInfo.project.use as any).uiCoverage);
       if (!options.enabled) return;
       await ContextRecorder.attach(context, testInfo, options);
     },

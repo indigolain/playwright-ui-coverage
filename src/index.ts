@@ -1,6 +1,7 @@
 import { test as base, expect } from '@playwright/test';
 import { ContextRecorder } from './recorder';
-import { resolveOptions, type UiCoverageOptions } from './options';
+import { recordingOptionsFor } from './config';
+import type { UiCoverageOptions } from './options';
 
 /**
  * Playwright fixtures that record UI coverage. Compose them with your own
@@ -10,13 +11,14 @@ import { resolveOptions, type UiCoverageOptions } from './options';
  *   import { uiCoverage } from 'playwright-ui-coverage';
  *   export const test = mergeTests(myTest, uiCoverage);
  *
- * Configure with `use: { uiCoverage: { ... } }`.
+ * Configure with `recording` in `ui-coverage.config.*`, or with
+ * `use: { uiCoverage: { ... } }` (wins key by key).
  */
 export const uiCoverage = base.extend<{ uiCoverage: Partial<UiCoverageOptions> }>({
   uiCoverage: [{}, { option: true, box: true }],
   context: [
     async ({ context, uiCoverage }, use, testInfo) => {
-      const options = resolveOptions(uiCoverage);
+      const options = recordingOptionsFor(testInfo, uiCoverage);
       // attach() returns undefined if `register` mode already records this context.
       const recorder = options.enabled
         ? await ContextRecorder.attach(context, testInfo, options)
@@ -58,7 +60,16 @@ export type {
   StoredData,
   StoredAttempt,
 } from './model/raw';
-export type { UiCoverageReporterOptions } from './report';
+export {
+  defineUiCoverageConfig,
+  type ConfigTrace,
+  type UiCoverageConfig,
+  type UiCoverageConfigBase,
+  type UiCoverageProfile,
+  type UiCoverageRecordingConfig,
+  type UiCoverageReporterOptions,
+} from './config';
+export type { ReportOptions } from './report';
 export { COVERAGE_SCHEMA_VERSION } from './coverage-report';
 export type {
   CoverageReport,

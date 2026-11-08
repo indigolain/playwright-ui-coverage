@@ -210,8 +210,8 @@ export interface CoverageReport {
     /** Its `attachmentsBaseURL`, relative to `path`. */
     attachmentsBaseURL: string;
   };
-  /** Reserved: the effective report configuration. */
-  config?: Record<string, unknown>;
+  /** The UI coverage config that built the report. */
+  config?: ReportConfig;
   /** Result of the `baseline` option; absent when it isn't set (or is `mode: 'off'`). */
   baseline?: BaselineCheck;
 }
@@ -271,6 +271,27 @@ export interface BaselineResolved {
 export interface ViewRename {
   from: string;
   to: string;
+}
+
+/**
+ * Where the config of a report came from, written to `coverage.json` (and the
+ * data folder) for traceability.
+ */
+export interface ReportConfig {
+  source: {
+    /** The config file, relative to the working directory (`/` separators); `null` without one. */
+    file: string | null;
+    /** Top-level keys set in the reporter options (they win over the file). */
+    inline: string[];
+  };
+  /** The selected profile, or `null`. */
+  profile: string | null;
+  /**
+   * The resolved config: the file, the reporter options and the profile,
+   * merged (without `profiles`). Functions appear as `"[function name]"`.
+   * `recording` is what the config sets; `use.uiCoverage` can override it per project.
+   */
+  resolved: Record<string, unknown>;
 }
 
 let cachedVersion: string | undefined;
@@ -347,7 +368,11 @@ const test = (t: TestInfo): TestRef => ({
  * Maps the internal summary (after screenshots were copied to `screens/`) to
  * the public `coverage.json` format.
  */
-export function toCoverageReport(summary: CoverageSummary, thresholds: ThresholdResult[]): CoverageReport {
+export function toCoverageReport(
+  summary: CoverageSummary,
+  thresholds: ThresholdResult[],
+  config?: ReportConfig,
+): CoverageReport {
   const link: HtmlReportLink | undefined = summary.htmlReport;
   return {
     schemaVersion: COVERAGE_SCHEMA_VERSION,
@@ -379,5 +404,6 @@ export function toCoverageReport(summary: CoverageSummary, thresholds: Threshold
       })),
     },
     ...(link ? { playwrightReport: { path: link.path, attachmentsBaseURL: link.attachmentsBaseURL } } : {}),
+    ...(config ? { config } : {}),
   };
 }

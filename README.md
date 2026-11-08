@@ -50,7 +50,7 @@ import 'playwright-ui-coverage/register'; // ← records every browser context i
 export default defineConfig({
   reporter: [
     ['list'],
-    ['playwright-ui-coverage/reporter', { outputFolder: 'ui-coverage-report' }],
+    ['playwright-ui-coverage/reporter'], // options: see Configuration
   ],
 });
 ```
@@ -93,7 +93,7 @@ UI coverage: 40.4% (23/57 elements)
 
 1. **Tracker** (`addInitScript`): capture-phase listeners record every interaction (`click`, `input`, `change`, `submit`, `dblclick`, `contextmenu`, keyboard activation, drag and drop, opt-in `scroll`/`focus`/`blur`, see [Interaction types](#interaction-types)) on an [interactive element](#which-elements-count), whichever Playwright API (or a real user) caused it.
 2. **Inventory + screenshot**: when a page loads and shortly after interactions, the recorder lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear. It records **raw facts** (tag, attributes, position among siblings, ancestors, accessible name), not keys: identity and filtering are decided later.
-3. **Reporter**: merges data from all workers, applies the [report-time rules](#report-time-rules-reporter-options) (filters, identity), groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it, and renders the HTML report and `coverage.json`. It also saves the raw data in `ui-coverage-report/data/`, so you can [rebuild the report](#rebuilding-the-report-report-cli) with other rules without running the tests again.
+3. **Reporter**: merges data from all workers, applies the [report-time rules](#report-time-rules) (filters, identity), groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it, and renders the HTML report and `coverage.json`. It also saves the raw data in `ui-coverage-report/data/`, so you can [rebuild the report](#rebuilding-the-report-report-cli) with other rules without running the tests again.
 
 ### Which elements count
 
@@ -150,34 +150,135 @@ Elements inside **iframes** (same-origin and cross-origin) and **open shadow roo
 - **Closed shadow roots** can't be read from the page, so their content isn't recorded; the host counts if it is interactive itself (e.g. `role="button"`, `tabindex="0"`), and events inside are credited to it.
 - **Suggested locators** use `page.frameLocator('<frame key>')` for elements in frames. Playwright's locators already pierce open shadow roots.
 
-## Options
+## Configuration
 
-Options come in two places:
-
-- **Report-time rules** (which elements count, how they're identified) are **reporter options**. They're applied when the report is built, so you can change them and [rebuild the report](#rebuilding-the-report-report-cli) without running the tests.
-- **Recording options** (`use.uiCoverage`) control what is captured while tests run: on/off, timing, screenshots, interaction types.
-
-### Report-time rules (reporter options)
+All settings live in one file, `ui-coverage.config.ts` next to `playwright.config.ts`. The recorder (in both modes), the reporter and the [`report` CLI](#rebuilding-the-report-report-cli) all read it:
 
 ```ts
-// playwright.config.ts
-reporter: [
-  ['playwright-ui-coverage/reporter', {
-    ignoreSelectors: ['.cookie-banner', '#debug-toolbar *'], // default: []
-    significantAttributes: ['data-component'],              // default: []
-    attributeFilters: [                                      // default: []
-      { attribute: 'id', value: 'tmp-.*' },                  // ignore id="tmp-…"
-      { attribute: 'id', value: 'mui-legacy', include: true }, // keep, despite the built-in rule
-    ],
-  }],
+// ui-coverage.config.ts
+import { DEFAULT_INTERACTIONS, defineUiCoverageConfig } from 'playwright-ui-coverage';
+
+export default defineUiCoverageConfig({
+  // Report-time rules: change them and rebuild the report without running tests.
+  ignoreSelectors: ['.cookie-banner', '#debug-toolbar *'],
+  significantAttributes: ['data-component'],
+  attributeFilters: [{ attribute: 'id', value: 'tmp-.*', comment: 'ids from the legacy form builder' }],
+
+  // Reporter settings.
+  outputFolder: 'ui-coverage-report',
+  threshold: { overall: 60 },
+
+  // Recording options: what the tests capture while they run.
+  recording: {
+    screenshots: 'first-only',
+    interactions: [...DEFAULT_INTERACTIONS, 'focus'],
+  },
+
+  // Named overrides, e.g. a stricter config for PR runs.
+  profiles: [
+    { name: 'pr-critical', tags: ['@pr-critical'], config: { threshold: { overall: 90 } } },
+  ],
+});
+```
+
+With the file in place the reporter needs no options: `['playwright-ui-coverage/reporter']`. `defineUiCoverageConfig` only adds types (`UiCoverageConfig`). `playwright-ui-coverage/config` exports it too, without loading `@playwright/test`.
+
+| Key | Applied | |
+|---|---|---|
+| `ignoreSelectors`, `significantAttributes`, `attributeFilters` | report time | [Report-time rules](#report-time-rules) |
+| `outputFolder`, `normalizeUrl`, `maxScreenshotsPerRoute`, `threshold`, `countFailedTests`, `viewBy`, `htmlReport`, `testIdAttribute`, `saveData`, `baseline`, `githubSummary` | report time | [Reporter settings](#reporter-settings) |
+| `recording` | while tests run | [Recording options](#recording-options) |
+| `profiles` | | [Profiles](#profiles) |
+| `comment` | | Free text, ignored. Every rule object (`attributeFilters` and `allowedInteractions` entries, profiles) takes a `comment` too. |
+
+Report-time keys are applied when the report is built, so you can change them and [rebuild the report](#rebuilding-the-report-report-cli) without running the tests. Recording options decide what is captured; changing them needs a new run.
+
+### Where the config comes from
+
+- **The file:** `ui-coverage.config.ts` (or `.mts`, `.cts`, `.mjs`, `.js`, `.cjs`, `.json`) in the directory of the Playwright config. Two of them in one directory is an error. Inside Playwright, TypeScript configs load through Playwright's own TypeScript support, so any Node.js version works. Functions like `normalizeUrl` need a JS/TS config.
+- **Another path:** the `UI_COVERAGE_CONFIG` environment variable (relative to the working directory), or the reporter option `configFile` (relative to the Playwright config; `false`: no file). The environment variable wins. The reporter passes the file it uses on to the test workers, so the recorder reads the same one.
+- **Inline:** the same keys in the reporter options, `['playwright-ui-coverage/reporter', { threshold: 80 }]`, except `recording` (the recorder runs in the test workers and can't see reporter options, so that's an error). The CLI reads only the file, so keep everything you want to rebuild with in the file.
+
+### Precedence
+
+Each layer wins over the ones before it, key by key:
+
+| | lowest → highest |
+|---|---|
+| Report-time keys | defaults → rules recorded with the data (deprecated `use.uiCoverage` rules) → config file → reporter options → selected profile |
+| Recording options | defaults → `recording` in the config file → the selected profile's `recording` → `use.uiCoverage` in the Playwright config |
+
+`use.uiCoverage` (in `playwright.config.ts`, per project if you like) keeps working and has the last word on recording options.
+
+Merging: a key that is set replaces the value below it. Lists replace (they're never concatenated). Objects (`recording`, `threshold` as an object) are merged one level deep, so a profile with `threshold: { overall: 90 }` keeps the base `threshold.views`. A key set to `undefined` counts as not set.
+
+### Profiles
+
+```ts
+profiles: [
+  { name: 'pr-critical', tags: ['@pr-critical'], config: { threshold: { overall: 90 }, ignoreSelectors: ['footer *'] } },
+  { name: 'mobile', projects: ['mobile-chrome', 'mobile-safari'], config: { recording: { screenshots: 'off' } } },
+  { name: 'nightly', comment: 'selected explicitly', config: { countFailedTests: true } },
 ],
 ```
 
-To share them with the `report` CLI, keep them in their own file and spread it into the reporter options, e.g. `...require('./ui-coverage.config.json')` (the demo does this with `demo/ui-coverage.config.json`). The type is exported as `UiCoverageRules`.
+A profile's `config` takes every top-level key except `profiles`, and is merged over the base config as described above. A run uses one profile, or none:
+
+1. **Explicit:** `UI_COVERAGE_PROFILE=<name>`, else the reporter option `profile`. In the CLI, `--profile <name>` wins over both. An unknown name is an error that lists the defined ones; an empty value selects no profile.
+2. **Automatic:** otherwise the **first** profile that matches the run:
+   - `projects`: every project with tests in the run is listed (`npx playwright test --project=mobile-chrome`);
+   - `tags`: every test in the run has one of these tags (`npx playwright test --grep @pr-critical`; the `@` is optional);
+   - both set: both must match. A profile with neither is only selected explicitly.
+
+The reporter selects the profile when the run starts, and the test workers record with it. When the run has no UI coverage reporter (`--reporter=blob` shards), each test selects with its own project and tags, or with `UI_COVERAGE_PROFILE`. The CLI uses `--profile`, else `UI_COVERAGE_PROFILE`, else the profile the reporter used (recorded in the data folder), else automatic selection from the recorded tests. The reporter and the CLI print `UI coverage profile: <name>` when one is used.
+
+### Validation
+
+The config is checked when the reporter starts, by the CLI, and by the recorder in each worker. Every problem is reported at once, with its location:
+
+```
+[playwright-ui-coverage] invalid ui-coverage.config.ts:
+  - ignoreSelector: unknown key (did you mean "ignoreSelectors"?)
+  - snapshotDelay: is a recording option: put it in `recording: { snapshotDelay }`
+  - profiles[0].config.threshold.overall: must be ≤ 100, got 120
+  - attributeFilters[1].value: invalid regular expression: …
+```
+
+Unknown keys, wrong types, unknown interaction types, invalid regular expressions and selectors that can't be evaluated at report time are all errors.
+
+### The resolved config in `coverage.json`
+
+`coverage.json` and `data/ui-coverage-data.json` record which config built the report:
+
+```json
+"config": {
+  "source": { "file": "ui-coverage.config.ts", "inline": ["threshold"] },
+  "profile": "pr-critical",
+  "resolved": { "significantAttributes": ["data-component"], "threshold": { "overall": 90 }, "recording": { "screenshots": "first-only" } }
+}
+```
+
+`source.file` is relative to the working directory (`null` without a file). `source.inline` lists the keys set in the reporter options. `resolved` is the merged config without `profiles`; functions appear as `"[function name]"`. Its `recording` is what the config sets; `use.uiCoverage` may override it per project.
+
+### Report-time rules
+
+```ts
+// ui-coverage.config.ts
+export default defineUiCoverageConfig({
+  ignoreSelectors: ['.cookie-banner', '#debug-toolbar *'], // default: []
+  significantAttributes: ['data-component'],              // default: []
+  attributeFilters: [                                      // default: []
+    { attribute: 'id', value: 'tmp-.*' },                  // ignore id="tmp-…"
+    { attribute: 'id', value: 'mui-legacy', include: true, comment: 'stable, despite the built-in rule' },
+  ],
+});
+```
+
+The type is exported as `UiCoverageRules`.
 
 - **`ignoreSelectors`**: elements matching one of these selectors, or inside an element that does (also inside a frame or shadow host that does), are excluded. An entry is a selector string or `{ selector, documentScope }`, see [`documentScope`](#documentscope). Same rules as `data-uicov-interactive="exclude-all"` (a `reset` inside stops it, an element's own `include` wins). Anything inside `data-uicov-ignore` is always excluded. Selectors are evaluated on the recorded structure, see [Report-time selectors](#report-time-selectors). One difference from excluding in the markup: the [nesting rule](#which-elements-count) is decided while recording, so excluding all inner widgets of a container widget doesn't make the container count.
 - **`significantAttributes`**: attributes that identify an element, checked after `data-uicov-id` and before the built-in test-id attributes, in the order given.
-- **`attributeFilters`**: `{ attribute, value?, include? }` rules deciding whether an attribute value may be used as a key. `attribute` and `value` are regular expressions, anchored automatically (`'id'` means `^(?:id)$`). Attribute names match case-insensitively, values case-sensitively. Without `value`, the rule matches any value. The first matching rule wins: `include: false` (default) skips the value, `include: true` keeps it. Your rules run before the built-in ones, which skip:
+- **`attributeFilters`**: `{ attribute, value?, include?, comment? }` rules deciding whether an attribute value may be used as a key. `attribute` and `value` are regular expressions, anchored automatically (`'id'` means `^(?:id)$`). Attribute names match case-insensitively, values case-sensitively. Without `value`, the rule matches any value. The first matching rule wins: `include: false` (default) skips the value, `include: true` keeps it. Your rules run before the built-in ones, which skip:
   - React `useId` values (`:r1:`, `:R2kq:`, `«r1»`), UUIDs and hex strings of 16+ characters, in any attribute;
   - in `id` and `name`: framework counters (`ember123`, `mui-12345`, `radix-…`, `headlessui-…`, `react-aria-…`, `downshift-…`, `react-select-…`, `mat-…-0`, `cdk-…-3`, `ui-id-4`, `ext-gen12`, `gwt-uid-3`, `yui_…`, `j_id…`), purely numeric values and values with 3+ consecutive digits.
 
@@ -210,34 +311,40 @@ Each host selector is matched in the host's own document or shadow tree. The hos
 
 #### Deprecated: rules in `use.uiCoverage`
 
-`ignoreSelectors`, `significantAttributes` and `attributeFilters` used to be recording options. In `use.uiCoverage` they still work, but are deprecated:
+`ignoreSelectors`, `significantAttributes` and `attributeFilters` used to be recording options. In `use.uiCoverage` they still work, but are deprecated (and not accepted in `recording`):
 
-- `significantAttributes` and `attributeFilters` are recorded with the data and applied at report time. If the reporter options set the same rule (even to `[]`), the reporter's value wins.
+- `significantAttributes` and `attributeFilters` are recorded with the data and applied at report time. If the config (file, reporter options or profile) sets the same rule (even to `[]`), the config's value wins.
 - `ignoreSelectors` is applied while recording (as before, with any CSS the browser supports), so it can't be undone at report time.
 
-Move them to the reporter options to change them without re-running tests. When you do, pass them to `merge-reports` too (see [Sharding](#sharding-and-merge-reports)).
+Move them to the config file to change them without re-running tests.
 
-### Recording (`use.uiCoverage`, works in both modes)
+### Recording options
+
+`recording` in the config file, read by both the fixture and register mode:
 
 ```ts
-import { defineConfig } from '@playwright/test';
-import { DEFAULT_INTERACTIONS, type UiCoverageOptions } from 'playwright-ui-coverage';
-
-export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
-  use: {
-    uiCoverage: {
-      enabled: !!process.env.UI_COVERAGE, // default: true
-      snapshotDelay: 250,                  // ms, default: 250
-      screenshots: 'on',                   // 'on' | 'first-only' | 'off', default: 'on'
-      format: 'jpeg',                      // 'png' | 'jpeg', default: 'png'
-      quality: 80,                         // JPEG quality 0-100, default: 80
-      maxScreenshotHeight: 8000,           // CSS px, 0 = no cap, default: 8000
-      interactions: [...DEFAULT_INTERACTIONS, 'focus'], // default: DEFAULT_INTERACTIONS
-      allowedInteractions: [               // default: []
-        { selector: '.date-picker input', events: ['change'] }, // focusing or clicking it doesn't count
-      ],
-    },
+// ui-coverage.config.ts
+export default defineUiCoverageConfig({
+  recording: {
+    enabled: !!process.env.UI_COVERAGE, // default: true
+    snapshotDelay: 250,                  // ms, default: 250
+    screenshots: 'on',                   // 'on' | 'first-only' | 'off', default: 'on'
+    format: 'jpeg',                      // 'png' | 'jpeg', default: 'png'
+    quality: 80,                         // JPEG quality 0-100, default: 80
+    maxScreenshotHeight: 8000,           // CSS px, 0 = no cap, default: 8000
+    interactions: [...DEFAULT_INTERACTIONS, 'focus'], // default: DEFAULT_INTERACTIONS
+    allowedInteractions: [               // default: []
+      { selector: '.date-picker input', events: ['change'], comment: "focusing or clicking it doesn't count" },
+    ],
   },
+});
+```
+
+The same keys still work in `use.uiCoverage` in `playwright.config.ts` (type `UiCoverageOptions`), for example per project, and win over the config file key by key:
+
+```ts
+export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
+  projects: [{ name: 'webkit', use: { uiCoverage: { format: 'jpeg' } } }],
 });
 ```
 
@@ -273,7 +380,9 @@ Screenshot options:
 
 In `coverage.json`, each element has `interactionCounts`: the interactions that counted as tested, by type (`{ "click": 3, "input": 1 }`). The report shows them as the tooltip of the *tested* label and of the Interactions cell. Each element also lists `testIds` / `failingTestIds`, the Playwright test ids (`TestCase.id`) of the tests that touched it, which point into the top-level `tests` array (see [coverage.json](#coveragejson)).
 
-### Reporter
+### Reporter settings
+
+Top-level keys of the config file (or reporter options):
 
 | Option | Default | Description |
 |---|---|---|
@@ -288,7 +397,9 @@ In `coverage.json`, each element has `interactionCounts`: the interactions that 
 | `saveData` | `true` | Keep the raw data and every screenshot in `<outputFolder>/data/` for the [`report` CLI](#rebuilding-the-report-report-cli). |
 | `baseline` | none | Fail only on *new* untested elements, compared with a committed baseline file. See [Baseline](#baseline-fail-only-on-new-untested-elements). |
 | `githubSummary` | `false` | Append a markdown summary to `$GITHUB_STEP_SUMMARY` when it's set. See [Comparing runs](#comparing-runs-pr-comments-and-the-github-step-summary). |
-| `ignoreSelectors`, `significantAttributes`, `attributeFilters` | `[]` | [Report-time rules](#report-time-rules-reporter-options). |
+| `ignoreSelectors`, `significantAttributes`, `attributeFilters` | `[]` | [Report-time rules](#report-time-rules). |
+
+Reporter options only: `configFile` and `profile`, see [Where the config comes from](#where-the-config-comes-from) and [Profiles](#profiles).
 
 ### Links to the HTML report and traces
 
@@ -365,12 +476,13 @@ What it can't see: elements that are clickable only through a JS handler and hav
 ### Thresholds
 
 ```ts
-['playwright-ui-coverage/reporter', {
+// ui-coverage.config.ts
+export default defineUiCoverageConfig({
   threshold: {
     overall: 70,
     views: { '/checkout': 95, '/login': 95, '/admin/*': 50 },
   },
-}],
+});
 ```
 
 `threshold: 70` is shorthand for `{ overall: 70 }`. If any threshold isn't met, the reporter prints each failing view with its actual and required % and the run fails (exit code 1).
@@ -553,16 +665,16 @@ npx playwright test --shard=2/2 --reporter=blob
 npx playwright merge-reports --reporter playwright-ui-coverage/reporter all-blob-reports
 ```
 
-The merged report is the same as one from an unsharded run. To pass reporter options (e.g. `outputFolder`, `threshold`, and the [report-time rules](#report-time-rules-reporter-options)), use a config file with `npx playwright merge-reports --config merge.config.ts all-blob-reports`. `--reporter` on the command line uses default options, so rules set in the reporter options would be missing:
+The merged report is the same as one from an unsharded run. The reporter finds `ui-coverage.config.*` next to the config `merge-reports` uses (with `--reporter` alone and no `--config`, that's the working directory), or through `UI_COVERAGE_CONFIG`. Options set inline in `playwright.config.ts` aren't seen by `merge-reports`; pass them in a merge config (`npx playwright merge-reports --config merge.config.ts all-blob-reports`):
 
 ```ts
 // merge.config.ts
-import rules from './ui-coverage.config.json';
-
 export default {
-  reporter: [['playwright-ui-coverage/reporter', { ...rules, outputFolder: 'ui-coverage-report', threshold: 30 }]],
+  reporter: [['playwright-ui-coverage/reporter', { configFile: './ui-coverage.config.ts', threshold: 30 }]],
 };
 ```
+
+The shards record with the config file too (`recording`, and a profile selected by each test's project and tags, or by `UI_COVERAGE_PROFILE`).
 
 Each screenshot is a file attachment named `ui-coverage-screenshot-<n>`, next to the `ui-coverage` JSON attachment, so you'll see them listed under the test's attachments in Playwright's own HTML report.
 
@@ -581,19 +693,21 @@ ui-coverage-report/
 Rebuild the report from it, e.g. after changing a filter, without running the tests:
 
 ```bash
-npx playwright-ui-coverage report --config ui-coverage.config.json
-npx playwright-ui-coverage report --data ci-artifacts/ui-coverage-report/data --config ui-coverage.config.mjs --out ui-coverage-report
+npx playwright-ui-coverage report
+npx playwright-ui-coverage report --profile pr-critical
+npx playwright-ui-coverage report --data ci-artifacts/ui-coverage-report/data --config other.config.mjs --out ui-coverage-report
 ```
 
 | Flag | Default | |
 |---|---|---|
-| `--config <file>` | none (default options) | A module exporting the reporter options: `.json`, `.js`/`.cjs` (`module.exports = {…}`), `.mjs` (`export default {…}`), or `.ts`/`.mts` if your Node.js can import TypeScript (22.18+ / 23.6+). Functions like `normalizeUrl` need a JS/TS config. |
+| `--config <file>` | `UI_COVERAGE_CONFIG`, else `ui-coverage.config.*` in the working directory, else default options | The [config file](#configuration): `.json`, `.js`/`.cjs` (`module.exports = {…}`), `.mjs` (`export default {…}`), `.ts`/`.mts`/`.cts` (loaded with Playwright's TypeScript support). `recording` is ignored here (nothing is recorded). |
+| `--profile <name>` | `UI_COVERAGE_PROFILE`, else the profile the reporter used, else automatic | The [profile](#profiles) to apply; `''` for none. |
 | `--data <dir>` | `data/` in the config's `outputFolder` (else `ui-coverage-report/data`) | The data folder. |
 | `--out <dir>` | the folder that contains `--data` | Where to write the report. Only `index.html`, `coverage.json` and `screens/` are replaced. |
 
-`threshold` and `baseline` are checked like in the reporter: the CLI exits with code 1 if a threshold isn't met or there are new untested elements, and 2 on errors (bad flags, unreadable data, invalid rules). Other commands: [`baseline`](#baseline-fail-only-on-new-untested-elements), [`compare` and `summary`](#comparing-runs-pr-comments-and-the-github-step-summary).
+`threshold` and `baseline` are checked like in the reporter: the CLI exits with code 1 if a threshold isn't met or there are new untested elements, and 2 on errors (bad flags, unreadable data, an invalid config, an unknown profile). Other commands: [`baseline`](#baseline-fail-only-on-new-untested-elements), [`compare` and `summary`](#comparing-runs-pr-comments-and-the-github-step-summary).
 
-**What a rebuild can change:** everything the reporter does with the data: [report-time rules](#report-time-rules-reporter-options), `normalizeUrl`, `viewBy`, `threshold`, `countFailedTests`, `maxScreenshotsPerRoute`. Links to the HTML report are kept and adjusted to `--out` (`htmlReport: false` drops them). **What it can't:** what was recorded. Which elements are interactive is decided in the browser (it needs the live page: computed styles, descendants, label targets), interaction types are recording options, and screenshots are what they are. The deprecated `use.uiCoverage.ignoreSelectors` was applied while recording.
+**What a rebuild can change:** everything the reporter does with the data: [report-time rules](#report-time-rules), `normalizeUrl`, `viewBy`, `threshold`, `countFailedTests`, `maxScreenshotsPerRoute`. Links to the HTML report are kept and adjusted to `--out` (`htmlReport: false` drops them). **What it can't:** what was recorded. Which elements are interactive is decided in the browser (it needs the live page: computed styles, descendants, label targets), interaction types are recording options, and screenshots are what they are. The deprecated `use.uiCoverage.ignoreSelectors` was applied while recording.
 
 **Data format.** `ui-coverage-data.json` has `formatVersion: 1` and an `attempts` array: one entry per test attempt and browser context with `testId`, `retry`, `passed`, `title`, `project`, `trace`, `tags`, `specFile` and `data`, the recording (`formatVersion: 3`, see `RawCoverageData` in [src/model/raw.ts](src/model/raw.ts); version 2 is still read):
 
@@ -601,6 +715,8 @@ npx playwright-ui-coverage report --data ci-artifacts/ui-coverage-report/data --
 - `snapshots`: `{ url, dpr, screenshot?, elements }`, with each element `{ node, name?, x, y, w, h }` (`name` is the accessible name, used for labels only; `candidateOnly: true` marks elements recorded although they aren't interactive, like `<label>`).
 - `interactions`: `{ event, url, element: { node, name? } }`, pointing into the same node table, so an interaction resolves to the same key as the element in the inventory.
 - `rules`: the deprecated `use.uiCoverage` identity rules, if any.
+
+The file also has `config`, the [resolved config](#the-resolved-config-in-coveragejson) the reporter used; the CLI uses its `profile` when no other is chosen.
 
 The same recording is the `ui-coverage` test attachment, so `merge-reports` and the data folder carry identical data. Attachments from earlier versions (no `formatVersion`, keys computed in the browser) are still read, but report-time rules can't change their keys.
 
@@ -667,19 +783,19 @@ npm install
 npx playwright install chromium
 npm run demo          # fixture mode: runs demo/tests, writes ui-coverage-report/
 npm run demo:register # register mode: same tests, config-only recording
-UICOV_DEMO_THRESHOLDS=1 npm run demo     # per-view thresholds that fail (exit code 1)
-UICOV_DEMO_THRESHOLDS=pass npm run demo  # per-view thresholds that pass
+UI_COVERAGE_PROFILE=thresholds-fail npm run demo  # per-view thresholds that fail (exit code 1), from ui-coverage.config.ts
+UI_COVERAGE_PROFILE=thresholds-pass npm run demo  # per-view thresholds that pass
 UICOV_DEMO_FAIL=1 npx playwright test --retries=1  # adds a failing and a flaky test (demo/tests/failing.spec.ts)
 UICOV_TRACE=1 npm run demo  # records traces; "Tested by" links to them in playwright-report/
 npm run check:interactivity  # in-browser check of the interactivity rules and interaction types
 npm run check:locators       # checks suggested locators and a11y hints; with a demo report, that every locator resolves
 npm run example:ct    # component testing example (examples/ct-react): installs it, runs it, writes its report
 npm run demo:sharded  # runs 2 blob shards + merge-reports, checks it matches an unsharded run
-npm run check:rebuild # checks the report CLI rebuilds the same report from data/, and that changed rules apply
+npm run check:rebuild # checks the report CLI rebuilds the same report from data/, that changed rules apply, and config profiles/validation
 npm run check:baseline  # baseline update/check, a new gap (UICOV_DEMO_GAP=1), compare and the step summary, end to end
 UICOV_DEMO_BASELINE=update npm run demo           # writes demo/ui-coverage-baseline.json (gitignored)
 UICOV_DEMO_BASELINE=check UICOV_DEMO_GAP=1 npm run demo  # a test skips a step: fails with 1 new untested element
-UICOV_DEMO_LEGACY=1 npm run demo  # sets the rules the deprecated way (use.uiCoverage); same report
+UICOV_DEMO_LEGACY=1 npm run demo  # no config file: rules and recording options in use.uiCoverage (deprecated for rules); same report
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
 npm run perf          # builds a 300-route synthetic report in perf-report/ and times it in Chromium
 npm run typecheck

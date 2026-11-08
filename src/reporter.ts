@@ -1,16 +1,30 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { FullConfig, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
+import type { FullConfig, Reporter, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 import { isPassingResult } from './attempts';
 import type { StoredAttempt } from './model/raw';
-import { pickRules, validateRules } from './model/rules';
-import { buildReport, DATA_DIR, readData, writeData, type ReportInput, type UiCoverageReporterOptions } from './report';
+import {
+  configFilePath,
+  configTrace,
+  envProfile,
+  loadConfigFileSync,
+  publishRunDecision,
+  resolveConfig,
+  selectProfile,
+  userReporterOptions,
+  validateReporterOptions,
+  type ResolvedConfig,
+  type RunInfo,
+  type UiCoverageConfig,
+  type UiCoverageReporterOptions,
+} from './config';
+import { buildReport, DATA_DIR, readData, writeData, type ReportInput } from './report';
 import { resolveBaselineOption } from './baseline';
 import { resolveHtmlReport, type HtmlReportLink } from './insights';
 import { ATTACHMENT_NAME } from './types';
 
-export type { UiCoverageReporterOptions } from './report';
+export type { UiCoverageReporterOptions } from './config';
 
 const CT_CONFIG_KEY = '@playwright/experimental-ct-core';
 
@@ -64,13 +78,41 @@ class UiCoverageReporter implements Reporter {
   /** `use.testIdAttribute` of the first project that sets it. */
   private configTestIdAttribute: string | undefined;
 
-  constructor(private options: UiCoverageReporterOptions = {}) {
-    // Fail fast on bad rules (invalid regex, unsupported selector syntax).
-    validateRules(pickRules(options as Record<string, unknown>), 'reporter options');
-    resolveBaselineOption(options.baseline, process.cwd());
+  private inline: UiCoverageReporterOptions;
+  private configFile: string | undefined;
+  private fileConfig: UiCoverageConfig | undefined;
+  private explicitProfile: string | undefined;
+  private resolved!: ResolvedConfig;
+
+  constructor(options: Record<string, unknown> = {}) {
+    // Fail fast on bad options and config files (unknown keys, wrong types,
+    // invalid regexes, unsupported selector syntax, unknown profile names).
+    this.inline = userReporterOptions(options);
+    validateReporterOptions(this.inline);
+    // Playwright passes the config's directory to reporters.
+    const configDir = typeof options.configDir === 'string' ? options.configDir : process.cwd();
+    this.configFile = configFilePath(configDir, this.inline.configFile);
+    this.fileConfig = this.configFile ? loadConfigFileSync(this.configFile) : undefined;
+    this.explicitProfile = envProfile() ?? this.inline.profile;
+    if (this.explicitProfile !== undefined)
+      selectProfile(this.inline.profiles ?? this.fileConfig?.profiles, { explicit: this.explicitProfile });
   }
 
-  onBegin(config: FullConfig) {
+  private get options() {
+    return this.resolved.config;
+  }
+
+  onBegin(config: FullConfig, suite: Suite) {
+    const tests = suite.allTests();
+    const run: RunInfo = {
+      projects: [...new Set(tests.map((t) => t.parent.project()?.name ?? ''))],
+      tests: tests.map((t) => ({ tags: (t as { tags?: string[] }).tags })),
+    };
+    const { config: resolved, profile } = resolveConfig(this.fileConfig, this.inline, { explicit: this.explicitProfile, run });
+    const inline = Object.keys(this.inline).filter((k) => k !== 'configFile' && k !== 'profile');
+    this.resolved = { config: resolved, file: this.configFile, inline, profile };
+    // The test workers start after onBegin and inherit the environment: record with the same file and profile.
+    publishRunDecision(this.configFile, profile);
     // Resolve relative to the config file's directory (like Playwright's html reporter).
     const configDir = config.configFile ? path.dirname(config.configFile) : process.cwd();
     this.configDir = configDir;
@@ -106,7 +148,9 @@ class UiCoverageReporter implements Reporter {
     if (this.tests.length === 0) return;
     fs.rmSync(this.outputFolder, { recursive: true, force: true });
     fs.mkdirSync(this.outputFolder, { recursive: true });
+    const trace = configTrace(this.resolved);
     let input: ReportInput = {
+      config: trace,
       attempts: this.tests,
       componentTestConfig: this.componentTestConfig,
       ...(this.htmlReport ? { htmlReport: this.htmlReport } : {}),
@@ -119,7 +163,8 @@ class UiCoverageReporter implements Reporter {
       writeData(dataDir, input);
       input = readData(dataDir);
     }
-    const { failed } = buildReport(input, this.options, this.outputFolder, { baseDir: this.configDir });
+    if (trace.profile) console.log(`\nUI coverage profile: ${trace.profile}`);
+    const { failed } = buildReport(input, this.options, this.outputFolder, { baseDir: this.configDir, config: trace });
     if (failed) return { status: 'failed' as const };
   }
 

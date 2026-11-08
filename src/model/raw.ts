@@ -4,6 +4,7 @@
  * report is built. Interactivity is recorded as a per-element fact (it needs
  * the live DOM to decide).
  */
+import type { ReportConfig } from '../coverage-report';
 import type { HtmlReportLink } from '../insights';
 import type { UiCoverageRules } from './rules';
 
@@ -197,5 +198,10 @@ export interface StoredData {
   htmlReport?: HtmlReportLink;
   /** `use.testIdAttribute` from the run's config, for suggested locators. */
   testIdAttribute?: string;
+  /** The UI coverage config the reporter used (also in `coverage.json`). */
+  config?: ConfigTrace;
   attempts: StoredAttempt[];
 }
+
+/** Where the config of a report came from (same as `config` in `coverage.json`). */
+export type ConfigTrace = ReportConfig;

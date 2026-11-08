@@ -12,14 +12,19 @@ import { selectAttempts } from './attempts';
 import { addSuggestedLocators } from './locators';
 import { indexTests, mostRepeated } from './insights';
 import { renderHtml } from './html';
-import { DATA_FILE, DATA_FORMAT_VERSION, type StoredData } from './model/raw';
+import { DATA_FILE, DATA_FORMAT_VERSION, type ConfigTrace, type StoredData } from './model/raw';
 import { resolveCoverageData, type CompiledRules, type RecordedCoverageData } from './model/resolve';
 import { pickRules, validateRules, type UiCoverageRules } from './model/rules';
 import { forDisplay, formatBaselineCheck, resolveBaselineOption, runBaseline, type BaselineOption } from './baseline';
 import { reportMarkdown } from './markdown';
 import { evaluateThresholds, formatThresholdResults, type ThresholdOption, type ThresholdResult } from './thresholds';
 
-export interface UiCoverageReporterOptions extends UiCoverageRules {
+/**
+ * What the report is built with: report-time rules plus reporter settings.
+ * The config file (`UiCoverageConfig`) and the reporter options hold these
+ * keys (plus `recording` and `profiles`); see `config.ts`.
+ */
+export interface ReportOptions extends UiCoverageRules {
   /** Where to write the report. Default: "ui-coverage-report". */
   outputFolder?: string;
   /** Map a URL to a route/view name. Default strips query and replaces id-like segments with ":id". */
@@ -82,7 +87,7 @@ export interface UiCoverageReporterOptions extends UiCoverageRules {
 export const DATA_DIR = 'data';
 
 /** What a report is built from: the stored attempts and facts about the run. */
-export type ReportInput = Pick<StoredData, 'attempts' | 'componentTestConfig' | 'htmlReport' | 'testIdAttribute'>;
+export type ReportInput = Pick<StoredData, 'attempts' | 'componentTestConfig' | 'htmlReport' | 'testIdAttribute' | 'config'>;
 
 /** Snapshot screenshot references in a recording (raw and pre-0.2 data share this shape). */
 const snapshotsOf = (data: unknown): { screenshot?: string }[] =>
@@ -116,6 +121,7 @@ export function writeData(dataDir: string, input: ReportInput): void {
     ...(input.componentTestConfig ? { componentTestConfig: true } : {}),
     ...(input.htmlReport ? { htmlReport: input.htmlReport } : {}),
     ...(input.testIdAttribute ? { testIdAttribute: input.testIdAttribute } : {}),
+    ...(input.config ? { config: input.config } : {}),
     attempts: out,
   };
   fs.writeFileSync(path.join(dataDir, DATA_FILE), JSON.stringify(file));
@@ -151,6 +157,8 @@ export function readData(dataDir: string): ReportInput {
 export interface ReportContext {
   /** The Playwright config file's folder (reporter) or `--config`'s folder (CLI). Default: cwd. */
   baseDir?: string;
+  /** Where the options came from, written to coverage.json as `config`. */
+  config?: ConfigTrace;
 }
 
 export interface ReportResult {
@@ -166,10 +174,11 @@ export interface ReportResult {
 /**
  * Applies the rules in `options` to `attempts` and writes `index.html`,
  * `coverage.json` and `screens/` into `outDir` (other files there are kept).
+ * `config` (where the options came from) is written into `coverage.json`.
  */
 export function buildReport(
   input: ReportInput,
-  options: UiCoverageReporterOptions,
+  options: ReportOptions,
   outDir: string,
   context: ReportContext = {},
 ): ReportResult {
@@ -227,7 +236,7 @@ export function buildReport(
   }
 
   const thresholds = evaluateThresholds(summary, options.threshold);
-  const report = toCoverageReport(summary, thresholds);
+  const report = toCoverageReport(summary, thresholds, context.config);
   if (baselineOption) report.baseline = runBaseline(report, baselineOption, outDir);
   fs.writeFileSync(path.join(outDir, 'coverage.json'), JSON.stringify(report, null, 2));
   fs.writeFileSync(path.join(outDir, 'index.html'), renderHtml(summary));

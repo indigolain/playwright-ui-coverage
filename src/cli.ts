@@ -9,7 +9,6 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   DEFAULT_BASELINE_FILE,
@@ -22,8 +21,16 @@ import {
 import { compareReports } from './compare';
 import type { CoverageReport } from './coverage-report';
 import { comparisonMarkdown, reportMarkdown, type MarkdownOptions } from './markdown';
-import { pickRules, validateRules } from './model/rules';
-import { buildReport, DATA_DIR, readData, type UiCoverageReporterOptions } from './report';
+import {
+  configTrace,
+  envProfile,
+  findConfigFile,
+  loadConfigFile,
+  resolveConfig,
+  type RunInfo,
+  type UiCoverageConfig,
+} from './config';
+import { buildReport, DATA_DIR, readData, type ReportInput, type ReportOptions } from './report';
 import { assertCoverageReport } from './units';
 
 const USAGE = `Usage: playwright-ui-coverage <command> [options]
@@ -38,21 +45,27 @@ Commands:
                             untested elements, resolved gaps, added/removed views.
   summary [coverage.json]   Markdown summary of one run (what githubSummary writes).
 
+report and baseline options:
+  --config <file>   UI coverage config file (.ts, .mts, .cts, .mjs, .js, .cjs,
+                    .json). Default: $UI_COVERAGE_CONFIG, else
+                    ui-coverage.config.* in the working directory, else
+                    default options. Relative paths in it resolve from its folder
+  --profile <name>  Profile to apply (default: $UI_COVERAGE_PROFILE; report:
+                    else the profile the reporter used, else automatic
+                    selection from the recorded projects and tags). '' selects none
+
 report options:
-  --data <dir>     Data folder written by the reporter (default: data/ in the
-                   config's outputFolder, else ui-coverage-report/data)
-  --config <file>  Module exporting the reporter options (.js, .cjs, .mjs, .json;
-                   .ts/.mts when your Node.js version can import TypeScript)
-  --out <dir>      Where to write the report (default: the folder that
-                   contains the data folder). Only index.html, coverage.json
-                   and screens/ are replaced; nothing else is deleted.
+  --data <dir>      Data folder written by the reporter (default: data/ in the
+                    config's outputFolder, else ui-coverage-report/data)
+  --out <dir>       Where to write the report (default: the folder that
+                    contains the data folder). Only index.html, coverage.json
+                    and screens/ are replaced; nothing else is deleted.
 
 baseline options:
   --report <file>      coverage.json (default: coverage.json in the config's
                        outputFolder, else ui-coverage-report/coverage.json)
   --file <file>        Baseline file (default: the config's baseline.file, else
                        ${DEFAULT_BASELINE_FILE})
-  --config <file>      Reporter options, for outputFolder and baseline
   --allow-new-views    check: untested elements of views not in the baseline
                        don't fail
 
@@ -67,41 +80,26 @@ compare / summary options:
 Exit codes: 0 ok, 1 a threshold or the baseline check failed, 2 usage or input error.
 `;
 
-// tsc compiles `import()` to `require()` for CommonJS output; keep a real dynamic import for ESM/TS configs.
-const dynamicImport = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<any>;
+/** The config file: --config, else $UI_COVERAGE_CONFIG, else ui-coverage.config.* in the working directory. */
+async function configFileOf(values: Values): Promise<{ file?: string; config: UiCoverageConfig }> {
+  const given = str(values.config) ?? process.env.UI_COVERAGE_CONFIG;
+  const file = given ? path.resolve(given) : findConfigFile(process.cwd());
+  return { file, config: file ? await loadConfigFile(file) : {} };
+}
 
-export async function loadConfig(file: string): Promise<UiCoverageReporterOptions> {
-  const abs = path.resolve(file);
-  if (!fs.existsSync(abs)) throw new Error(`config file not found: ${file}`);
-  const ext = path.extname(abs).toLowerCase();
-  let mod: any;
-  if (ext === '.json') {
-    mod = JSON.parse(fs.readFileSync(abs, 'utf8'));
-  } else {
-    try {
-      mod = await dynamicImport(pathToFileURL(abs).href);
-    } catch (e) {
-      if (['.ts', '.mts', '.cts'].includes(ext)) {
-        throw new Error(
-          `can't load ${file}: ${(e as Error).message}\n` +
-            `TypeScript configs need a Node.js version that can import .ts files (22.18+ / 23.6+); ` +
-            `otherwise use a .js, .mjs or .json config.`,
-        );
-      }
-      throw e;
-    }
-    // ESM default export, or CommonJS `module.exports` (exposed as `default` too).
-    mod = mod?.default ?? mod;
-    if (mod && typeof mod === 'object' && 'default' in mod && Object.keys(mod).length === 1) mod = mod.default;
-  }
-  if (!mod || typeof mod !== 'object' || Array.isArray(mod))
-    throw new Error(`${file} must export the reporter options object`);
-  return mod as UiCoverageReporterOptions;
+/** Projects and tags of the recorded tests, for automatic profile selection. */
+function runInfo(input: ReportInput): RunInfo {
+  const tests = new Map<string, string[] | undefined>();
+  for (const a of input.attempts) tests.set(a.testId, a.tags);
+  return {
+    projects: [...new Set(input.attempts.map((a) => a.project ?? ''))],
+    tests: [...tests.values()].map((tags) => ({ tags })),
+  };
 }
 
 const COMMAND_OPTIONS: Record<string, string[]> = {
-  report: ['data', 'config', 'out'],
-  baseline: ['report', 'file', 'config', 'allow-new-views'],
+  report: ['data', 'config', 'profile', 'out'],
+  baseline: ['report', 'file', 'config', 'profile', 'allow-new-views'],
   compare: ['format', 'out', 'report-url', 'title'],
   summary: ['out', 'report-url', 'title'],
 };
@@ -129,7 +127,7 @@ function output(text: string, out: string | undefined) {
 }
 
 /** outputFolder in the config is relative to the config file (like in playwright.config.ts). */
-function reportDirOf(config: string | undefined, options: UiCoverageReporterOptions) {
+function reportDirOf(config: string | undefined, options: ReportOptions) {
   return config && options.outputFolder
     ? path.resolve(path.dirname(path.resolve(config)), options.outputFolder)
     : path.resolve('ui-coverage-report');
@@ -138,22 +136,35 @@ function reportDirOf(config: string | undefined, options: UiCoverageReporterOpti
 const baseDirOf = (config: string | undefined) => (config ? path.dirname(path.resolve(config)) : process.cwd());
 
 async function reportCommand(values: Values): Promise<number> {
-  const config = str(values.config);
-  const options = config ? await loadConfig(config) : {};
-  validateRules(pickRules(options as Record<string, unknown>), config ?? 'options');
-  const reportDir = reportDirOf(config, options);
+  const { file, config: fileConfig } = await configFileOf(values);
+  let explicit = str(values.profile) ?? envProfile();
+  // The data folder: with automatic profile selection, from the base config's outputFolder.
+  const base = resolveConfig(fileConfig, undefined, { explicit }).config;
+  const reportDir = reportDirOf(file, base);
   const dataDir = path.resolve(str(values.data) ?? path.join(reportDir, DATA_DIR));
   const out = path.resolve(str(values.out) ?? (values.data ? path.dirname(dataDir) : reportDir));
-  const attempts = readData(dataDir);
+  const input = readData(dataDir);
+  // Without an explicit choice, use the profile the reporter used, if the config still has it.
+  const recorded = input.config?.profile;
+  if (explicit === undefined && recorded) {
+    if (fileConfig.profiles?.some((p) => p.name === recorded)) explicit = recorded;
+    else
+      console.warn(
+        `playwright-ui-coverage: the data was reported with profile "${recorded}", which the config doesn't define; selecting automatically`,
+      );
+  }
+  const { config, profile } = resolveConfig(fileConfig, undefined, { explicit, run: runInfo(input) });
+  const trace = configTrace({ config, file, inline: [], profile });
+  if (profile) console.log(`\nUI coverage profile: ${profile}`);
   fs.mkdirSync(out, { recursive: true });
-  const { failed } = buildReport(attempts, options, out, { baseDir: baseDirOf(config) });
+  const { failed } = buildReport(input, config, out, { baseDir: baseDirOf(file), config: trace });
   return failed ? 1 : 0;
 }
 
 async function baselineCommand(sub: string | undefined, values: Values): Promise<number> {
   if (sub !== 'check' && sub !== 'update') throw new UsageError('baseline: expected "check" or "update"');
-  const config = str(values.config);
-  const options = config ? await loadConfig(config) : {};
+  const { file: config, config: fileConfig } = await configFileOf(values);
+  const options = resolveConfig(fileConfig, undefined, { explicit: str(values.profile) ?? envProfile() }).config;
   const configured: BaselineOption = options.baseline && options.baseline !== true ? options.baseline : {};
   const fromConfig = typeof configured === 'string' ? { file: configured } : (configured as Exclude<BaselineOption, boolean | string>);
   const file = str(values.file) !== undefined
