@@ -1,3 +1,4 @@
+import type { HtmlReportLink, RepeatedElement, TestInfo } from './insights';
 import type { TestCoverageData } from './types';
 
 export interface ElementCoverage {
@@ -18,6 +19,14 @@ export interface ElementCoverage {
    * Empty for untested elements.
    */
   interactionCounts: Record<string, number>;
+  /** Sum of `interactionCounts`. */
+  interactionTotal?: number;
+  /** Distinct tests whose interactions counted (by test id when known, else by title). */
+  testCount?: number;
+  /** `TestCase.id`s of the tests in `testedBy`; see `CoverageSummary.tests`. */
+  testIds?: string[];
+  /** `TestCase.id`s of the tests in `testedByFailing`. */
+  failingTestIds?: string[];
 }
 
 export interface ScreenshotBox {
@@ -53,6 +62,12 @@ export interface CoverageSummary {
   percent: number;
   failingOnly: number;
   routes: RouteCoverage[];
+  /** Every test, with what's needed to link to it in Playwright's HTML report. Set by the reporter. */
+  tests?: TestInfo[];
+  /** Playwright's HTML report, when configured. Set by the reporter. */
+  htmlReport?: HtmlReportLink;
+  /** Elements used by the most tests. Set by the reporter. */
+  mostRepeated?: RepeatedElement[];
 }
 
 export type NormalizeUrl = (url: string) => string;
@@ -86,6 +101,8 @@ export type InteractionUse = 'tested' | 'failing' | 'ignore';
 
 export interface TestEntry {
   title: string;
+  /** `TestCase.id`; when set, elements list it in `testIds` / `failingTestIds`. */
+  testId?: string;
   data: TestCoverageData;
   /** Default: `tested`. */
   interactions?: InteractionUse;
@@ -99,7 +116,7 @@ export function aggregate(
   opts: { normalizeUrl: NormalizeUrl; maxScreenshotsPerRoute: number },
 ): CoverageSummary {
   type RouteAcc = {
-    elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string>; labels: Set<string> }>;
+    elements: Map<string, ElementCoverage & { testedBySet: Set<string>; failingSet: Set<string>; labels: Set<string>; idSet: Set<string>; failingIdSet: Set<string> }>;
     snapshots: { snap: TestCoverageData['snapshots'][number]; test: string }[];
   };
   const routes = new Map<string, RouteAcc>();
@@ -136,13 +153,15 @@ export function aggregate(
             testedBySet: new Set(),
             failingSet: new Set(),
             labels: new Set([el.label]),
+            idSet: new Set(),
+            failingIdSet: new Set(),
           });
       }
     }
   }
 
   // Pass 2: interactions.
-  for (const { title, data, interactions: use = 'tested' } of tests) {
+  for (const { title, testId, data, interactions: use = 'tested' } of tests) {
     if (use === 'ignore') continue;
     for (const i of data.interactions) {
       const acc = routeFor(i.url, data.view);
@@ -152,14 +171,17 @@ export function aggregate(
         el = {
           key: i.key, label: i.label, tag: '?', instances: 1, tested: false,
           testedBy: [], testedByFailing: [], interactionCounts: {}, testedBySet: new Set(), failingSet: new Set(), labels: new Set([i.label]),
+          idSet: new Set(), failingIdSet: new Set(),
         };
         acc.elements.set(i.key, el);
       }
       if (use === 'failing') {
         el.failingSet.add(title);
+        if (testId) el.failingIdSet.add(testId);
       } else {
         el.tested = true;
         el.testedBySet.add(title);
+        if (testId) el.idSet.add(testId);
         el.interactionCounts[i.event] = (el.interactionCounts[i.event] ?? 0) + 1;
       }
     }
@@ -167,7 +189,8 @@ export function aggregate(
 
   const result: RouteCoverage[] = [];
   for (const [route, acc] of routes) {
-    const elements = [...acc.elements.values()].map(({ testedBySet, failingSet, labels, ...e }) => {
+    const withIds = tests.some((t) => t.testId);
+    const elements = [...acc.elements.values()].map(({ testedBySet, failingSet, labels, idSet, failingIdSet, ...e }) => {
       // Elements sharing a key (e.g. a link on every table row) can have different
       // labels; pick one independent of test order so reports are reproducible.
       const sorted = [...labels].sort();
@@ -180,6 +203,11 @@ export function aggregate(
         interactionCounts: Object.fromEntries(
           Object.entries(e.interactionCounts).sort(([a], [b]) => a.localeCompare(b)),
         ),
+        interactionTotal: Object.values(e.interactionCounts).reduce((s, n) => s + n, 0),
+        testCount: withIds ? idSet.size : testedBySet.size,
+        ...(withIds
+          ? { testIds: [...idSet].sort(), failingTestIds: [...failingIdSet].filter((t) => !idSet.has(t)).sort() }
+          : {}),
       };
     });
     if (elements.length === 0) continue;

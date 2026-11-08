@@ -11,6 +11,14 @@ export interface AttemptEntry {
   /** Whether this attempt had the expected outcome (see `isPassingResult`). */
   passed: boolean;
   title: string;
+  /** Project name, shown next to the title when several projects ran. */
+  project?: string;
+  /**
+   * This attempt's trace as Playwright's HTML reporter stores it: the file name
+   * (`<sha1>.zip`) inside its attachments folder. Set only when the HTML report
+   * is linked (see `htmlReport`).
+   */
+  trace?: string;
   data: TestCoverageData;
 }
 
@@ -46,6 +54,6 @@ export function selectAttempts(entries: AttemptEntry[], opts: { countFailedTests
       if (pass === undefined) interactions = 'failing';
       else if (retry !== pass) interactions = 'ignore';
     }
-    return { title, data, interactions };
+    return { title, testId, data, interactions };
   });
 }

@@ -18,6 +18,10 @@ See which buttons, links and inputs your Playwright E2E tests **actually touch**
 
 <img src="docs/report-hover.png" alt="Hovering the 'button Delete ×3' row highlights all three Delete buttons on the screenshot in orange; the table lists each element with its status and the tests that covered it" width="720">
 
+**Jump to the test and its trace.** With Playwright's HTML reporter configured, each test under "Tested by" links to its entry in the HTML report, and to its trace when one was recorded. See [Links to the HTML report and traces](#links-to-the-html-report-and-traces).
+
+**Spot repeated setup.** The element table shows how many times each element was used (**Interactions**) and by how many tests (**Tests**); click either header to sort by it. **Most repeated elements** in the sidebar lists the elements used by the most tests across the report, such as a login form that every test fills in first.
+
 **Large suites.** Filter routes by name (press `/`), sort them by name, lowest coverage or most untested elements, and screenshots load lazily. A synthetic report with 300 routes × 80 elements opens in under 0.1 s and switching routes takes a few milliseconds (`npm run perf` to measure).
 
 **Dark mode** follows your system setting:
@@ -199,7 +203,13 @@ Screenshot options:
 | `quality` | `80` | JPEG quality (ignored for PNG). |
 | `maxScreenshotHeight` | `8000` | Full-page screenshots of taller pages are cropped to this height. Elements below the crop are still counted, just not drawn on the image. `0` disables the cap. |
 
-In `coverage.json`, each element has `interactionCounts`: the interactions that counted as tested, by type (`{ "click": 3, "input": 1 }`). The report shows them as the tooltip of the *tested* label.
+In `coverage.json`, each element has `interactionCounts`: the interactions that counted as tested, by type (`{ "click": 3, "input": 1 }`). The report shows them as the tooltip of the *tested* label and of the Interactions cell. Each element also has:
+
+- `interactionTotal`: the sum of `interactionCounts`;
+- `testCount`: the number of distinct tests whose interactions counted;
+- `testIds` / `failingTestIds`: the Playwright test ids (`TestCase.id`) behind `testedBy` / `testedByFailing`.
+
+The summary has `tests` (one entry per test: `id`, `title`, `project`, `run`, the attempt the report links to, and `trace`, see below), `mostRepeated` (up to 10 elements used by 2 or more tests, most first, with `route`, `key`, `label`, `tests`, `interactions` and `share`, the percent of all tests) and, when Playwright's HTML report is linked, `htmlReport`.
 
 ### Reporter
 
@@ -211,6 +221,34 @@ In `coverage.json`, each element has `interactionCounts`: the interactions that 
 | `threshold` | none | Fail the run if coverage % is below this: a number (overall), or `{ overall, views }` for per-view minimums. See below. |
 | `countFailedTests` | `false` | Let interactions from tests that didn't pass mark elements as tested. See below. |
 | `viewBy` | `'auto'` | Group views by page URL (`'url'`) or by spec file (`'file'`). `'auto'` picks `'file'` for component tests. See [Component testing](#component-testing). |
+| `htmlReport` | detected | Folder of Playwright's HTML report (relative to the config file) that "Tested by" links to. Detected from the `html` reporter in the config; `false` turns the links off. See below. |
+
+### Links to the HTML report and traces
+
+When the config also has Playwright's `html` reporter, each test under "Tested by" links to its entry in the HTML report (`index.html#?testId=<id>&run=<attempt>`): for a flaky test the retry that passed, for a test that never passed its last attempt. If that attempt recorded a trace (`use: { trace: 'on' }` or similar), a **trace** link opens it in the trace viewer bundled with the HTML report. The reporter reads the HTML reporter's `outputFolder` (and `PLAYWRIGHT_HTML_OUTPUT_DIR`, `attachmentsBaseURL`) from the config. Without the `html` reporter, tests are listed as plain text.
+
+Links are relative, so the two reports must keep their relative position when you move or upload them. Two layouts work:
+
+```ts
+// 1. Side by side (default): playwright-report/ and ui-coverage-report/
+reporter: [['html'], ['playwright-ui-coverage/reporter']],
+
+// 2. Inside the HTML report, served together by `npx playwright show-report`.
+//    List the html reporter first: it clears its folder when it writes.
+reporter: [['html'], ['playwright-ui-coverage/reporter', { outputFolder: 'playwright-report/ui-coverage' }]],
+```
+
+- **Test links** work from `file://` too.
+- **Trace links** need the reports served over `http(s)`, like the HTML report's own trace links (the trace viewer can't load from `file://` and says so). With layout 2, `npx playwright show-report` serves both; with layout 1, serve the folder that contains both with any static file server.
+- Traces are never sent anywhere: the link uses the HTML report's own copy of the trace viewer, not trace.playwright.dev.
+- **`merge-reports`:** pass both reporters in a merge config (`--config merge.config.ts`). With `--reporter html,playwright-ui-coverage/reporter` on the command line the reporter can't see the HTML reporter's options, so there are no links.
+- The trace viewer can't open at a given time or action from a URL, so links open the trace at its start.
+
+Each trace is identified by the file name the HTML reporter gives it (SHA-1 of its content), computed only when the HTML report is linked.
+
+### Most repeated elements
+
+Elements used by many tests are often setup steps (signing in, creating data) rather than what those tests check. **Most repeated elements** in the sidebar lists them with their number of tests and interactions; click a route to see the element on its page. If a step there isn't what most of those tests are about, you can do it once instead: [authenticate in a setup project and reuse the `storageState`](https://playwright.dev/docs/auth), or [prepare data through the API](https://playwright.dev/docs/api-testing#using-request-context), and keep one test that goes through the UI.
 
 ### Thresholds
 
@@ -334,6 +372,7 @@ npm run demo:register # register mode: same tests, config-only recording
 UICOV_DEMO_THRESHOLDS=1 npm run demo     # per-view thresholds that fail (exit code 1)
 UICOV_DEMO_THRESHOLDS=pass npm run demo  # per-view thresholds that pass
 UICOV_DEMO_FAIL=1 npx playwright test --retries=1  # adds a failing and a flaky test (demo/tests/failing.spec.ts)
+UICOV_TRACE=1 npm run demo  # records traces; "Tested by" links to them in playwright-report/
 npm run check:interactivity  # in-browser check of the interactivity rules and interaction types
 npm run example:ct    # component testing example (examples/ct-react): installs it, runs it, writes its report
 npm run demo:sharded  # runs 2 blob shards + merge-reports, checks it matches an unsharded run

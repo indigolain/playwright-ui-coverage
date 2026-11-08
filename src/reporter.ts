@@ -1,9 +1,11 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FullConfig, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
 import { aggregate, defaultNormalizeUrl, type NormalizeUrl } from './aggregate';
 import { isPassingResult, selectAttempts, type AttemptEntry } from './attempts';
 import { renderHtml } from './html';
+import { indexTests, mostRepeated, resolveHtmlReport, type HtmlReportLink } from './insights';
 import { evaluateThresholds, formatThresholdResults, type ThresholdOption } from './thresholds';
 import { ATTACHMENT_NAME, type TestCoverageData } from './types';
 
@@ -36,6 +38,12 @@ export interface UiCoverageReporterOptions {
    *   (`@playwright/experimental-ct-*`), `'url'` otherwise.
    */
   viewBy?: 'url' | 'file' | 'auto';
+  /**
+   * Folder of Playwright's HTML report (relative to the config file), to link
+   * each test under "Tested by" to its entry and trace there. Default: detected
+   * from the `html` reporter in the config. `false`: no links.
+   */
+  htmlReport?: string | false;
 }
 
 const CT_CONFIG_KEY = '@playwright/experimental-ct-core';
@@ -65,6 +73,20 @@ function resolveScreenshots(data: TestCoverageData, result: TestResult): TestCov
   return data;
 }
 
+/**
+ * The file name Playwright's HTML reporter gives this attempt's trace in its
+ * attachments folder: the SHA-1 of the file's content plus its extension.
+ */
+function traceFileName(result: TestResult): string | undefined {
+  const trace = result.attachments.find((a) => a.name === 'trace' && a.path);
+  if (!trace?.path) return undefined;
+  try {
+    return crypto.createHash('sha1').update(fs.readFileSync(trace.path)).digest('hex') + path.extname(trace.path);
+  } catch {
+    return undefined;
+  }
+}
+
 class UiCoverageReporter implements Reporter {
   /** One entry per attachment per attempt; retries are resolved in onEnd. */
   private tests: AttemptEntry[] = [];
@@ -72,6 +94,7 @@ class UiCoverageReporter implements Reporter {
   /** Each attachment's spec file view, applied in onEnd when grouping by file. */
   private specViews = new Map<TestCoverageData, string>();
   private componentTestConfig = false;
+  private htmlReport: HtmlReportLink | undefined;
 
   constructor(private options: UiCoverageReporterOptions = {}) {}
 
@@ -80,9 +103,11 @@ class UiCoverageReporter implements Reporter {
     const configDir = config.configFile ? path.dirname(config.configFile) : process.cwd();
     this.outputFolder = path.resolve(configDir, this.options.outputFolder ?? 'ui-coverage-report');
     this.componentTestConfig = CT_CONFIG_KEY in config;
+    this.htmlReport = resolveHtmlReport(config.reporter, configDir, this.outputFolder, this.options.htmlReport);
   }
 
   onTestEnd(test: TestCase, result: TestResult) {
+    let trace: string | undefined | null = null; // computed on first use
     for (const a of result.attachments) {
       if (a.name !== ATTACHMENT_NAME || !a.body) continue;
       try {
@@ -93,6 +118,8 @@ class UiCoverageReporter implements Reporter {
           retry: result.retry,
           passed: isPassingResult(test, result),
           title: test.titlePath().filter(Boolean).slice(1).join(' › '),
+          project: test.parent.project()?.name || undefined,
+          trace: this.htmlReport ? (trace ??= traceFileName(result)) : undefined,
           data,
         });
       } catch {
@@ -118,6 +145,9 @@ class UiCoverageReporter implements Reporter {
       normalizeUrl: this.options.normalizeUrl ?? defaultNormalizeUrl,
       maxScreenshotsPerRoute: this.options.maxScreenshotsPerRoute ?? 3,
     });
+    summary.tests = indexTests(this.tests);
+    if (this.htmlReport) summary.htmlReport = this.htmlReport;
+    summary.mostRepeated = mostRepeated(summary);
 
     fs.rmSync(this.outputFolder, { recursive: true, force: true });
     const screensDir = path.join(this.outputFolder, 'screens');
