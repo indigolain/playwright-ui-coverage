@@ -1,4 +1,4 @@
-import { test, expect } from '../../src';
+import { test, expect } from '../fixtures';
 
 test('search filters the list', async ({ page }) => {
   await page.goto('/users');

@@ -1,42 +1,36 @@
 import { test as base, expect } from '@playwright/test';
-import { Recorder } from './recorder';
-
-export interface UiCoverageOptions {
-  /** Turn recording off (e.g. `enabled: !!process.env.UI_COVERAGE`). Default: true. */
-  enabled: boolean;
-  /** Extra selectors to exclude (elements inside `[data-uicov-ignore]` are always excluded). */
-  ignoreSelectors: string[];
-  /** ms to wait after a load/interaction before snapshotting. Default: 250. */
-  snapshotDelay: number;
-}
-
-export const defaultUiCoverageOptions: UiCoverageOptions = {
-  enabled: true,
-  ignoreSelectors: [],
-  snapshotDelay: 250,
-};
+import { ContextRecorder } from './recorder';
+import { resolveOptions, type UiCoverageOptions } from './options';
 
 /**
- * Drop-in replacement for Playwright's `test` that records UI coverage.
+ * Playwright fixtures that record UI coverage. Compose them with your own
+ * fixtures using `mergeTests`:
  *
- *   import { test, expect } from 'playwright-ui-coverage';
+ *   import { mergeTests } from '@playwright/test';
+ *   import { uiCoverage } from 'playwright-ui-coverage';
+ *   export const test = mergeTests(myTest, uiCoverage);
  *
- * Configure per project with `use: { uiCoverage: { ... } }`.
+ * Configure with `use: { uiCoverage: { ... } }`.
  */
-export const test = base.extend<{ uiCoverage: Partial<UiCoverageOptions> }>({
-  uiCoverage: [{}, { option: true }],
-  page: async ({ page, uiCoverage }, use, testInfo) => {
-    const options = { ...defaultUiCoverageOptions, ...uiCoverage };
-    if (!options.enabled) {
-      await use(page);
-      return;
-    }
-    const recorder = new Recorder(page, testInfo, options);
-    await recorder.install();
-    await use(page);
-    await recorder.finish();
-  },
+export const uiCoverage = base.extend<{ uiCoverage: Partial<UiCoverageOptions> }>({
+  uiCoverage: [{}, { option: true, box: true }],
+  context: [
+    async ({ context, uiCoverage }, use, testInfo) => {
+      const options = resolveOptions(uiCoverage);
+      // attach() returns undefined if `register` mode already records this context.
+      const recorder = options.enabled
+        ? await ContextRecorder.attach(context, testInfo, options)
+        : undefined;
+      await use(context);
+      await recorder?.finish();
+    },
+    { scope: 'test', box: true },
+  ],
 });
 
+/** `@playwright/test`'s `test` with UI coverage built in, for the simplest setup. */
+export const test = uiCoverage;
+
 export { expect };
+export { defaultUiCoverageOptions, type UiCoverageOptions } from './options';
 export type { TestCoverageData, Interaction, Snapshot, InventoryElement } from './types';

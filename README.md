@@ -28,21 +28,15 @@ See which buttons, links and inputs your Playwright E2E tests **actually touch**
 npm i -D playwright-ui-coverage
 ```
 
-**1. Use the instrumented `test`** in place of `@playwright/test`'s:
+There are two ways to turn recording on. Both use the same reporter and produce the same results.
+
+### Option A: config only (experimental, no test changes)
 
 ```ts
-import { test, expect } from 'playwright-ui-coverage';
+// playwright.config.ts
+import { defineConfig } from '@playwright/test';
+import 'playwright-ui-coverage/register'; // ← records every browser context in every test
 
-test('subscribe', async ({ page }) => {
-  await page.goto('/');
-  await page.getByLabel('Email').fill('ada@example.com');
-  await page.getByRole('button', { name: 'Subscribe' }).click();
-});
-```
-
-**2. Add the reporter** in `playwright.config.ts`:
-
-```ts
 export default defineConfig({
   reporter: [
     ['list'],
@@ -50,6 +44,28 @@ export default defineConfig({
   ],
 });
 ```
+
+This is the quickest way to try it on an existing suite. It hooks into Playwright's internal instrumentation, the same hook Playwright's trace recorder uses. That API is private, so if a Playwright release changes it, register mode switches itself off with a warning. Option B keeps working either way.
+
+### Option B: fixture (stable, recommended for long-term use)
+
+Merge `uiCoverage` into your own fixtures with Playwright's `mergeTests`:
+
+```ts
+// tests/fixtures.ts
+import { mergeTests } from '@playwright/test';
+import { uiCoverage } from 'playwright-ui-coverage';
+import { test as appTest } from './my-fixtures';
+
+export const test = mergeTests(appTest, uiCoverage);
+export { expect } from '@playwright/test';
+```
+
+No fixtures of your own? Import `test` directly instead: `import { test, expect } from 'playwright-ui-coverage'`.
+
+Then add the reporter the same way as in Option A.
+
+Either way, recording covers every page and popup in the test's browser context. It adds **no steps** to your HTML report or trace, because its calls are marked as internal.
 
 **3. Run your tests** and open `ui-coverage-report/index.html`.
 
@@ -64,7 +80,7 @@ UI coverage: 33.3% (12/36 elements)
 ## How it works
 
 1. **Tracker** (`addInitScript`): a capture-phase listener records every `click` / `input` / `change` / `submit` on an interactive element, whichever Playwright API (or a real user) caused it.
-2. **Inventory + screenshot**: when a page loads and shortly after interactions, the fixture lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear.
+2. **Inventory + screenshot**: when a page loads and shortly after interactions, the recorder lists every visible interactive element (with bounding boxes) and takes a full-page screenshot. It only takes a new screenshot when new elements appear.
 3. **Reporter**: merges data from all workers, groups by route (`/users/42` → `/users/:id`), marks an element *tested* if any test interacted with it, and renders the HTML report and `coverage.json`.
 
 ### Element identity
@@ -75,7 +91,7 @@ Adding `data-testid`s makes matching the most reliable.
 
 ## Options
 
-### Fixture (`use.uiCoverage`)
+### Recording (`use.uiCoverage`, works in both modes)
 
 ```ts
 use: {
@@ -110,7 +126,8 @@ Anything inside an element with `data-uicov-ignore` is always excluded.
 ```bash
 npm install
 npx playwright install chromium
-npm run demo          # runs demo/tests against the demo app, writes ui-coverage-report/
+npm run demo          # fixture mode: runs demo/tests, writes ui-coverage-report/
+npm run demo:register # register mode: same tests, config-only recording
 npm run docs:screenshots  # regenerates the README images in docs/ (run demo first)
 npm run typecheck
 npm run build         # compiles to dist/

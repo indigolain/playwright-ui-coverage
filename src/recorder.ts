@@ -1,19 +1,26 @@
 import fs from 'node:fs';
-import type { Page, TestInfo } from '@playwright/test';
+import type { BrowserContext, Page, TestInfo } from '@playwright/test';
 import { tracker } from './tracker';
+import type { UiCoverageOptions } from './options';
 import { ATTACHMENT_NAME, type Interaction, type Inventory, type Snapshot } from './types';
 
-export interface RecorderOptions {
-  ignoreSelectors: string[];
-  /** ms to wait after a load/interaction before snapshotting (lets UI settle). */
-  snapshotDelay: number;
+/**
+ * Runs `fn` as an "internal" Playwright call when possible, so our evaluate /
+ * screenshot calls don't show up as steps in the user's report or trace.
+ * Falls back to a plain call if the private API isn't there.
+ */
+function internal<T>(owner: unknown, fn: () => Promise<T>): Promise<T> {
+  const wrap = (owner as any)?._wrapApiCall;
+  return typeof wrap === 'function' ? wrap.call(owner, fn, { internal: true }) : fn();
 }
 
+const recorders = new WeakMap<BrowserContext, ContextRecorder>();
+
 /**
- * Per-test recorder: collects interactions from the page and takes
- * inventory + screenshot snapshots whenever new elements show up.
+ * Records UI coverage for one browser context (every page and popup in it)
+ * and attaches the result to the test when finished.
  */
-export class Recorder {
+export class ContextRecorder {
   private interactions: Interaction[] = [];
   private snapshots: Snapshot[] = [];
   /** Keys already captured in any inventory, per URL. */
@@ -21,58 +28,94 @@ export class Recorder {
   /** Keys already visible in a screenshot, per URL. */
   private shotKeys = new Map<string, Set<string>>();
   private chain: Promise<void> = Promise.resolve();
-  private timer: NodeJS.Timeout | undefined;
+  private timers = new Map<Page, NodeJS.Timeout>();
   private shotIndex = 0;
+  private finished = false;
 
-  constructor(
-    private page: Page,
+  private constructor(
+    private context: BrowserContext,
     private testInfo: TestInfo,
-    private options: RecorderOptions,
+    private options: UiCoverageOptions,
   ) {}
 
-  async install() {
-    await this.page.exposeBinding(
-      '__uicovRecord',
-      (_source, interaction: Interaction, inventory?: Inventory) => {
-        this.interactions.push(interaction);
-        if (inventory && this.addNew(this.seenKeys, inventory)) this.snapshots.push(inventory);
-        this.schedule();
-      },
-    );
-    await this.page.addInitScript(tracker, { ignoreSelectors: this.options.ignoreSelectors });
-    this.page.on('load', () => void this.enqueue());
+  /** Starts recording `context`. Returns undefined if it is already being recorded. */
+  static async attach(
+    context: BrowserContext,
+    testInfo: TestInfo,
+    options: UiCoverageOptions,
+  ): Promise<ContextRecorder | undefined> {
+    if (recorders.has(context)) return undefined;
+    const recorder = new ContextRecorder(context, testInfo, options);
+    recorders.set(context, recorder);
+    await recorder.install();
+    return recorder;
+  }
+
+  static for(context: BrowserContext): ContextRecorder | undefined {
+    return recorders.get(context);
+  }
+
+  private async install() {
+    await internal(this.context, async () => {
+      await this.context.exposeBinding(
+        '__uicovRecord',
+        ({ page }, interaction: Interaction, inventory?: Inventory) => {
+          this.interactions.push(interaction);
+          if (inventory && this.addNew(this.seenKeys, inventory)) this.snapshots.push(inventory);
+          if (page) this.schedule(page);
+        },
+      );
+      await this.context.addInitScript(tracker, { ignoreSelectors: this.options.ignoreSelectors });
+    });
+    this.context.on('page', (page) => this.watch(page));
+    this.context.pages().forEach((page) => this.watch(page));
+  }
+
+  private watch(page: Page) {
+    page.on('load', () => void this.enqueue(page));
+    page.on('close', () => {
+      clearTimeout(this.timers.get(page));
+      this.timers.delete(page);
+    });
   }
 
   /** Throttled: snapshot `snapshotDelay` ms after the first interaction of a burst. */
-  private schedule() {
-    if (this.timer) return;
-    this.timer = setTimeout(() => {
-      this.timer = undefined;
-      void this.enqueue();
-    }, this.options.snapshotDelay);
+  private schedule(page: Page) {
+    if (this.finished || this.timers.has(page)) return;
+    this.timers.set(
+      page,
+      setTimeout(() => {
+        this.timers.delete(page);
+        void this.enqueue(page);
+      }, this.options.snapshotDelay),
+    );
   }
 
-  private enqueue() {
-    this.chain = this.chain.then(() => this.snapshot()).catch(() => {});
+  private enqueue(page: Page) {
+    this.chain = this.chain.then(() => this.snapshot(page)).catch(() => {});
     return this.chain;
   }
 
-  private async snapshot() {
+  private async snapshot(page: Page) {
     const inventory = () =>
-      this.page.evaluate(() => (window as any).__uicovInventory?.() as Inventory | undefined);
+      internal(page, () =>
+        page.evaluate(() => (window as any).__uicovInventory?.() as Inventory | undefined),
+      );
     const sameLayout = (a: Inventory, b: Inventory) =>
       a.url === b.url && JSON.stringify(a.elements) === JSON.stringify(b.elements);
 
     // The test keeps running while we snapshot, so the page can change between
     // the inventory and the screenshot. Re-check after the screenshot and retry.
     for (let attempt = 0; attempt < 3; attempt++) {
-      if (this.page.isClosed()) return;
+      if (page.isClosed()) return;
       const before = await inventory();
       if (!before) return;
       // Only screenshot when this state shows elements no screenshot has shown yet.
       if (!this.hasNew(this.shotKeys, before)) return;
 
-      const image = await this.page.screenshot({ fullPage: true, animations: 'disabled' });
+      const image = await internal(page, () =>
+        page.screenshot({ fullPage: true, animations: 'disabled' }),
+      );
       const after = await inventory();
       if (!after) return;
       if (!sameLayout(before, after)) {
@@ -112,13 +155,21 @@ export class Recorder {
     return added;
   }
 
+  /** Takes a final snapshot of every open page and attaches the data to the test. */
   async finish() {
-    clearTimeout(this.timer);
-    this.timer = undefined;
+    if (this.finished) return;
+    this.finished = true;
+    this.timers.forEach((t) => clearTimeout(t));
+    this.timers.clear();
     await this.chain;
-    await this.enqueue(); // final state (open modals, etc.)
-    await this.testInfo.attach(ATTACHMENT_NAME, {
-      body: JSON.stringify({ interactions: this.interactions, snapshots: this.snapshots }),
+    for (const page of this.context.pages()) await this.enqueue(page); // final state (open modals, etc.)
+    recorders.delete(this.context);
+    if (this.interactions.length === 0 && this.snapshots.length === 0) return;
+    // Push directly (like Playwright does for videos) rather than testInfo.attach(),
+    // which would add an "Attach" step to the user's report.
+    this.testInfo.attachments.push({
+      name: ATTACHMENT_NAME,
+      body: Buffer.from(JSON.stringify({ interactions: this.interactions, snapshots: this.snapshots })),
       contentType: 'application/json',
     });
   }

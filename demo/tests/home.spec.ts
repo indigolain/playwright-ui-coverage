@@ -1,4 +1,4 @@
-import { test, expect } from '../../src';
+import { test, expect } from '../fixtures';
 
 test('subscribe to the newsletter', async ({ page }) => {
   await page.goto('/');

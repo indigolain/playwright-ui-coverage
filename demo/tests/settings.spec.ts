@@ -1,4 +1,4 @@
-import { test, expect } from '../../src';
+import { test, expect } from '../fixtures';
 
 // Deliberately partial: theme, bio, reset and "Delete account" stay untested.
 test('enable notifications', async ({ page }) => {
