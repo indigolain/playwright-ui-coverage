@@ -41,6 +41,7 @@ export {
   type AttributeFilter,
   type ElementFilter,
   type NamedElement,
+  type LinkRules,
   type UiCoverageRules,
 } from './model/rules';
 export {
@@ -89,6 +90,9 @@ export type {
   CoverageCounts,
   ViewCoverage,
   ElementCoverage,
+  LinkCoverage,
+  UntestedView,
+  UntestedViewReferrer,
   A11yHint,
   ViewScreenshot,
   TestRef,

@@ -33,15 +33,16 @@ export function makeReport(views: Views, thresholds: ThresholdCheck[] = []): Cov
         failingTestIds: [],
         interactionCounts: tested ? { click: 1 } : ({} as Record<string, number>),
       }));
-      return { name, reportUrl: `index.html#${encodeURIComponent(name)}`, summary: counts(elements), elements, screenshots: [] };
+      return { name, reportUrl: `index.html#${encodeURIComponent(name)}`, summary: counts(elements), elements, links: [], screenshots: [] };
     });
   const all = out.flatMap((v) => v.elements);
   return {
     schemaVersion: 1,
     generatedAt: new Date(0).toISOString(),
     generator: { name: 'playwright-ui-coverage', version: '0.0.0' },
-    summary: { viewCount: out.length, ...counts(all) },
+    summary: { viewCount: out.length, untestedViewCount: 0, ...counts(all) },
     views: out,
+    untestedViews: [],
     tests: [{ id: 't1', title: 'a.spec.ts › t', passed: true, retry: 0 }],
     thresholds,
     insights: { mostRepeated: [] },

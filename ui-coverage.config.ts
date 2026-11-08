@@ -7,8 +7,9 @@ import { DEFAULT_INTERACTIONS } from './src/interactions';
 
 /**
  * Views and element rules. None of them changes the demo's numbers: the
- * footer links and the external link would not count anyway, and the view
- * pattern names the view the automatic rules would.
+ * footer links were excluded in the markup before, the Playwright link is only
+ * shown by a test that is skipped, and the view pattern names the view the
+ * automatic rules would.
  */
 export const demoReportRules = defineUiCoverageConfig({
   views: [{ pattern: '/users/:id', comment: 'Every user page is one view, whatever the id (/users/ada too).' }],
@@ -16,7 +17,7 @@ export const demoReportRules = defineUiCoverageConfig({
     {
       pattern: 'https://playwright.dev/*',
       include: false,
-      comment: 'An external site the home page links to: never a view of this app.',
+      comment: 'An external site the home page links to: links to it are dropped (not counted as elements).',
     },
   ],
   elementFilters: [
@@ -64,7 +65,7 @@ export default defineUiCoverageConfig({
     {
       name: 'thresholds-fail',
       comment: 'Thresholds the demo misses (exit code 1), plus a typo\'d view that only warns.',
-      config: { threshold: { overall: 30, views: { '/users': 40, '/settings': 50, '/users/*': 20, '/setings': 10 } } },
+      config: { threshold: { overall: 30, views: { '/users': 40, '/settings': 50, '/users/*': 40, '/setings': 10 } } },
     },
   ],
 });

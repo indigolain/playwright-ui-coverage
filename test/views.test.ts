@@ -134,7 +134,7 @@ describe('views in aggregate', () => {
         { title: 'c', data: data(at('/docs/api/a'), 'x') },
         { title: 'd', data: data(at('/admin/users'), 'z', true) },
       ],
-      { view: mapper.view, maxScreenshotsPerRoute: 3 },
+      { viewMapper: mapper, maxScreenshotsPerRoute: 3 },
     );
     expect(summary.routes.map((r) => [r.route, r.tested, r.total])).toEqual([
       ['/docs/api/*', 0, 1],
@@ -146,10 +146,54 @@ describe('views in aggregate', () => {
   it('a spec-file view (component tests) ignores views and viewFilters', () => {
     const mapper = createViewMapper({ viewFilters: [{ pattern: '/*', include: false }] });
     const summary = aggregate([{ title: 'ct', data: { ...data(at('/'), 'x'), view: 'Button.spec.tsx' } }], {
-      view: mapper.view,
+      viewMapper: mapper,
       maxScreenshotsPerRoute: 3,
     });
     expect(summary.routes.map((r) => r.route)).toEqual(['Button.spec.tsx']);
+  });
+});
+
+describe('views and links', () => {
+  const link = (key: string, href: string) => ({
+    key, label: `link "${key}"`, tag: 'a', role: 'link', name: key, nameFrom: 'text', attrs: { href }, x: 0, y: 0, w: 10, h: 10,
+  });
+  const home = (): TestCoverageData => ({
+    snapshots: [
+      {
+        url: at('/'),
+        dpr: 1,
+        elements: [
+          link('audit', '/settings/audit'),
+          link('docs', '/docs/guides/intro'),
+          link('auth', 'https://auth.example.com/login'),
+          link('ext', 'https://example.com/'),
+        ],
+      },
+    ],
+    interactions: [],
+  });
+  const run = (mapper: ReturnType<typeof createViewMapper>) =>
+    aggregate([{ title: 'home', data: home() }], { viewMapper: mapper, maxScreenshotsPerRoute: 3 });
+
+  it('a viewFilter removes the link unit (and untested view) of an excluded destination', () => {
+    const before = run(createViewMapper());
+    expect(before.routes[0].links.map((l) => l.key)).toEqual(['/docs/guides/intro', '/settings/audit']);
+    expect(before.untestedViews?.map((v) => v.view)).toEqual(['/docs/guides/intro', '/settings/audit']);
+    const after = run(createViewMapper({ viewFilters: [{ pattern: '/settings/*', include: false }] }));
+    expect(after.routes[0].links.map((l) => l.key)).toEqual(['/docs/guides/intro']);
+    expect(after.untestedViews?.map((v) => v.view)).toEqual(['/docs/guides/intro']);
+    // The <a> isn't counted as an element either.
+    expect(after.routes[0].elements.map((e) => e.key).sort()).toEqual(['auth', 'ext']);
+  });
+
+  it('drops links to excluded URLs on other origins too', () => {
+    const s = run(createViewMapper({ viewFilters: [{ pattern: 'https://auth.example.com/*', include: false }] }));
+    expect(s.routes[0].elements.map((e) => e.key)).toEqual(['ext']);
+  });
+
+  it('groups link destinations by view patterns', () => {
+    const s = run(createViewMapper({ views: [{ pattern: '/docs/:section/*', groupBy: ['section'] }] }));
+    expect(s.routes[0].links.map((l) => l.key)).toEqual(['/docs/guides/*', '/settings/audit']);
   });
 });
 

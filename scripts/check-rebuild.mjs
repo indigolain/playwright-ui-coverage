@@ -78,9 +78,15 @@ const comparable = (s) =>
       elements: v.elements
         .map((e) => ({ key: e.key, tested: e.tested, instances: e.instances, testIds: [...e.testIds].sort() }))
         .sort((a, b) => a.key.localeCompare(b.key)),
+      links: (v.links ?? [])
+        .map((l) => ({ key: l.key, tested: l.tested, destinations: l.destinations, referrers: l.referrers.map((e) => e.key).sort() }))
+        .sort((a, b) => a.key.localeCompare(b.key)),
     })),
+    untestedViews: s.untestedViews,
   });
 const keys = (s) => s.views.flatMap((v) => v.elements.map((e) => `${v.name} ${e.key}`));
+/** Keys of the <a> elements of link units, once per view. */
+const linkKeys = (s) => s.views.flatMap((v) => [...new Set((v.links ?? []).flatMap((l) => l.referrers.map((e) => `${v.name} ${e.key}`)))]);
 /** How coverage.json names a config file: relative to the working directory, absolute outside it. */
 const traceFile = (file) => {
   const rel = path.relative(root, file);
@@ -133,6 +139,9 @@ try {
       (k) => / nav > a/.test(k) || k.endsWith(' [data-action="delete-user"]') || inFrame.has(k),
     );
     const left = keys(filtered).filter((k) => removed.includes(k));
+    const navLinks = linkKeys(filtered).filter((k) => / nav > a/.test(k));
+    if (!linkKeys(baseline).some((k) => / nav > a/.test(k))) errors.push('filter check is vacuous: no nav links in link units');
+    if (navLinks.length) errors.push(`ignored links still in link units: ${navLinks.join(', ')}`);
     if (removed.length === 0) errors.push('filter check is vacuous: no nav links / delete buttons in the baseline');
     if (left.length) errors.push(`ignored elements still in the report: ${left.join(', ')}`);
     const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
@@ -142,7 +151,9 @@ try {
   }
 
   // 2b. Views and element rules, changed in the CLI config (no test run):
-  //  - views: '/users/:id' grouped by id → '/users/1'; viewFilters: '/widgets' dropped;
+  //  - views: '/users/:id' grouped by id → '/users/1' (the links to users 2 and 3 now
+  //    lead to untested views); viewFilters: '/widgets' dropped, and '/settings/audit'
+  //    too, which removes the link unit pointing to it (and that untested view);
   //  - elementFilters: only the "Home" nav link is kept (an include protects it from
   //    the `nav *` exclude), and without the demo's `footer *` rule the two footer links count;
   //  - elements: the named star button gets another name.
@@ -152,7 +163,11 @@ try {
     `export default ${JSON.stringify({
       ...rules,
       views: [{ pattern: '/users/:id', groupBy: ['id'] }],
-      viewFilters: [...(rules.viewFilters ?? []), { pattern: '/widgets', include: false }],
+      viewFilters: [
+        ...(rules.viewFilters ?? []),
+        { pattern: '/widgets', include: false },
+        { pattern: '/settings/audit', include: false },
+      ],
       elementFilters: [
         { selector: 'nav a[href="/"]', include: true },
         { selector: 'nav *', include: false },
@@ -187,8 +202,34 @@ try {
       if (exact(gotKeys) !== exact(expected.sort()))
         errors.push(`${name}: keys ${gotKeys.join(', ')}; expected ${expected.join(', ')}`);
     }
+    // Links: no nav link but "Home" refers to anything, the audit link unit is gone, users 2 and 3 are untested views.
+    const referrers = changed.views.flatMap((v) => (v.links ?? []).flatMap((l) => l.referrers.map((e) => e.key)));
+    const badNav = referrers.filter((k) => navLink.test(k) && navLink.exec(k)[2] !== '1');
+    if (badNav.length) errors.push(`excluded nav links still in link units: ${badNav.join(', ')}`);
+    const linkViews = (s) => s.views.flatMap((v) => (v.links ?? []).map((l) => l.key));
+    if (!linkViews(baseline).includes('/settings/audit')) errors.push('viewFilters link check is vacuous: no link to /settings/audit');
+    if (linkViews(changed).includes('/settings/audit')) errors.push('viewFilters did not remove the link unit to /settings/audit');
+    const untested = changed.untestedViews.map((v) => v.name).sort();
+    if (exact(untested) !== exact(['/users/2', '/users/3'])) errors.push(`untested views: ${untested.join(', ')}, expected /users/2, /users/3`);
     const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
     console.log(`views and element rules check: ${baseline.views.length} → ${changed.views.length} views, ${total(baseline)} → ${total(changed)} elements`);
+  }
+
+  // 2c. `links: false`: every <a> is an element again, no link units or untested views.
+  const noLinksConfig = writeConfig('no-links.config.json', JSON.stringify({ ...rules, links: false }));
+  const noLinksOut = path.join(tmp, 'no-links');
+  if (runCli(['report', '--data', data, '--config', noLinksConfig, '--out', noLinksOut]) !== 0) {
+    errors.push('CLI rebuild with links: false failed');
+  } else {
+    const noLinks = read(noLinksOut);
+    const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
+    if (baseline.summary.untestedLinksCount + baseline.summary.testedLinksCount === 0) errors.push('links check is vacuous: no link units in the demo');
+    if (baseline.untestedViews.length === 0) errors.push('links check is vacuous: no untested views in the demo');
+    if (noLinks.summary.testedLinksCount + noLinks.summary.untestedLinksCount !== 0 || noLinks.untestedViews.length !== 0)
+      errors.push(`links: false still has link units: ${JSON.stringify(noLinks.summary)}`);
+    if (total(noLinks) !== total(baseline) + linkKeys(baseline).length)
+      errors.push(`links: false: ${total(noLinks)} elements, expected ${total(baseline)} + ${linkKeys(baseline).length} link elements`);
+    else console.log(`links check: ${total(baseline)} elements + ${linkKeys(baseline).length} link elements with links: false`);
   }
 
   // 3. Thresholds (.cjs config): exit code 1 when not met.

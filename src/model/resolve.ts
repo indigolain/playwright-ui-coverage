@@ -311,6 +311,7 @@ export class Resolver {
       nameFrom: ref.nameFrom ?? '',
       ...(frames.length ? { frames } : {}),
       ...(pin ? { autoKey: this.key(node) } : {}),
+      ...(ref.href ? { href: ref.href } : {}),
     };
   }
 }

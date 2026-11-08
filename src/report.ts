@@ -223,8 +223,9 @@ export function buildReport(
   }
   const entries = selectAttempts(resolved, { countFailedTests: options.countFailedTests ?? false });
   const summary = aggregate(entries, {
-    view: createViewMapper(options).view,
+    viewMapper: createViewMapper(options),
     maxScreenshotsPerRoute: options.maxScreenshotsPerRoute ?? 3,
+    links: rules.links,
   });
   summary.tests = indexTests(resolved);
   const link = input.htmlReport;
@@ -261,9 +262,15 @@ export function buildReport(
 
   const pad = (s: string, n: number) => s.padEnd(n);
   const width = Math.max(10, ...summary.routes.map((r) => r.route.length));
-  console.log(`\nUI coverage: ${summary.percent}% (${summary.tested}/${summary.total} elements)`);
+  const elementsOf = (r: { total: number; tested: number; totalLinks: number; testedLinks: number }) =>
+    `${r.tested - r.testedLinks}/${r.total - r.totalLinks} elements` + (r.totalLinks ? `, ${r.testedLinks}/${r.totalLinks} links` : '');
+  console.log(`\nUI coverage: ${summary.percent}% (${summary.tested}/${summary.total}: ${elementsOf(summary)})`);
   for (const r of summary.routes) {
     console.log(`  ${pad(r.route, width)}  ${String(r.percent).padStart(5)}%  ${r.tested}/${r.total}`);
+  }
+  if (summary.untestedViews.length) {
+    const names = summary.untestedViews.map((v) => v.view);
+    console.log(`  ${names.length} untested view(s), only linked to: ${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}`);
   }
   if (summary.failingOnly > 0) {
     console.log(`  ${summary.failingOnly} more element(s) touched only by failing tests (not counted)`);
