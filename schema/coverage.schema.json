@@ -137,6 +137,7 @@
         "label": { "type": "string", "description": "role \"name\"; '(+N variants)' when instances sharing the key had different labels." },
         "tag": { "type": "string", "description": "Lowercase tag name; '?' for an element seen only in an interaction." },
         "instances": { "type": "integer", "minimum": 1, "description": "Max number of instances seen at once." },
+        "group": { "$ref": "#/$defs/ElementGroup" },
         "tested": { "type": "boolean" },
         "testIds": { "type": "array", "items": { "type": "string" }, "description": "Ids (see tests) of the tests whose interactions counted." },
         "failingTestIds": { "type": "array", "items": { "type": "string" }, "description": "Ids of tests that interacted only in attempts that didn't pass." },
@@ -152,6 +153,16 @@
         "frames": { "type": "array", "items": { "type": "string" }, "description": "Keys of the iframe elements the element is inside, outermost first (each a prefix of key). Absent in the top document." },
         "suggestedLocator": { "type": "string", "description": "One line of Playwright code that interacts with the element. Heuristic: the text may change between versions." },
         "a11yHints": { "type": "array", "items": { "$ref": "#/$defs/A11yHint" }, "description": "Absent when there are none." }
+      }
+    },
+    "ElementGroup": {
+      "type": "object",
+      "description": "Set when the element stands for several: a group (README \"Element grouping\") or instances sharing the key.",
+      "required": ["reason", "members"],
+      "properties": {
+        "name": { "type": "string", "description": "data-uicov-group value or elementGroups name; explicit groups only." },
+        "reason": { "enum": ["markup", "config", "same-key", "row", "repeated", "label"], "description": "Why the elements are one. More reasons may be added." },
+        "members": { "type": "integer", "minimum": 1, "description": "Number of distinct elements (keys before grouping) in the group." }
       }
     },
     "A11yHint": {

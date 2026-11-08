@@ -138,7 +138,46 @@ Elements are matched across tests by **attributes and position, never by visible
 
 Keys are computed when the report is built, from the recorded attributes, so changing `significantAttributes` or `attributeFilters` only needs a [rebuild](#rebuilding-the-report-report-cli). Attribute values that look generated (rules 2–5) are skipped, see `attributeFilters` below. Visible text (role + accessible name, e.g. `button "Save"`) is shown in the report as the element's **label** only.
 
-Positional keys read like CSS selectors and only use an index when there are several siblings with the same tag. Table rows (`<tr>`, `role="row"`) never get an index, so a "Delete" button on every row is one element with several instances. Positional keys change when the markup around the element changes, so for anything that matters, add a `data-testid` (or a `data-uicov-id`).
+Positional keys read like CSS selectors and only use an index when there are several siblings with the same tag. Table rows (`<tr>`, `role="row"`) never get an index, so a "Delete" button on every row is one element with several instances (unless `autoGroup: { rows: false }`). Positional keys change when the markup around the element changes, so for anything that matters, add a `data-testid` (or a `data-uicov-id`).
+
+Elements that share a key are one element. [Element grouping](#element-grouping) goes further: it merges elements with *different* keys that are really one control repeated (the "Add to cart" button of every product card), and splits elements that share a key but are different controls (the "Submit" of a login form and of a signup form).
+
+### Element grouping
+
+A group is one element of the view: it counts once in the score, is tested when a test interacts with any member, and is listed as `label (N instances)` in the report (`instances` and `group` in [`coverage.json`](#coveragejson)). Its members' boxes on the screenshots all point at it. The first rule that applies to an element decides:
+
+| # | Rule | Key of the group | `group.reason` |
+|---|---|---|---|
+| 1 | **`data-uicov-group="name"`** on the element or an ancestor (also across frames and shadow roots; the closest one wins). Every element with the same name is one group, even a single one. An empty value (`data-uicov-group=""`) turns all grouping off for that subtree. | `[data-uicov-group="name"]` | `markup` |
+| 2 | **`elementGroups`** in the config: the first entry whose selector matches the element or an ancestor. A group even with one match. `exclude: true` turns grouping off instead. | the entry's selector | `config` |
+| 3 | **Form boundary**: elements that share a key but are in different forms (`<form>`, `role="form"`), or in and out of one, are one element per form. Keys only change when there's such a conflict in the view. | `#signup [data-testid="submit"]` (the form's key, a space, the key) | — |
+| 4 | **Table rows**: controls in the same column/position of the rows (`<tr>`, `role="row"`) of a `<table>` or `role="grid"`/`"table"`/`"treegrid"`, whatever their own attributes (`id="edit-42"`) or names ("Edit Ada"). | the table's key, then the position with rows unindexed: `[data-testid="users"] > tbody > tr > td:nth-of-type(3) > button` | `row` |
+| 5 | **Repeated structures**: elements with the same shape at the same depth: the same chain of tags and classes from the page top down (class tokens containing digits ignored), the same role and the same accessible name, and their own identity equal once digits are ignored (`data-testid="add-to-cart-1"` and `"add-to-cart-2"` match, `"profile-edit"` and `"billing-edit"` don't). Ancestor forms must have the same identity and `action`, so identical login and signup forms aren't merged. | positional, from the deepest ancestor identity all members share, with an index only where all members agree: `[data-testid="products"] > li > div > button:nth-of-type(1)` | `repeated` |
+| 6 | **Labels**: a `<label>` that counts (e.g. `tabindex="0"`) is merged into its control (`for`, or the control inside it), since its events are credited to the control anyway. Not counted as an instance. | the control's key | `label` |
+
+Elements that share a key without any of these (the same `data-testid` on every row) are reported with `group.reason: "same-key"`.
+
+The heuristics (rules 4–6) only group **two or more** elements of the view, from all tests together (a list with one card in one test and three in another still forms one group). They are deliberately conservative:
+
+- Links (`<a href>`) are left to link grouping by destination and aren't grouped by rows or structure. Elements with a `data-uicov-id` (an explicit identity) aren't grouped automatically either; explicit groups (rules 1–2) apply to both.
+- Repeated structures need an accessible name and the same one: navigation items ("Home", "Users") and toolbar buttons have different names, so they stay separate. Nothing inside `<nav>`, `<menu>` or `role="navigation"`/`menu`/`menubar`/`tablist`/`toolbar`/`radiogroup`/`listbox`/`tree` is grouped this way.
+- Limits: two unrelated controls with identical names and markup structure (two "Edit" buttons in two identical, unnamed panels) are grouped; give one a `data-testid` with a word in it, or use `data-uicov-group=""`. Names that change per item ("Add Desk lamp to cart") prevent a repeated-structure group; use `data-uicov-group` or `elementGroups`. Group keys of rules 4–5 are positional, so they change with the markup like any positional key.
+
+Turn the heuristics off, all or one by one, with `autoGroup` (report time, so a [rebuild](#rebuilding-the-report-report-cli) shows the effect):
+
+```ts
+// ui-coverage.config.ts
+export default defineUiCoverageConfig({
+  autoGroup: { repeated: false },   // or `false` for all; keys: rows, repeated, labels, forms (default: all true)
+  elementGroups: [
+    { selector: '.product-card', name: 'product card' },     // everything inside any card is one element
+    { selector: 'button', documentScope: 'star-rating' },    // inside a shadow host or frame
+    { selector: '.legacy-list li', exclude: true },          // never group these
+  ],
+});
+```
+
+With `rows: false`, table rows get an index in positional keys (`tr:nth-of-type(2)`), and rows are only grouped if they qualify as repeated structures.
 
 ### Iframes and shadow DOM
 
@@ -185,11 +224,11 @@ With the file in place the reporter needs no options: `['playwright-ui-coverage/
 
 | Key | Applied | |
 |---|---|---|
-| `ignoreSelectors`, `significantAttributes`, `attributeFilters` | report time | [Report-time rules](#report-time-rules) |
+| `ignoreSelectors`, `significantAttributes`, `attributeFilters`, `elementGroups`, `autoGroup` | report time | [Report-time rules](#report-time-rules) |
 | `outputFolder`, `normalizeUrl`, `maxScreenshotsPerRoute`, `threshold`, `countFailedTests`, `viewBy`, `htmlReport`, `testIdAttribute`, `saveData`, `baseline`, `githubSummary` | report time | [Reporter settings](#reporter-settings) |
 | `recording` | while tests run | [Recording options](#recording-options) |
 | `profiles` | | [Profiles](#profiles) |
-| `comment` | | Free text, ignored. Every rule object (`attributeFilters` and `allowedInteractions` entries, profiles) takes a `comment` too. |
+| `comment` | | Free text, ignored. Every rule object (`attributeFilters`, `elementGroups` and `allowedInteractions` entries, profiles) takes a `comment` too. |
 
 Report-time keys are applied when the report is built, so you can change them and [rebuild the report](#rebuilding-the-report-report-cli) without running the tests. Recording options decide what is captured; changing them needs a new run.
 
@@ -271,6 +310,8 @@ export default defineUiCoverageConfig({
     { attribute: 'id', value: 'tmp-.*' },                  // ignore id="tmp-…"
     { attribute: 'id', value: 'mui-legacy', include: true, comment: 'stable, despite the built-in rule' },
   ],
+  elementGroups: [{ selector: '.product-card', name: 'product card' }], // default: []
+  autoGroup: { rows: true, repeated: true, labels: true, forms: true }, // default (or true / false)
 });
 ```
 
@@ -283,6 +324,8 @@ The type is exported as `UiCoverageRules`.
   - in `id` and `name`: framework counters (`ember123`, `mui-12345`, `radix-…`, `headlessui-…`, `react-aria-…`, `downshift-…`, `react-select-…`, `mat-…-0`, `cdk-…-3`, `ui-id-4`, `ext-gen12`, `gwt-uid-3`, `yui_…`, `j_id…`), purely numeric values and values with 3+ consecutive digits.
 
   The built-in lists are exported as `BUILTIN_IDENTITY_ATTRIBUTES` and `BUILTIN_ATTRIBUTE_FILTERS`.
+- **`elementGroups`**: `{ selector, name?, documentScope?, exclude?, comment? }` entries. The elements matching `selector`, or inside an element that does, are one element, even when there's only one; the first matching entry wins, and `data-uicov-group` in the markup wins over all of them. `name` is shown in the report (default: the selector); the key is the selector. `exclude: true`: matching elements are never grouped. See [Element grouping](#element-grouping).
+- **`autoGroup`**: `false` turns the automatic grouping heuristics off, or `{ rows, repeated, labels, forms }` turns them off one by one (each defaults to `true`). See [Element grouping](#element-grouping).
 
 #### Report-time selectors
 

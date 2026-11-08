@@ -27,6 +27,29 @@ describe('suggestedLocator', () => {
     ).toBe("await page.getByTestId('b').click();");
   });
 
+  it('groups: scoped test ids for form-split keys, no per-member test id, wrapper markup groups', () => {
+    const named = { role: 'button', name: 'Submit', nameFrom: 'text' };
+    expect(suggestedLocator(el({ key: '#signup [data-testid="submit"]', attrs: { 'data-testid': 'submit' }, ...named }))).toBe(
+      "await page.locator('#signup').getByTestId('submit').click();",
+    );
+    expect(
+      suggestedLocator(
+        el({
+          key: 'main > ul > li > button',
+          instances: 3,
+          attrs: { 'data-testid': 'add-1' },
+          group: { reason: 'repeated', members: 3 },
+          role: 'button',
+          name: 'Add',
+          nameFrom: 'text',
+        }),
+      ),
+    ).toMatch(/^await page\.getByRole\('button', \{ name: 'Add' \}\)\.first\(\)\.click\(\);/);
+    const markup = { key: '[data-uicov-group="stars"]', group: { name: 'stars', reason: 'markup' as const, members: 5 } };
+    expect(cssFromKey(el({ ...markup, attrs: {} }))).toBe('[data-uicov-group="stars"] button');
+    expect(cssFromKey(el({ ...markup, attrs: { 'data-uicov-group': 'stars' } }))).toBe('[data-uicov-group="stars"]');
+  });
+
   it('reads the test id back from the key for data without attrs', () => {
     expect(suggestedLocator({ key: '[data-testid="go"]', label: 'link "Go"', tag: 'a', instances: 1 })).toBe(
       "await page.getByTestId('go').click();",

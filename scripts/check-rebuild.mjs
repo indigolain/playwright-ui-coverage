@@ -79,6 +79,7 @@ const comparable = (s) =>
     })),
   });
 const keys = (s) => s.views.flatMap((v) => v.elements.map((e) => `${v.name} ${e.key}`));
+const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
 /** How coverage.json names a config file: relative to the working directory, absolute outside it. */
 const traceFile = (file) => {
   const rel = path.relative(root, file);
@@ -133,10 +134,44 @@ try {
     const left = keys(filtered).filter((k) => removed.includes(k));
     if (removed.length === 0) errors.push('filter check is vacuous: no nav links / delete buttons in the baseline');
     if (left.length) errors.push(`ignored elements still in the report: ${left.join(', ')}`);
-    const total = (s) => s.summary.testedElementsCount + s.summary.untestedElementsCount;
     if (total(filtered) !== total(baseline) - removed.length)
       errors.push(`filtered total ${total(filtered)}, expected ${total(baseline)} - ${removed.length}`);
     else console.log(`filter check: ${total(baseline)} → ${total(filtered)} elements`);
+  }
+
+  // 2b. Grouping rules (README "Element grouping"): an elementGroups entry merges
+  //     each view's nav links into one element; autoGroup: false undoes the
+  //     automatic groups on /shop (repeated cards, the label).
+  const groupsConfig = writeConfig(
+    'groups.config.mjs',
+    `export default ${JSON.stringify({ ...rules, elementGroups: [{ selector: 'nav', name: 'main navigation' }] })};\n`,
+  );
+  const groupsOut = path.join(tmp, 'groups');
+  if (runCli(['report', '--data', data, '--config', groupsConfig, '--out', groupsOut]) !== 0) {
+    errors.push('CLI rebuild with elementGroups failed');
+  } else {
+    const grouped = read(groupsOut);
+    const navLinks = keys(baseline).filter((k) => / nav > a/.test(k)).length;
+    const navGroups = grouped.views.filter((v) => v.elements.some((e) => e.key === 'nav' && e.group?.reason === 'config' && e.group.name === 'main navigation')).length;
+    if (navLinks === 0 || navGroups !== baseline.views.length) errors.push(`elementGroups: ${navGroups} nav groups in ${baseline.views.length} views`);
+    else if (total(grouped) !== total(baseline) - navLinks + navGroups)
+      errors.push(`elementGroups total ${total(grouped)}, expected ${total(baseline)} - ${navLinks} + ${navGroups}`);
+    else console.log(`elementGroups check: ${total(baseline)} → ${total(grouped)} elements`);
+  }
+  const ungroupedConfig = writeConfig('ungrouped.config.json', JSON.stringify({ ...rules, autoGroup: false }));
+  const ungroupedOut = path.join(tmp, 'ungrouped');
+  if (runCli(['report', '--data', data, '--config', ungroupedConfig, '--out', ungroupedOut]) !== 0) {
+    errors.push('CLI rebuild with autoGroup: false failed');
+  } else {
+    const shop = (s) => s.views.find((v) => v.name === '/shop');
+    const before = shop(baseline);
+    const after = shop(read(ungroupedOut));
+    const n = (v) => v.summary.testedElementsCount + v.summary.untestedElementsCount;
+    if (!before || !after) errors.push('autoGroup check: no /shop view');
+    else if (after.elements.some((e) => e.group && e.group.reason !== 'markup' && e.group.reason !== 'same-key'))
+      errors.push('autoGroup: false still has automatic groups on /shop');
+    else if (n(after) <= n(before)) errors.push(`autoGroup: false: /shop has ${n(after)} elements, grouped ${n(before)}`);
+    else console.log(`autoGroup check: /shop ${n(before)} → ${n(after)} elements without automatic grouping`);
   }
 
   // 3. Thresholds (.cjs config): exit code 1 when not met.

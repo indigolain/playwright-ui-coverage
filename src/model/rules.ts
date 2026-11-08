@@ -71,6 +71,52 @@ export interface UiCoverageRules {
    * evaluated before the built-in rules for generated values.
    */
   attributeFilters?: AttributeFilter[];
+  /**
+   * Named groups: elements matching `selector` (or inside an element that
+   * does) count as one element, even with a single match. The first entry
+   * that matches wins; `data-uicov-group` in the markup wins over every
+   * entry. See README "Element grouping".
+   */
+  elementGroups?: ElementGroupRule[];
+  /**
+   * Automatic grouping heuristics (README "Element grouping"). `false` turns
+   * them all off; an object turns single heuristics off. Default: all on.
+   * Explicit groups (`data-uicov-group`, `elementGroups`) always apply.
+   */
+  autoGroup?: boolean | AutoGroupOptions;
+}
+
+/**
+ * An `elementGroups` entry: the elements matching `selector`, or inside an
+ * element that does, are one element (key: the selector; with
+ * `documentScope`, `'<documentScope> >> <selector>'`).
+ */
+export interface ElementGroupRule extends ScopedSelector {
+  /** Shown in the report (`group.name` in coverage.json). Default: the selector. */
+  name?: string;
+  /** `true`: matching elements are never grouped (neither by name nor automatically). */
+  exclude?: boolean;
+  /** Free text, ignored. */
+  comment?: string;
+}
+
+/** Switches for the automatic grouping heuristics (all default to `true`). */
+export interface AutoGroupOptions {
+  /** Controls at the same column/position across the rows of a `<table>` or `role=grid|table|treegrid`. */
+  rows?: boolean;
+  /** Controls at the same position in repeated sibling structures (cards, list items) with the same name. */
+  repeated?: boolean;
+  /** A counted `<label>` merged into the control it labels. */
+  labels?: boolean;
+  /** Elements sharing a key inside different forms (`<form>`, `role=form`) are kept apart. */
+  forms?: boolean;
+}
+
+/** `autoGroup` resolved to one switch per heuristic. */
+export function autoGroupSwitches(rules: UiCoverageRules): Required<AutoGroupOptions> {
+  const a = rules.autoGroup;
+  const on = (k: keyof AutoGroupOptions) => (a === undefined || a === true ? true : a === false ? false : a[k] !== false);
+  return { rows: on('rows'), repeated: on('repeated'), labels: on('labels'), forms: on('forms') };
 }
 
 const regexProblem = (src: string): string | undefined => {
@@ -115,6 +161,29 @@ export const reportSelector = (): Schema => {
   };
 };
 
+const elementGroupRule = (): Schema => {
+  const shape = s.rule(
+    {
+      selector: s.required(s.string()),
+      documentScope: s.string(),
+      name: s.string((v) => (v.trim() ? undefined : 'must not be empty')),
+      exclude: s.boolean(),
+    },
+    'an object { selector, name?, documentScope?, exclude? }',
+  );
+  return {
+    ...shape,
+    check(value, path, errors) {
+      const before = errors.length;
+      shape.check(value, path, errors);
+      if (errors.length > before) return;
+      const { selector, documentScope } = value as ElementGroupRule;
+      const problem = selectorProblem(documentScope === undefined ? selector : { selector, documentScope });
+      if (problem) errors.push(path ? `${path}: ${problem}` : problem);
+    },
+  };
+};
+
 /**
  * Schema of the report-time rules: one entry per `UiCoverageRules` key (the
  * compiler checks both lists match). These keys are accepted at the top level
@@ -126,6 +195,11 @@ export const RULES_SCHEMA = {
   attributeFilters: s.array(
     s.rule({ attribute: s.required(s.string(regexProblem)), value: s.string(regexProblem), include: s.boolean() }),
     'an array of { attribute, value?, include? } rules',
+  ),
+  elementGroups: s.array(elementGroupRule(), 'an array of { selector, name?, documentScope?, exclude? } rules'),
+  autoGroup: s.union(
+    s.boolean(),
+    s.object({ rows: s.boolean(), repeated: s.boolean(), labels: s.boolean(), forms: s.boolean() }),
   ),
 } satisfies SchemaFields<UiCoverageRules>;
 
@@ -153,6 +227,8 @@ export function mergeRules(primary: UiCoverageRules, recorded: UiCoverageRules |
 
 /** Explicit identity override: its value is used as the key, as-is, and is never filtered. */
 export const UICOV_ID_ATTRIBUTE = 'data-uicov-id';
+/** Explicit group, on an element or a wrapper: the value names the group; empty turns grouping off. */
+export const UICOV_GROUP_ATTRIBUTE = 'data-uicov-group';
 /** Elements inside an element with this attribute are always excluded. */
 export const UICOV_IGNORE_SELECTOR = '[data-uicov-ignore]';
 

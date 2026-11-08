@@ -29,7 +29,7 @@ coverage = (testedElementsCount + testedLinksCount)
 
 rounded to one decimal; `100` when there are no units.
 
-- An **element** is an interactive element of a view (see "Which elements count" in the README), identified by its `key` within the view. Elements sharing a key (a "Delete" button on every row) are one unit, whatever `instances` says.
+- An **element** is an interactive element of a view (see "Which elements count" in the README), identified by its `key` within the view. Elements sharing a key (a "Delete" button on every row) are one unit, whatever `instances` says, and so is a group (see "Element grouping" in the README): the "Add to cart" button of every product card, a `data-uicov-group`. A group is tested when any member is.
 - An element is **tested** when a counted test interacted with it in that view. By default only each test's last passing attempt counts (`countFailedTests: true` counts every attempt). Elements touched only by attempts that didn't pass are untested and also counted in `failingOnlyElementsCount`.
 - **Links:** `testedLinksCount` / `untestedLinksCount` are reserved for link tracking, where a link is a unit tested when its destination view was visited. Until then both are `0` and `<a>` elements are counted as ordinary elements. When link tracking arrives, links get their own counts (and `<a>` elements stop being counted as elements) without a schema version change, since the formula above already includes them.
 - `a11yHintsCount` is informational and never affects `coverage`.
@@ -88,6 +88,7 @@ A view is a page URL normalized by `normalizeUrl` (`/users/42?tab=x` → `/users
 | `label` | string | `role "name"`, with ` (+N variants)` when instances sharing the key had different labels. For display. |
 | `tag` | string | Lowercase tag name; `?` for an element only seen in an interaction, never in an inventory. |
 | `instances` | integer | Max number of instances seen at once. |
+| `group` | `{ name?, reason, members }`, optional | Set when the element stands for several. `reason`: `markup` (`data-uicov-group`), `config` (`elementGroups`), `same-key` (instances sharing the key), `row` (the same column of a table or grid), `repeated` (the same control in repeated structures) or `label` (a `<label>` merged into its control); more may be added. `name`: the group's name, explicit groups only. `members`: distinct elements (keys before grouping) in it. Absent for a single element. |
 | `tested` | boolean | |
 | `testIds` | string[] | Ids (into `tests`) of the tests whose interactions counted. Empty when untested. |
 | `failingTestIds` | string[] | Ids of tests that touched it only in attempts that didn't pass. Non-empty with `tested: false` = "failing tests only". |

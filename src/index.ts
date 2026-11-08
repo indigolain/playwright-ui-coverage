@@ -39,6 +39,8 @@ export {
   BUILTIN_ATTRIBUTE_FILTERS,
   BUILTIN_IDENTITY_ATTRIBUTES,
   type AttributeFilter,
+  type AutoGroupOptions,
+  type ElementGroupRule,
   type UiCoverageRules,
 } from './model/rules';
 export { RECORDED_CANDIDATES } from './model/elements';
@@ -77,6 +79,7 @@ export type {
   CoverageCounts,
   ViewCoverage,
   ElementCoverage,
+  ElementGroup,
   A11yHint,
   ViewScreenshot,
   TestRef,

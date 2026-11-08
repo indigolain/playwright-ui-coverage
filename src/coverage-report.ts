@@ -95,6 +95,11 @@ export interface ElementCoverage {
   tag: string;
   /** Max number of instances seen at once (e.g. a "Delete" button per row). */
   instances: number;
+  /**
+   * Set when the element stands for several (README "Element grouping"): a
+   * group, or instances sharing the key. Absent for a single element.
+   */
+  group?: ElementGroup;
   tested: boolean;
   /** Ids (see `CoverageReport.tests`) of the tests whose interactions counted. */
   testIds: string[];
@@ -119,6 +124,22 @@ export interface ElementCoverage {
   suggestedLocator?: string;
   /** Informational accessibility hints; absent when there are none. Messages may change between versions. */
   a11yHints?: A11yHint[];
+}
+
+/** How an element stands for several (`ElementCoverage.group`). */
+export interface ElementGroup {
+  /** The `data-uicov-group` value or `elementGroups` name; explicit groups only. */
+  name?: string;
+  /**
+   * `markup` (`data-uicov-group`), `config` (`elementGroups`), `same-key`
+   * (instances sharing a key, e.g. the same `data-testid`), `row` (the same
+   * column of a table or grid), `repeated` (the same control in repeated
+   * structures like cards) or `label` (a `<label>` and its control). More may
+   * be added.
+   */
+  reason: 'markup' | 'config' | 'same-key' | 'row' | 'repeated' | 'label';
+  /** Number of distinct elements (keys before grouping) in the group. */
+  members: number;
 }
 
 export interface A11yHint {
@@ -337,6 +358,7 @@ function element(e: InternalElement): ElementCoverage {
     label: e.label,
     tag: e.tag,
     instances: e.instances,
+    ...(e.group ? { group: { ...(e.group.name !== undefined ? { name: e.group.name } : {}), reason: e.group.reason, members: e.group.members } } : {}),
     tested: e.tested,
     testIds: ids(e.testIds, e.testedBy),
     failingTestIds: ids(e.failingTestIds, e.testedByFailing),
