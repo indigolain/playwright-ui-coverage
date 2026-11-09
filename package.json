@@ -1,7 +1,7 @@
 {
   "name": "playwright-ui-coverage",
   "version": "0.1.0",
-  "description": "See which buttons, links and inputs your Playwright E2E tests actually touch \u2014 screenshots with tested/untested overlays.",
+  "description": "See which buttons, links and inputs your Playwright E2E tests actually touch — screenshots with tested/untested overlays.",
   "license": "MIT",
   "author": "indigolain",
   "homepage": "https://indigolain.github.io/playwright-ui-coverage/",
@@ -60,7 +60,10 @@
     "example:ct": "node scripts/example-ct.mjs",
     "example:ct:register": "node scripts/example-ct.mjs register",
     "test": "vitest run --dir test",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test",
+    "changeset": "changeset",
+    "version-packages": "changeset version && npm install --package-lock-only",
+    "release": "changeset publish"
   },
   "keywords": [
     "playwright",
@@ -74,6 +77,8 @@
     "@playwright/test": ">=1.50.0"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
     "@playwright/test": "^1.50.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0",
