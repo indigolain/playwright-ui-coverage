@@ -1,0 +1,91 @@
+name: Dependabot Changeset
+
+# Dependabot PRs don't carry a changeset, so dependency bumps never reach the
+# changelog or trigger a release. This workflow writes one into the PR branch.
+#
+# `pull_request_target` is required because the default `pull_request` token for
+# Dependabot is read-only and cannot push. No code from the PR is executed here:
+# the branch is checked out only so a file can be written and committed (no
+# install, no build, no scripts).
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  add-changeset:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write changeset
+        env:
+          UPDATED_DEPENDENCIES: ${{ steps.metadata.outputs.updated-dependencies-json }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          SUMMARY=$(node --input-type=module -e '
+            const deps = JSON.parse(process.env.UPDATED_DEPENDENCIES || "[]");
+            const describe = (d) =>
+              d.prevVersion && d.newVersion
+                ? `${d.dependencyName} ${d.prevVersion} → ${d.newVersion}`
+                : d.dependencyName;
+            if (deps.length === 0) {
+              // Fall back to the PR title (e.g. grouped updates with no metadata)
+              const title = process.env.PR_TITLE.replace(/^chore:\s*/, "");
+              process.stdout.write(title.charAt(0).toUpperCase() + title.slice(1));
+            } else if (deps.length === 1) {
+              const d = deps[0];
+              process.stdout.write(
+                d.prevVersion && d.newVersion
+                  ? `Bump ${d.dependencyName} from ${d.prevVersion} to ${d.newVersion}`
+                  : `Bump ${d.dependencyName}`
+              );
+            } else {
+              process.stdout.write(`Bump dependencies: ${deps.map(describe).join(", ")}`);
+            }
+          ')
+
+          CHANGESET=".changeset/dependabot-pr-${PR_NUMBER}.md"
+          PACKAGE=$(jq -r .name package.json)
+
+          cat > "$CHANGESET" <<EOF
+          ---
+          "$PACKAGE": patch
+          ---
+
+          $SUMMARY
+          EOF
+
+          echo "Wrote $CHANGESET:"
+          cat "$CHANGESET"
+
+      - name: Commit changeset
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ".changeset/dependabot-pr-${PR_NUMBER}.md"
+
+          if git diff --quiet --cached; then
+            echo "Changeset already up to date — nothing to commit."
+            exit 0
+          fi
+
+          git commit -m "chore: add changeset for dependency update"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"

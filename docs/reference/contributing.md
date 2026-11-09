@@ -61,6 +61,18 @@ BROWSER=firefox scripts/demo-both-modes.sh  # what CI runs: both modes, same cov
 
 `.github/workflows/playwright-next.yml` runs the demo weekly against `@playwright/test@next`, to catch changes to the private instrumentation API that register mode relies on. `.github/workflows/docs.yml` builds this site and deploys it to GitHub Pages on every push to `main` that touches the docs.
 
+## Releasing
+
+Releases are made with [Changesets](https://github.com/changesets/changesets).
+
+1. **Every PR that changes the package adds a changeset.** Run `npx changeset`, pick `patch`, `minor` or `major`, write a one-line summary for the changelog, and commit the generated `.changeset/*.md` file. The `changeset-check` workflow fails a PR without one, except PRs that only touch `.github/` or `docs/`. For a change that shouldn't be released at all (tests, demo, tooling), use `npx changeset --empty`.
+2. **Merging to `main` opens or updates a "chore: version packages" PR.** `.github/workflows/publish.yml` collects the pending changesets, bumps the version in `package.json`, and writes `CHANGELOG.md`.
+3. **Merging that PR publishes.** The same workflow publishes the new version to npm with provenance, then creates the `vX.Y.Z` tag and a GitHub release with the changelog entry.
+
+Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): no npm token is stored in the repository. The package's trusted publisher on npmjs.com names this repository, the `publish.yml` workflow and the `npm` environment, so renaming the workflow file or the environment breaks publishing.
+
+Dependabot opens weekly PRs for npm dependencies; `.github/workflows/dependabot-changeset.yml` adds a patch changeset to each one, so dependency updates appear in the changelog and get released.
+
 ## Documentation
 
 The site is built with [VitePress](https://vitepress.dev) from the `docs/` folder. Its dependencies are in `docs/package.json`, separate from the library's, so installing the library for development or CI doesn't pull them in.

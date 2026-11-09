@@ -1,0 +1,57 @@
+name: Publish
+
+# Release flow (Changesets):
+#  1. Every PR that changes the package adds a changeset (`npx changeset`).
+#  2. On push to main, this workflow opens or updates a "chore: version packages"
+#     PR that bumps the version and writes CHANGELOG.md from the changesets.
+#  3. Merging that PR runs this workflow again, which publishes the new version
+#     to npm and creates the matching git tag and GitHub release.
+#
+# Publishing uses npm trusted publishing (OIDC): there is no npm token in the
+# repository secrets. The package's trusted publisher on npmjs.com must name
+# this repository, this workflow file (publish.yml) and the `npm` environment.
+on:
+  push:
+    branches: [main]
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          # Node 24 ships npm 11, which trusted publishing requires.
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm test
+
+      - name: Set npm provenance
+        run: npm config set provenance true
+
+      - name: Create release PR or publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          publish: npm run release
+          version: npm run version-packages
+          title: "chore: version packages"
+          commit: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
