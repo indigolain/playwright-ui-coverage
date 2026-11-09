@@ -137,12 +137,42 @@ export interface Snapshot extends Inventory {
    * short-lived state (`captureTransientStates`); boxes stay in document coordinates.
    */
   screenshotClip?: { x: number; y: number; width: number; height: number };
+  /** When it was taken, ms since the epoch (recording format 4). */
+  t?: number;
+  /** SHA-1 of the screenshot file: the same state reached by several tests. */
+  hash?: string;
+}
+
+/** The element a step acted on, resolved like an interaction's. */
+export type StepTarget = Pick<Interaction, 'key' | 'label' | 'grouping' | 'frames'>;
+
+/** One step of a test (recording option `steps`): an interaction, or a page load. */
+export interface Step {
+  /** ms since the epoch. */
+  t: number;
+  /** DOM event type, or `load`. */
+  event: string;
+  url: string;
+  /** The page of the browser context: 0 for the first, in creation order. */
+  page?: number;
+  /** The element acted on; absent for loads, and for elements the report-time rules exclude. */
+  target?: StepTarget;
+  /** The element's accessible name when it has no target (excluded by the rules). */
+  name?: string;
+  /** The Playwright call, when known (see `RawCall`). */
+  call?: import('./model/raw').RawCall;
+  /** Index into `TestCoverageData.states`: the page after this step. */
+  state?: number;
 }
 
 /** Resolved data of one recording (one browser context in one test attempt). */
 export interface TestCoverageData {
   interactions: Interaction[];
   snapshots: Snapshot[];
+  /** Steps in the order they happened (recording option `steps`). */
+  steps?: Step[];
+  /** Screenshots of the page after steps (`Step.state`). Not counted for coverage. */
+  states?: Snapshot[];
   /** True when the test ran under Playwright component testing (`@playwright/experimental-ct-*`). */
   componentTest?: boolean;
   /**

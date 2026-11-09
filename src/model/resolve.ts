@@ -10,7 +10,7 @@
  * structural `tag:nth-of-type(n)` path up to the nearest identified ancestor.
  * Elements in frames and shadow trees are prefixed by their host's key and `>>`.
  */
-import type { GroupHints, GroupLevel, Interaction, InventoryElement, Snapshot, TestCoverageData } from '../types';
+import type { GroupHints, GroupLevel, Interaction, InventoryElement, Snapshot, Step, TestCoverageData } from '../types';
 import { inputType, roleOf } from './elements';
 import {
   READABLE_RECORDING_FORMAT_VERSIONS,
@@ -19,6 +19,7 @@ import {
   type RawElementRef,
   type RawInteraction,
   type RawNode,
+  type RawSnapshot,
 } from './raw';
 import {
   autoGroupSwitches,
@@ -527,7 +528,7 @@ export function resolveCoverageData(
   const r = new Resolver(data, compiledRules);
   r.pinNamedElements(data.snapshots, data.interactions);
 
-  const snapshots: Snapshot[] = data.snapshots.map((snap) => {
+  const resolveSnapshot = (snap: RawSnapshot): Snapshot => {
     const elements: InventoryElement[] = [];
     for (const el of snap.elements) {
       const node = r.node(el);
@@ -546,8 +547,11 @@ export function resolveCoverageData(
     if (snap.screenshot) out.screenshot = snap.screenshot;
     if (snap.screenshotHeight) out.screenshotHeight = snap.screenshotHeight;
     if (snap.screenshotClip) out.screenshotClip = snap.screenshotClip;
+    if (snap.t !== undefined) out.t = snap.t;
+    if (snap.hash) out.hash = snap.hash;
     return out;
-  });
+  };
+  const snapshots = data.snapshots.map(resolveSnapshot);
 
   const interactions: Interaction[] = [];
   for (const i of data.interactions) {
@@ -555,5 +559,22 @@ export function resolveCoverageData(
     if (!node || r.isExcluded(node)) continue;
     interactions.push({ ...r.describe(i.element, node), event: i.event, url: i.url });
   }
-  return { interactions, snapshots, ...(data.componentTest ? { componentTest: true } : {}) };
+  const out: TestCoverageData = { interactions, snapshots };
+  if (data.steps) {
+    out.steps = data.steps.map((st) => {
+      const step: Step = { t: st.t, event: st.event, url: st.url };
+      if (st.page !== undefined) step.page = st.page;
+      const node = st.element && r.node(st.element);
+      if (node && !r.isExcluded(node)) {
+        const { key, label, grouping, frames } = r.describe(st.element!, node);
+        step.target = { key, label, ...(grouping ? { grouping } : {}), ...(frames ? { frames } : {}) };
+      } else if (st.element?.name) step.name = st.element.name;
+      if (st.call) step.call = st.call;
+      if (st.state !== undefined) step.state = st.state;
+      return step;
+    });
+  }
+  if (data.states) out.states = data.states.map(resolveSnapshot);
+  if (data.componentTest) out.componentTest = true;
+  return out;
 }

@@ -74,6 +74,8 @@ export default defineConfig<{ uiCoverage: Partial<UiCoverageOptions> }>({
       ...(legacy ? { significantAttributes: uiCoverageConfig.significantAttributes, ...uiCoverageConfig.recording } : {}),
       // UICOV_FORMAT=jpeg records JPEG screenshots instead of PNG.
       ...(process.env.UICOV_FORMAT === 'jpeg' ? { format: 'jpeg' as const } : {}),
+      // UICOV_STEPS=off records no steps (no state stepper beyond the regular screenshots).
+      ...(process.env.UICOV_STEPS === 'off' ? { steps: 'off' as const } : {}),
     },
   },
   projects: [{ name: browser, use: { ...devices[device] } }],

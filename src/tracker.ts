@@ -434,6 +434,20 @@ export function tracker(args: TrackerArgs): void {
 
   // ---- Event recording -------------------------------------------------
 
+  /**
+   * When an event happened (ms since the epoch, the clock Node's `Date.now()`
+   * reads too), to tell which Playwright call caused it. Taken before the
+   * page's scripts run, so a page that replaces `Date.now` doesn't change it.
+   */
+  const dateNow = Date.now;
+  const clock = (): number | undefined => {
+    try {
+      return dateNow.call(Date);
+    } catch {
+      return undefined;
+    }
+  };
+
   const globalEvents = new Set(args.interactions || []);
   const allowedRules = (args.allowedInteractions || [])
     .filter((r) => validSelector(r.selector))
@@ -451,7 +465,7 @@ export function tracker(args: TrackerArgs): void {
 
   const send = (el: Element, type: string) => {
     const { nodes, add } = nodeTable();
-    const event: RawInteractionEvent = { event: type, url: location.href, nodes, element: ref(el, add) };
+    const event: RawInteractionEvent = { event: type, url: location.href, nodes, element: ref(el, add), t: clock() };
     // These may navigate away before a delayed snapshot can run, so ship the
     // current inventory with them (synchronously, before navigation).
     const withInventory = type === 'click' || type === 'submit' || type === 'keydown';

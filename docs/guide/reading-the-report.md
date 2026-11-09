@@ -16,6 +16,18 @@ Each view shows up to three screenshots (`maxScreenshotsPerRoute`), chosen to sh
 
 Boxes of `position: fixed` and `sticky` elements are drawn dashed, see [Screenshots](./screenshots.md#fixed-and-sticky-elements). Screenshots of short-lived states (a modal a test opened and closed quickly) are captioned "viewport, right after an interaction".
 
+## Step through every state
+
+The three screenshots are the overview. **All states** goes through every screenshot taken on the view, from every test, in the order the tests reached them: `◀ State n of N ▶`, or the <kbd>←</kbd> and <kbd>→</kbd> keys. Each state shows:
+
+- the screenshot with the usual green and red boxes;
+- its own coverage: how many of the elements in it are tested;
+- **Reached by**: the tests (and retries) that produced it, each linking to the test and its trace in Playwright's HTML report, as under "Tested by". The same screen reached by several tests is one state.
+
+![The /users view with "All states" selected: State 3 of 5 shows the "Add user" modal, 8 of 12 elements in it tested, reached by "add a user via the modal"](../images/report-states.png)
+
+Without the recording option [`steps`](../reference/recording-options.md#steps), the states are the screenshots the recorder takes anyway (when new elements appear). With `steps: 'on'`, there's a screenshot after every step of every test, so you can follow what a page went through. The address bar keeps the state (`#%2Fusers&state=3`), so you can link to it.
+
 ## Find what's missing
 
 Turn on **Untested only** to hide everything that's already covered:

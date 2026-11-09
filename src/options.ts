@@ -67,6 +67,21 @@ export interface UiCoverageOptions {
    * count (the first matching rule wins). Default: [].
    */
   allowedInteractions: AllowedInteraction[];
+  /**
+   * Record each test's steps (every counted interaction and page load, with
+   * the Playwright call and spec location when known) and a viewport
+   * screenshot of the page after each one, for the report's state stepper
+   * and per-test walkthrough. Screenshots only with `screenshots: 'on'`;
+   * identical consecutive states are stored once. Doesn't change coverage.
+   * Each step screenshot holds the test's next action until it's taken (about
+   * 30 ms), so it shows the page after the step. Default: `'off'`.
+   */
+  steps: 'on' | 'off';
+  /**
+   * Max step screenshots per test (`steps`); later steps are recorded
+   * without one. `0`: no step screenshots. Default: 50.
+   */
+  maxStepScreenshots: number;
 }
 
 export const defaultUiCoverageOptions: UiCoverageOptions = {
@@ -82,6 +97,8 @@ export const defaultUiCoverageOptions: UiCoverageOptions = {
   maxScreenshotHeight: 8000,
   interactions: DEFAULT_INTERACTIONS,
   allowedInteractions: [],
+  steps: 'off',
+  maxStepScreenshots: 50,
 };
 
 /** The deprecated rule keys of `use.uiCoverage` (not accepted in the config file's `recording`). */
@@ -106,6 +123,8 @@ export const RECORDING_SCHEMA = {
     s.rule({ selector: s.required(s.string()), events: s.required(s.array(interaction(), 'an array of interaction types')) }),
     'an array of { selector, events } rules',
   ),
+  steps: s.oneOf('on', 'off'),
+  maxStepScreenshots: s.number({ min: 0 }),
 } satisfies SchemaFields<UiCoverageRecordingConfig>;
 
 export function resolveOptions(partial?: Partial<UiCoverageOptions>): UiCoverageOptions {

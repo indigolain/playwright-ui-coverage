@@ -2,6 +2,26 @@
 
 exports[`aggregate > matches the snapshot 1`] = `
 {
+  "attempts": [
+    {
+      "passed": true,
+      "retry": 0,
+      "title": "users › search",
+      "use": "tested",
+    },
+    {
+      "passed": true,
+      "retry": 0,
+      "title": "users › add",
+      "use": "tested",
+    },
+    {
+      "passed": true,
+      "retry": 0,
+      "title": "app › hash routes",
+      "use": "tested",
+    },
+  ],
   "failingOnly": 0,
   "percent": 57.1,
   "routes": [
@@ -343,6 +363,146 @@ exports[`aggregate > matches the snapshot 1`] = `
           "dpr": 2,
           "source": "ui-coverage-screenshot-1",
           "test": "users › add",
+        },
+      ],
+      "states": [
+        {
+          "attempts": [
+            0,
+          ],
+          "boxes": [
+            {
+              "h": 30,
+              "key": "#search",
+              "w": 200,
+              "x": 10,
+              "y": 10,
+            },
+            {
+              "h": 30,
+              "key": "[data-testid="add-user"]",
+              "w": 80,
+              "x": 220,
+              "y": 10,
+            },
+            {
+              "h": 20,
+              "key": "link "Ada Lovelace"",
+              "w": 100,
+              "x": 10,
+              "y": 50,
+            },
+            {
+              "h": 20,
+              "key": "link "Grace Hopper"",
+              "w": 100,
+              "x": 10,
+              "y": 80,
+            },
+            {
+              "h": 20,
+              "key": "button "Delete"",
+              "w": 60,
+              "x": 300,
+              "y": 50,
+            },
+            {
+              "h": 20,
+              "key": "button "Delete"",
+              "w": 60,
+              "x": 300,
+              "y": 80,
+            },
+          ],
+          "dpr": 1,
+          "source": "ui-coverage-screenshot-0",
+          "tested": 2,
+          "total": 5,
+        },
+        {
+          "attempts": [
+            1,
+          ],
+          "boxes": [
+            {
+              "h": 30,
+              "key": "#search",
+              "w": 200,
+              "x": 10,
+              "y": 10,
+            },
+            {
+              "h": 30,
+              "key": "[data-testid="add-user"]",
+              "w": 80,
+              "x": 220,
+              "y": 10,
+            },
+            {
+              "h": 20,
+              "key": "link "Ada Lovelace"",
+              "w": 100,
+              "x": 10,
+              "y": 50,
+            },
+            {
+              "h": 20,
+              "key": "link "Grace Hopper"",
+              "w": 100,
+              "x": 10,
+              "y": 80,
+            },
+            {
+              "h": 20,
+              "key": "button "Delete"",
+              "w": 60,
+              "x": 300,
+              "y": 50,
+            },
+            {
+              "h": 20,
+              "key": "button "Delete"",
+              "w": 60,
+              "x": 300,
+              "y": 80,
+            },
+          ],
+          "dpr": 2,
+          "source": "ui-coverage-screenshot-0",
+          "tested": 2,
+          "total": 5,
+        },
+        {
+          "attempts": [
+            1,
+          ],
+          "boxes": [
+            {
+              "h": 30,
+              "key": "#new-name",
+              "w": 180,
+              "x": 400,
+              "y": 200,
+            },
+            {
+              "h": 30,
+              "key": "button "Save"",
+              "w": 60,
+              "x": 400,
+              "y": 250,
+            },
+            {
+              "h": 30,
+              "key": "button "Cancel"",
+              "w": 60,
+              "x": 470,
+              "y": 250,
+            },
+          ],
+          "dpr": 2,
+          "source": "ui-coverage-screenshot-1",
+          "tested": 2,
+          "total": 3,
         },
       ],
       "tested": 6,

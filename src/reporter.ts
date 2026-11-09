@@ -19,7 +19,7 @@ import {
   type UiCoverageConfig,
   type UiCoverageReporterOptions,
 } from './config';
-import { buildReport, DATA_DIR, readData, writeData, type ReportInput } from './report';
+import { buildReport, DATA_DIR, readData, snapshotsOf, writeData, type ReportInput } from './report';
 import { resolveBaselineOption } from './baseline';
 import { resolveHtmlReport, type HtmlReportLink } from './insights';
 import { ATTACHMENT_NAME } from './types';
@@ -44,7 +44,7 @@ function specView(test: TestCase): string {
 function resolveScreenshots<T>(data: T, result: TestResult): T {
   const paths = new Map<string, string>();
   for (const a of result.attachments) if (a.path) paths.set(a.name, a.path);
-  for (const snap of ((data as any)?.snapshots ?? []) as { screenshot?: string }[]) {
+  for (const snap of snapshotsOf(data)) {
     if (!snap.screenshot) continue;
     const file = paths.get(snap.screenshot) ?? (path.isAbsolute(snap.screenshot) ? snap.screenshot : undefined);
     if (file) snap.screenshot = file;

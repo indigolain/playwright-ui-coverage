@@ -53,6 +53,8 @@ export default defineUiCoverageConfig({
     ],
     // scroll is opt-in; the demo turns it on to show the scrollable log on /widgets.
     interactions: [...DEFAULT_INTERACTIONS, 'scroll'],
+    // Steps are opt-in too: the report's state stepper then has a screenshot after every step.
+    steps: 'on',
   },
 
   // Per-view thresholds: UI_COVERAGE_PROFILE=thresholds-pass npm run demo (or thresholds-fail).

@@ -1,4 +1,4 @@
-import type { CoverageSummary, ElementCoverage } from './aggregate';
+import type { CoverageSummary, ElementCoverage, RouteCoverage, ScreenshotBox } from './aggregate';
 import { mostRepeated } from './insights';
 import { testSkeleton } from './locators';
 
@@ -10,20 +10,81 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
  * (instead of repeating each element key per box) with coordinates rounded to
  * 0.1 px. coverage.json keeps the full format.
  */
+/** The <a> elements of a route's link units, once each: `links[].refs` and boxes index into them. */
+const linkElsOf = (r: RouteCoverage) => [...new Set((r.links ?? []).flatMap((l) => l.referrers))];
+
+/** Boxes become `[index, x, y, w, h, pos?]`: an index into elements, then (offset by elements.length) into linkEls. */
+function boxCompactor(r: RouteCoverage) {
+  const index = new Map([...r.elements, ...linkElsOf(r)].map((e, i) => [e.key, i]));
+  return (b: ScreenshotBox) => {
+    const i = index.get(b.key);
+    if (i === undefined) return b;
+    const out: (number | string)[] = [i, round1(b.x), round1(b.y), round1(b.w), round1(b.h)];
+    if (b.pos) out.push(b.pos);
+    return out;
+  };
+}
+
+/**
+ * Test attempts as the page needs them: `test` indexes `tests` (when the
+ * attempt's test is listed there), `run` is the retry.
+ */
+function compactAttempts(summary: CoverageSummary, testIndex: Map<string, number>) {
+  return (summary.attempts ?? []).map((a) => {
+    const test = a.testId !== undefined ? testIndex.get(a.testId) : undefined;
+    return {
+      ...(test !== undefined ? { test } : { title: a.title }),
+      run: a.retry,
+      ...(a.passed ? {} : { failed: 1 }),
+      ...(a.trace ? { trace: a.trace } : {}),
+    };
+  });
+}
+
+/**
+ * The files the page loads on demand, by name in the `steps/` folder: each
+ * view's states (`view-<i>.js`), so a large report stays quick to open.
+ * Each calls `__uicovData(kind, index, payload)`.
+ */
+export function renderLazyFiles(summary: CoverageSummary): Map<string, string> {
+  const files = new Map<string, string>();
+  summary.routes.forEach((r, i) => {
+    if (!r.states?.length) return;
+    const box = boxCompactor(r);
+    const payload = {
+      states: r.states.map((st) => ({
+        source: st.source,
+        dpr: st.dpr,
+        ...(st.viewport ? { viewport: 1 } : {}),
+        ...(st.t !== undefined ? { t: st.t } : {}),
+        tested: st.tested,
+        total: st.total,
+        attempts: st.attempts,
+        boxes: st.boxes.map(box),
+      })),
+    };
+    files.set(`view-${i}.js`, lazyScript('view', i, payload));
+  });
+  return files;
+}
+
+const lazyScript = (kind: string, i: number, payload: unknown) =>
+  `__uicovData(${JSON.stringify(kind)},${i},${JSON.stringify(payload).replace(/</g, '\\u003c')});\n`;
+
 function compact(summary: CoverageSummary) {
   const tests = summary.tests ?? [];
   const testIndex = new Map(tests.map((t, i) => [t.id, i]));
+  const { attempts: _, ...rest } = summary;
   return {
-    ...summary,
+    ...rest,
     tests,
+    attempts: compactAttempts(summary, testIndex),
     mostRepeated: summary.mostRepeated ?? mostRepeated(summary),
-    routes: summary.routes.map((r) => {
-      // The <a> elements of link units, once each: `links[].refs` and boxes index into them.
-      const linkEls = [...new Set((r.links ?? []).flatMap((l) => l.referrers))];
+    routes: summary.routes.map(({ states, ...r }) => {
+      const linkEls = linkElsOf(r);
       const linkIndex = new Map(linkEls.map((e, i) => [e, i]));
       const untestedLinkEls = new Set((r.links ?? []).filter((l) => !l.tested).flatMap((l) => l.referrers));
-      // Boxes: an index into elements, then (offset by elements.length) into linkEls.
-      const index = new Map([...r.elements, ...linkEls].map((e, i) => [e.key, i]));
+      const box = boxCompactor(r);
       // The page needs neither the raw recorded data nor locators for tested elements.
       // Hints become their messages.
       const slim = ({ role, name, nameFrom, attrs, suggestedLocator, a11yHints, ...e }: ElementCoverage, keepLocator: boolean) => ({
@@ -37,16 +98,9 @@ function compact(summary: CoverageSummary) {
         // A link's locator matters while its destination is untested.
         linkEls: linkEls.map((e) => slim(e, untestedLinkEls.has(e))),
         links: (r.links ?? []).map(({ referrers, ...l }) => ({ ...l, refs: referrers.map((e) => linkIndex.get(e)!) })),
-        screenshots: r.screenshots.map(({ testId: _, ...s }) => ({
-          ...s,
-          boxes: s.boxes.map((b) => {
-            const i = index.get(b.key);
-            if (i === undefined) return b;
-            const out: (number | string)[] = [i, round1(b.x), round1(b.y), round1(b.w), round1(b.h)];
-            if (b.pos) out.push(b.pos);
-            return out;
-          }),
-        })),
+        screenshots: r.screenshots.map(({ testId: _, ...s }) => ({ ...s, boxes: s.boxes.map(box) })),
+        // The states themselves are in steps/view-<i>.js.
+        ...(states?.length ? { stateCount: states.length } : {}),
       };
     }),
     untestedViews: summary.untestedViews ?? [],
@@ -206,6 +260,22 @@ h2.section { font-size: 15px; margin: 24px 0 8px; display: flex; gap: 10px; alig
 #untestedList button[aria-current=true] { background: var(--bg); outline: 1px solid var(--border); }
 #untestedList { padding: 4px 8px 8px; }
 @keyframes flash { from { background: rgba(245,158,11,.3); } to { background: transparent; } }
+.views { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { font: inherit; font-size: 12px; color: var(--text); background: var(--panel); border: 0; padding: 3px 10px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button:hover { background: var(--bg); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.seg button[aria-pressed=true] { background: var(--bg); font-weight: 600; }
+.stepper { margin-bottom: 24px; max-width: 1100px; }
+.stepbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.stepbar .pos { font-variant-numeric: tabular-nums; }
+.btn:disabled { opacity: .4; cursor: default; }
+.btn:disabled:hover { background: var(--panel); }
+.kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+.reached a { color: inherit; }
+.reached a:hover { color: var(--accent); }
+.reached .trace { margin-left: 6px; color: var(--accent); }
 </style>
 </head>
 <body>
@@ -413,19 +483,113 @@ function linkRows(r) {
     '</tr>').join('');
 }
 
-function show(i, fromUser, focusKey) {
+// Overlay boxes are placed only once each (lazy) image has loaded.
+function wireShot(el, r, s, tested) {
+  const img = el.querySelector('img');
+  const place = () => placeBoxes(el, r, s, tested);
+  if (img.complete && img.naturalWidth) place();
+  else {
+    img.addEventListener('load', place, { once: true });
+    img.addEventListener('error', () => el.classList.add('loaded', 'missing'), { once: true });
+  }
+}
+
+// ---- Screenshots of a route: the overview (the best few) or every state, one at a time.
+let shotMode = store.get('shotMode') === 'states' ? 'states' : 'best';
+let stateAt = 0;
+// Data loaded on demand from steps/ (script tags, so it works from file://).
+const lazy = new Map();
+window.__uicovData = (kind, i, payload) => { const e = lazy.get(kind + '-' + i); if (e) e.resolve(payload); };
+function loadLazy(kind, i) {
+  const k = kind + '-' + i;
+  if (!lazy.has(k)) {
+    const e = {};
+    e.promise = new Promise((resolve, reject) => { e.resolve = resolve; e.reject = reject; });
+    lazy.set(k, e);
+    const s = document.createElement('script');
+    s.src = 'steps/' + k + '.js';
+    s.onerror = () => { lazy.delete(k); s.remove(); e.reject(new Error('not found')); };
+    document.head.appendChild(s);
+  }
+  return lazy.get(k).promise;
+}
+function renderShots(i, tested) {
+  const r = data.routes[i];
+  const area = $('#shotArea');
+  if (!area) return;
+  const mode = r.stateCount ? shotMode : 'best';
+  $('#main').querySelectorAll('.seg button[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+  const hint = $('#viewsHint');
+  if (hint) hint.innerHTML = mode === 'states' ? '<span class="kbd">←</span> <span class="kbd">→</span> to step through' : 'The screenshots that show the most elements';
+  if (mode === 'best') {
+    area.innerHTML = r.screenshots.length ? '<div class="shots">' + r.screenshots.map((s, si) =>
+      '<figure><div class="shot" data-si="' + si + '"><img loading="lazy" decoding="async" src="' + esc(s.source) + '" alt="Screenshot of ' + esc(r.route) + '"></div>' +
+      '<figcaption>' + (s.viewport ? 'viewport, right after an interaction · ' : '') + 'from: ' + esc(s.test) + '</figcaption></figure>').join('') + '</div>' : '';
+    area.querySelectorAll('.shot').forEach(el => wireShot(el, r, r.screenshots[+el.dataset.si], tested));
+    setHash(r);
+    return;
+  }
+  area.innerHTML = '<div class="stepper"><p class="muted">Loading states…</p></div>';
+  loadLazy('view', i).then(payload => {
+    if (current !== i || shotMode !== 'states' || !$('#shotArea')) return;
+    states = payload.states;
+    showState(i, Math.min(stateAt, states.length - 1), tested);
+  }, () => { if (current === i) area.innerHTML = '<p class="muted">The states of this view weren’t found (steps/view-' + i + '.js).</p>'; });
+}
+let states = null;
+const setHash = (r, k) => { try { history.replaceState(null, '', '#' + encodeURIComponent(r.route) + (k != null ? '&state=' + (k + 1) : '')); } catch {} };
+function showState(i, k, tested) {
+  const r = data.routes[i];
+  const n = states.length;
+  if (k < 0 || k >= n) return;
+  stateAt = k;
+  const st = states[k];
+  const pct = st.total ? Math.round(st.tested / st.total * 1000) / 10 : 100;
+  const area = $('#shotArea');
+  area.innerHTML = '<div class="stepper">' +
+    '<div class="stepbar"><button class="btn" data-state-step="-1" title="Previous state (←)" aria-label="Previous state"' + (k === 0 ? ' disabled' : '') + '>◀</button>' +
+      '<span class="pos">State <b>' + (k + 1) + '</b> of ' + n + '</span>' +
+      '<button class="btn" data-state-step="1" title="Next state (→)" aria-label="Next state"' + (k === n - 1 ? ' disabled' : '') + '>▶</button>' +
+      '<span class="muted">' + st.tested + ' of ' + plural(st.total, 'element') + ' in this state tested (' + pct + '%)</span></div>' +
+    '<figure><div class="shot"><img decoding="async" src="' + esc(st.source) + '" alt="State ' + (k + 1) + ' of ' + esc(r.route) + '"></div>' +
+      '<figcaption class="reached">' + (st.viewport ? 'viewport' : 'full page') + (st.t ? ' · ' + new Date(st.t).toLocaleTimeString() : '') +
+      ' · Reached by: ' + st.attempts.map(a => attemptItem(data.attempts[a])).join(', ') + '</figcaption></figure></div>';
+  area.querySelectorAll('[data-state-step]').forEach(b => b.onclick = () => showState(i, stateAt + +b.dataset.stateStep, tested));
+  wireShot(area.querySelector('.shot'), r, st, tested);
+  // The neighbours load in the background, so stepping is instant.
+  [k - 1, k + 1].forEach(j => { if (states[j]) new Image().src = states[j].source; });
+  setHash(r, k);
+}
+// A test attempt, linked to the HTML report and its trace like "Tested by".
+function attemptItem(a) {
+  if (!a) return '';
+  const t = a.test != null ? tests[a.test] : null;
+  const label = t ? testItem({ ...t, run: a.run, trace: a.trace }, !!a.failed) : esc(a.title) + (a.failed ? ' (failed)' : '');
+  return label + (a.run ? ' <span class="muted">(retry #' + a.run + ')</span>' : '');
+}
+const stepping = () => current >= 0 && shotMode === 'states' && states && $('#main .stepper .stepbar');
+addEventListener('keydown', e => {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  if (!stepping()) return;
+  e.preventDefault();
+  showState(current, stateAt + (e.key === 'ArrowLeft' ? -1 : 1), boxInfo(data.routes[current]));
+});
+
+function show(i, fromUser, focusKey, state) {
   const r = data.routes[i];
   if (!r) { $('#main').innerHTML = '<p class="muted">No coverage data.</p>'; return; }
   try { history.replaceState(null, '', '#' + encodeURIComponent(r.route)); } catch {}
   clearCurrent();
+  states = null;
   current = i;
   buttons[i].setAttribute('aria-current', 'true');
   if (!fromUser) buttons[i].scrollIntoView({ block: 'nearest' });
 
   const tested = boxInfo(r);
-  const shots = r.screenshots.map((s, si) =>
-    '<figure><div class="shot" data-si="' + si + '"><img loading="lazy" decoding="async" src="' + esc(s.source) + '" alt="Screenshot of ' + esc(r.route) + '"></div>' +
-    '<figcaption>' + (s.viewport ? 'viewport, right after an interaction · ' : '') + 'from: ' + esc(s.test) + '</figcaption></figure>').join('');
+  if (state !== undefined) shotMode = 'states';
+  stateAt = state || 0;
+  const shots = r.screenshots.length || r.stateCount;
   const rows = sortedElements(r.elements).map(e =>
     '<tr class="' + (e.tested ? 'ok' : 'bad') + '" data-key="' + esc(e.key) + '">' +
       '<td><span class="pill ' + (e.tested ? 'ok" title="' + esc(countsText(e)) + '">tested' : failingOnly(e) ? 'warn" title="Touched only by tests that did not pass; not counted as tested">failing tests only' : 'bad">untested') + '</span></td>' +
@@ -447,7 +611,13 @@ function show(i, fromUser, focusKey) {
     '<span style="margin-left:auto"></span>' +
     (skeletonLines(r).length ? '<button class="btn" data-copy="skeleton" title="A test that visits this route and touches each untested element and link">Copy untested as test skeleton</button>' : '') +
     '<label><input type="checkbox" id="only"' + (onlyUntested ? ' checked' : '') + '> Untested only</label></div>' +
-    (shots ? '<div class="shots">' + shots + '</div>' : '') +
+    (r.stateCount
+      ? '<div class="views"><span class="seg" role="group" aria-label="Screenshots">' +
+          '<button data-mode="best" title="The screenshots that show the most elements">Overview</button>' +
+          '<button data-mode="states" title="Every state of this view the tests reached, in the order they reached it">All states (' + r.stateCount + ')</button></span>' +
+          '<span class="muted" id="viewsHint"></span></div>'
+      : '') +
+    (shots ? '<div id="shotArea"></div>' : '') +
     (r.elements.length ? '<div class="table-wrap"><table class="els"><thead><tr><th>Status</th><th>Element</th>' + insightHeaders() + '<th>Tested by</th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '') +
     (linksOf(r).length
       ? '<h2 class="section">Links <span class="muted">' + (r.totalLinks - r.testedLinks) + ' untested of ' + r.totalLinks + '</span></h2>' +
@@ -463,17 +633,14 @@ function show(i, fromUser, focusKey) {
     main.className = onlyUntested ? 'only-untested' : '';
   };
 
-  // Overlay boxes are placed only once each (lazy) image has loaded.
-  main.querySelectorAll('.shot').forEach(el => {
-    const s = r.screenshots[+el.dataset.si];
-    const img = el.querySelector('img');
-    const place = () => placeBoxes(el, r, s, tested);
-    if (img.complete && img.naturalWidth) place();
-    else {
-      img.addEventListener('load', place, { once: true });
-      img.addEventListener('error', () => el.classList.add('loaded', 'missing'), { once: true });
-    }
+  main.querySelectorAll('.seg button[data-mode]').forEach(b => b.onclick = () => {
+    if (shotMode === b.dataset.mode) return;
+    shotMode = b.dataset.mode;
+    store.set('shotMode', shotMode);
+    stateAt = 0;
+    renderShots(i, tested);
   });
+  if (shots) renderShots(i, tested);
 
   wireGoto(main);
   const focusRow = focusKey != null && rowOf(focusKey);
@@ -719,18 +886,25 @@ $('#main').addEventListener('click', e => {
   }
 });
 
-const indexOfHash = () => data.routes.findIndex(r => '#' + encodeURIComponent(r.route) === location.hash);
+// '#<route>' or '#<route>&state=<n>' (route names are encoded, so '&' only separates).
+const hashParts = () => { const [route, query] = location.hash.split('&'); const m = /^state=(\\d+)$/.exec(query || ''); return { route, state: m ? +m[1] - 1 : undefined }; };
+const indexOfHash = () => data.routes.findIndex(r => '#' + encodeURIComponent(r.route) === hashParts().route);
 const untestedOfHash = () => untestedViews.findIndex(v => UNTESTED_HASH + encodeURIComponent(v.view) === location.hash);
 addEventListener('hashchange', () => {
   if (location.hash === REPEATED_HASH) { if (current !== -1) showRepeated(); return; }
   if (location.hash.startsWith(UNTESTED_HASH)) { const u = untestedOfHash(); if (u >= 0 && u !== currentUntested) showUntested(u); return; }
-  const i = indexOfHash(); if (i >= 0 && i !== current) show(i);
+  const i = indexOfHash();
+  const { state } = hashParts();
+  if (i >= 0 && i !== current) show(i, false, undefined, state);
+  else if (i >= 0 && state !== undefined && state !== stateAt) {
+    if (stepping()) showState(i, state, boxInfo(data.routes[i])); else show(i, false, undefined, state);
+  }
 });
 const fromHash = indexOfHash();
 const first = firstVisible();
 if (location.hash === REPEATED_HASH) showRepeated();
 else if (untestedOfHash() >= 0) showUntested(untestedOfHash());
-else show(fromHash >= 0 ? fromHash : first ? +first.dataset.i : 0);
+else show(fromHash >= 0 ? fromHash : first ? +first.dataset.i : 0, false, undefined, fromHash >= 0 ? hashParts().state : undefined);
 </script>
 </body>
 </html>

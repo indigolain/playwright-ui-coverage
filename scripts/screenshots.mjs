@@ -49,7 +49,26 @@ await page.mouse.move(0, 0);
 await page.locator('h2.section').evaluate((h) => h.scrollIntoView({ block: 'start' }));
 await page.screenshot({ path: path.join(out, 'report-links.png') });
 
-// 6. Dark mode.
+// 6. All states of /users, at the state with the "Add user" modal (needs `steps: 'on'`, as in the demo config).
+await open('/users');
+await page.getByRole('button', { name: /^All states/ }).click();
+await page.locator('.stepper .box').first().waitFor();
+const modal = await page.evaluate(() => {
+  // The state of the modal test with the most boxes: the open modal.
+  const t = data.tests.findIndex((x) => x.title.includes('add a user via the modal'));
+  let best = 0;
+  states.forEach((s, i) => {
+    const mine = s.attempts.some((a) => data.attempts[a].test === t);
+    if (mine && s.boxes.length > states[best].boxes.length) best = i;
+  });
+  return best;
+});
+for (let i = 0; i < modal; i++) await page.keyboard.press('ArrowRight');
+await page.locator('.stepper .box').first().waitFor();
+await page.mouse.move(0, 0);
+await page.screenshot({ path: path.join(out, 'report-states.png') });
+
+// 7. Dark mode.
 await page.emulateMedia({ colorScheme: 'dark' });
 await open('/');
 await page.screenshot({ path: path.join(out, 'report-dark.png') });

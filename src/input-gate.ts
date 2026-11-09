@@ -19,6 +19,11 @@
  *   (at most `IDLE_WAIT` ms, so a click stuck waiting for actionability
  *   doesn't hold up recording).
  *
+ * Step screenshots (recording option `steps`) use it in every engine: a step's
+ * capture runs exclusively too, so it shows the page after the action that
+ * made the step, and `hold` keeps the next input back from the moment the
+ * step arrives until its capture starts.
+ *
  * The connection is shared by every object in the worker, so this works the
  * same in fixture and register mode. It's a private API: when it isn't there,
  * the gate does nothing and captures run as before.
@@ -47,6 +52,8 @@ const INPUT_METHODS: Record<string, Set<string>> = {
 
 /** How long a capture waits for input calls in flight before it goes ahead anyway. */
 const IDLE_WAIT = 3000;
+/** A hold is released after this long at the latest, so a test is never stuck behind one. */
+const MAX_HOLD = 5000;
 
 /** Input calls in flight for elements whose page isn't known (element handles). */
 const ANY_PAGE = Symbol('any page');
@@ -59,29 +66,70 @@ class Gate {
   private inputs = new Map<PageKey, number>();
   /** Captures waiting for a page's inputs to finish. */
   private idleWaiters = new Set<() => void>();
+  /** Holds (see `hold`) per page. Resolve when released. */
+  private holds = new Map<object, Set<Promise<void>>>();
+
+  /** What input to `page` has to wait for: captures in progress and holds. */
+  private blocker(page: PageKey): Promise<unknown> | undefined {
+    const list: Promise<unknown>[] = [];
+    if (page === ANY_PAGE) {
+      list.push(...this.captures.values());
+      for (const set of this.holds.values()) list.push(...set);
+    } else {
+      const c = this.captures.get(page);
+      if (c) list.push(c);
+      list.push(...(this.holds.get(page) ?? []));
+    }
+    return list.length === 0 ? undefined : list.length === 1 ? list[0] : Promise.all(list);
+  }
 
   /** Wraps one `sendMessageToServer` call. */
   send(object: any, method: string, run: () => Promise<unknown>): Promise<unknown> {
     if (!INPUT_METHODS[object?._type]?.has(method)) return run();
     const page: PageKey = object._type === 'Page' ? object : object._type === 'Frame' && object._page ? object._page : ANY_PAGE;
-    const blocking =
-      page === ANY_PAGE
-        ? this.captures.size
-          ? Promise.all(this.captures.values())
-          : undefined
-        : this.captures.get(page);
-    // Counted before waiting, so no new capture starts until this call is done.
-    this.inputs.set(page, (this.inputs.get(page) ?? 0) + 1);
-    // No capture in progress (almost always): send right away, synchronously, as before.
-    const result = blocking ? blocking.then(run) : run();
-    const done = () => {
-      const n = (this.inputs.get(page) ?? 1) - 1;
-      if (n > 0) this.inputs.set(page, n);
-      else this.inputs.delete(page);
-      this.idleWaiters.forEach((wake) => wake());
+    const start = () => {
+      this.inputs.set(page, (this.inputs.get(page) ?? 0) + 1);
+      const result = run();
+      const done = () => {
+        const n = (this.inputs.get(page) ?? 1) - 1;
+        if (n > 0) this.inputs.set(page, n);
+        else this.inputs.delete(page);
+        this.idleWaiters.forEach((wake) => wake());
+      };
+      result.then(done, done);
+      return result;
     };
-    result.then(done, done);
-    return result;
+    const blocking = this.blocker(page);
+    // Nothing in the way (almost always): send right away, synchronously, as before.
+    if (!blocking) return start();
+    // Wait until nothing is in the way: another capture or hold may have begun meanwhile.
+    return (async () => {
+      for (let b: Promise<unknown> | undefined = blocking; b; b = this.blocker(page)) await b;
+      return start();
+    })();
+  }
+
+  /**
+   * Keeps input to `page` back until the returned function is called (or
+   * `MAX_HOLD` ms passed). Input calls already sent aren't affected.
+   */
+  hold(page: object): () => void {
+    let release!: () => void;
+    const p = new Promise<void>((resolve) => (release = resolve));
+    if (!this.holds.has(page)) this.holds.set(page, new Set());
+    this.holds.get(page)!.add(p);
+    let done = false;
+    const timer = setTimeout(() => end(), MAX_HOLD);
+    const end = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const set = this.holds.get(page);
+      set?.delete(p);
+      if (set && !set.size) this.holds.delete(page);
+      release();
+    };
+    return end;
   }
 
   private busy(page: object) {

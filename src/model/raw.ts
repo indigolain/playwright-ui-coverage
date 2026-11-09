@@ -13,11 +13,13 @@ import type { UiCoverageRules } from './rules';
  * Payloads without `formatVersion` are the pre-0.2 format, where keys and
  * labels were computed in the browser (`TestCoverageData` in `types.ts`).
  * 3 added frame and shadow root boundaries to the node table (`RawNode.tag`);
- * version 2 payloads are read as they are (they have none).
+ * version 2 payloads are read as they are (they have none). 4 added `steps`,
+ * `states` and the `t` / `hash` of snapshots; versions 2 and 3 are read as
+ * they are (no steps, snapshots in recording order).
  */
-export const RECORDING_FORMAT_VERSION = 3;
+export const RECORDING_FORMAT_VERSION = 4;
 /** Recording format versions this version reads. */
-export const READABLE_RECORDING_FORMAT_VERSIONS: readonly number[] = [2, 3];
+export const READABLE_RECORDING_FORMAT_VERSIONS: readonly number[] = [2, 3, 4];
 
 /**
  * One DOM element: a recorded candidate or one of its ancestors. Nodes are
@@ -125,6 +127,46 @@ export interface RawSnapshot {
   viewport?: RawViewport;
   /** Visible recorded elements, in document order. */
   elements: RawElement[];
+  /** When the inventory (or screenshot) was taken, ms since the epoch. */
+  t?: number;
+  /** SHA-1 of the screenshot file, to recognize the same state across tests. */
+  hash?: string;
+}
+
+/**
+ * The Playwright call a step was made by, when known (`RawStep.call`): taken
+ * from Playwright's client instrumentation while the call was in progress.
+ */
+export interface RawCall {
+  /** Playwright API name: `locator.click`, `page.goto`, `keyboard.press`, … */
+  api: string;
+  /** The locator, in Playwright syntax: `getByRole('button', { name: 'Save' })`. */
+  locator?: string;
+  /** A short argument that is safe to show: the key of `press`, the URL of `goto`. Never typed text. */
+  arg?: string;
+  /** Where the call is in the test code: relative to the project's testDir, `/` separators. */
+  file?: string;
+  line?: number;
+  column?: number;
+}
+
+/**
+ * One step of a test (recording option `steps`): an interaction the tracker
+ * counted (the same events as `interactions`), or a page load.
+ */
+export interface RawStep {
+  /** ms since the epoch, when the recorder received it. */
+  t: number;
+  /** DOM event type of the interaction (`click`, `input`, …), or `load`. */
+  event: string;
+  url: string;
+  /** The page of the context it happened in: 0 for the first page, in creation order. */
+  page?: number;
+  /** The element acted on (absent for `load`, or for a frame that was gone). */
+  element?: RawElementRef;
+  call?: RawCall;
+  /** Index into `states`: the page right after this step. Absent when no screenshot was taken. */
+  state?: number;
 }
 
 export interface RawInteraction {
@@ -152,6 +194,14 @@ export interface RawCoverageData {
   rules?: UiCoverageRules;
   snapshots: RawSnapshot[];
   interactions: RawInteraction[];
+  /** Steps in the order they happened (version 4, recording option `steps`). */
+  steps?: RawStep[];
+  /**
+   * Viewport screenshots of the page after steps (`RawStep.state`), with the
+   * elements in view. Not used for coverage: they only feed the state stepper
+   * and the per-test walkthrough. Identical consecutive states are stored once.
+   */
+  states?: RawSnapshot[];
   /** True when the test ran under Playwright component testing. */
   componentTest?: boolean;
 }
@@ -199,6 +249,8 @@ export interface RawInteractionEvent {
   url: string;
   nodes: RawNode[];
   element: RawElementRef;
+  /** When it happened in the page, ms since the epoch (to find the Playwright call that caused it). */
+  t?: number;
 }
 
 /** Version of `ui-coverage-report/data/ui-coverage-data.json`. */
