@@ -66,13 +66,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: changeset-release/main
         run: |
+          # changesets/action v2 pushes through the API and leaves the version
+          # changes uncommitted here, so read the PR's head without checking it out.
           git fetch -q origin "$BRANCH"
-          git checkout -q FETCH_HEAD
           # GitHub may hold the pull_request runs that pushes to the version PR
           # trigger for approval (github-actions[bot] counts as a first-time contributor), and held
           # runs block merging. Approve them; if GitHub triggered nothing,
           # start CI directly.
-          SHA=$(git rev-parse HEAD)
+          SHA=$(git rev-parse FETCH_HEAD)
           SEEN=""
           # Runs appear a few seconds after the push, one per workflow; keep
           # looking for a minute and approve each held one.
