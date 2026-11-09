@@ -68,7 +68,15 @@ await page.locator('.stepper .box').first().waitFor();
 await page.mouse.move(0, 0);
 await page.screenshot({ path: path.join(out, 'report-states.png') });
 
-// 7. Dark mode.
+// 7. The walkthrough of the modal test, at the step that selects the role.
+await page.locator('#tabTests').click();
+await page.locator('#testList button', { hasText: 'add a user via the modal' }).click();
+await page.locator('.walk .steplist button', { hasText: 'combobox "Role"' }).first().click();
+await page.locator('.walk .box.target').first().waitFor();
+await page.mouse.move(0, 0);
+await page.screenshot({ path: path.join(out, 'report-walkthrough.png') });
+
+// 8. Dark mode.
 await page.emulateMedia({ colorScheme: 'dark' });
 await open('/');
 await page.screenshot({ path: path.join(out, 'report-dark.png') });
