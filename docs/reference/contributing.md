@@ -59,7 +59,7 @@ BROWSER=firefox scripts/demo-both-modes.sh  # what CI runs: both modes, same cov
 - **checks:** typecheck, build, unit tests, and the docs build (`npm run docs:build`, which fails on dead links);
 - **demo:** both recording modes on Chromium, Firefox and WebKit with `@playwright/test` 1.50.0 and the latest release; the Chromium jobs also run `check:interactivity`, `check:locators`, `demo:sharded`, `check:rebuild` (both modes) and `check:baseline`.
 
-`.github/workflows/playwright-next.yml` runs the demo weekly against `@playwright/test@next`, to catch changes to the private instrumentation API that register mode relies on. `.github/workflows/docs.yml` builds this site and deploys it to GitHub Pages (only once the repository is public).
+`.github/workflows/playwright-next.yml` runs the demo weekly against `@playwright/test@next`, to catch changes to the private instrumentation API that register mode relies on. `.github/workflows/docs.yml` builds this site and deploys it to GitHub Pages on every push to `main` that touches the docs.
 
 ## Documentation
 
