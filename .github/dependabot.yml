@@ -8,3 +8,8 @@ updates:
     commit-message:
       prefix: "chore"
     open-pull-requests-limit: 5
+    ignore:
+      # Aliased TypeScript 6, kept for its JavaScript compiler API (used by
+      # test/coverage-schema.test.mjs). TypeScript 7 has no such API.
+      - dependency-name: "typescript6"
+        update-types: ["version-update:semver-major"]

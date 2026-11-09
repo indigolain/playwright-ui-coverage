@@ -17,7 +17,8 @@ import { checkBaseline } from '../src/baseline';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const ts = require('typescript');
+// TypeScript 7 (the native compiler) has no JavaScript API; parse with TS 6's.
+const ts = require('typescript6');
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schema = JSON.parse(fs.readFileSync(path.join(root, 'schema', 'coverage.schema.json'), 'utf8'));
 
