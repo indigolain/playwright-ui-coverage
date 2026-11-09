@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = (m) => createRequire(import.meta.url)(path.join(root, 'dist', m));
-const { renderHtml } = dist('html.js');
+const { renderHtml, renderLazyFiles } = dist('html.js');
 const { addSuggestedLocators } = dist('locators.js');
 const { addA11yHints } = dist('a11y.js');
 const ROUTES = Number(process.argv[2] || 300);
@@ -43,6 +43,7 @@ const SHOT_H = 2400;
   await page.close();
 }
 
+const STATES = 20;
 const segs = ['users', 'orders', 'settings', 'billing', 'reports', 'admin', 'projects', 'teams', 'inbox', 'search'];
 const routes = [];
 let total = 0;
@@ -81,7 +82,15 @@ for (let r = 0; r < ROUTES; r++) {
   }));
   total += elements.length;
   testedTotal += tested;
-  routes.push({ route, total: elements.length, tested, percent: Math.round((tested / elements.length) * 1000) / 10, elements, screenshots });
+  // 20 states per route (steps: 'on'), loaded on demand from steps/view-<i>.js.
+  const states = Array.from({ length: STATES }, (_, k) => ({
+    ...screenshots[k % 3],
+    t: k,
+    tested,
+    total: elements.length,
+    attempts: [k % 3],
+  }));
+  routes.push({ route, total: elements.length, tested, percent: Math.round((tested / elements.length) * 1000) / 10, elements, screenshots, states });
 }
 routes.sort((a, b) => a.route.localeCompare(b.route));
 const summary = {
@@ -90,12 +99,20 @@ const summary = {
   tested: testedTotal,
   percent: Math.round((testedTotal / total) * 1000) / 10,
   routes,
+  attempts: [0, 1, 2].map((k) => ({ title: `spec ${k} › visits`, retry: 0, passed: true, use: 'tested' })),
 };
 // Same post-processing as the reporter.
 addSuggestedLocators(summary);
 addA11yHints(summary);
 const html = renderHtml(summary);
 fs.writeFileSync(path.join(out, 'index.html'), html);
+fs.mkdirSync(path.join(out, 'steps'), { recursive: true });
+let lazyBytes = 0;
+for (const [name, content] of renderLazyFiles(summary)) {
+  fs.writeFileSync(path.join(out, 'steps', name), content);
+  lazyBytes += content.length;
+}
+console.log(`${STATES} states per route in steps/: ${(lazyBytes / ROUTES / 1024).toFixed(0)} KB per route, loaded on demand`);
 console.log(`${ROUTES} routes x ${ELEMENTS} elements, index.html ${(html.length / 1024 / 1024).toFixed(2)} MB`);
 
 const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
@@ -150,6 +167,19 @@ console.log(`hover highlight: ${stats(hov)}`);
 const tog = [];
 for (let i = 0; i < 6; i++) tog.push(await time(() => document.getElementById('only').click()));
 console.log(`"Untested only" toggle: ${stats(tog)}`);
+
+// "All states": loading a route's states (a script tag), then stepping with the arrow key.
+await page.locator('.seg button[data-mode=states]').click();
+await page.locator('.stepper .box').first().waitFor();
+const t1 = Date.now();
+await page.locator('#navList button').nth(5).click();
+await page.locator('.stepper .box').first().waitFor();
+console.log(`switch route in "All states" (loads its states): ${Date.now() - t1} ms`);
+const steps = [];
+for (let i = 0; i < 10; i++)
+  steps.push(await time(() => dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))));
+console.log(`next state (→): ${stats(steps)}`);
+await page.locator('.seg button[data-mode=best]').click();
 
 const dom = await page.evaluate(() => document.getElementsByTagName('*').length);
 console.log(`DOM nodes: ${dom}`);

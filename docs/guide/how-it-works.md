@@ -8,6 +8,8 @@ This page explains the three stages, recording in the browser, raw data, and rul
 
 **Inventory and screenshot.** When a page loads and shortly after interactions (`snapshotDelay`), the recorder lists every visible interactive element, with bounding boxes, and takes a full-page screenshot. It only takes a new screenshot when new elements appear. When an interaction makes new elements appear (a modal opens), the page sends an inventory as soon as its handlers have run, and the recorder takes a viewport screenshot right away, so states a test closes again within a few milliseconds get a screenshot too (`captureTransientStates`, see [Screenshots](./screenshots.md#short-lived-states)).
 
+**Steps** (opt-in, [`steps: 'on'`](../reference/recording-options.md#steps)). The recorder also keeps each interaction and page load as a step, with the Playwright call it came from and its place in the test, and takes a viewport screenshot after each one. The test's next action waits until that screenshot is taken, so it shows the page after the step.
+
 **Recording runs while the test keeps going.** In Chromium, a full-page screenshot of a page larger than the viewport briefly resizes the viewport, and input sent during it can get lost (a mouse wheel that doesn't scroll, a click in a cross-origin iframe that never arrives). So there, a full-page capture waits until the test's input call in progress (click, fill, hover, `mouse.wheel`, …) is done, and the next input call waits until the capture is done. That's usually tens of milliseconds, and doesn't change the test's steps.
 
 The recorder stores **raw facts** (tag, attributes, position among siblings, ancestors, accessible name), not keys: identity and filtering are decided later. Each element's `role`, accessible `name` and where the name came from (`nameFrom`: `aria-labelledby`, `aria-label`, `label`, `placeholder`, `title`, `alt`, `value`, `text`, or `name` for the name attribute) are recorded too; [suggested locators and accessibility hints](./locators-and-accessibility.md) are built from them.
@@ -52,6 +54,8 @@ See the [`report` command](../reference/cli.md#report) for its flags.
 **What a rebuild can change:** everything the reporter does with the data: report-time rules, `views`, `viewFilters`, `normalizeUrl`, `viewBy`, `threshold`, `countFailedTests`, `maxScreenshotsPerRoute`. Links to the HTML report are kept and adjusted to `--out` (`htmlReport: false` drops them).
 
 **What it can't change:** what was recorded.
+
+- Steps and their screenshots exist only if `steps` was on while the tests ran.
 
 - Which elements are interactive is decided in the browser, because it needs the live page (computed styles, descendants, label targets). That includes the `data-uicov-*` markup directives.
 - Interaction types are recording options: events that weren't listened to can't be recovered.

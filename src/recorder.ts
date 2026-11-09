@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { BrowserContext, Frame, Page, TestInfo } from '@playwright/test';
@@ -17,6 +18,7 @@ import {
   type RawNode,
   type RawClip,
   type RawSnapshot,
+  type RawStep,
 } from './model/raw';
 import { compileRules, Resolver } from './model/resolve';
 import { DOCUMENT_TAG } from './model/selector';
@@ -24,6 +26,7 @@ import { intersects, viewportClip } from './model/geometry';
 import type { UiCoverageRules } from './model/rules';
 import { ATTACHMENT_NAME, SCREENSHOT_ATTACHMENT_PREFIX } from './types';
 import { inputGate, type InputGate } from './input-gate';
+import { trackCalls, type CallTracker } from './calls';
 
 /**
  * Runs `fn` as an "internal" Playwright call when possible, so our evaluate /
@@ -38,6 +41,20 @@ function internal<T>(owner: unknown, fn: () => Promise<T>): Promise<T> {
 const recorders = new WeakMap<BrowserContext, ContextRecorder>();
 /** Screenshot counter per test, so several contexts in one test don't collide. */
 const shotCounters = new WeakMap<TestInfo, number>();
+interface StepQueue {
+  steps: RawStep[];
+  busy: boolean;
+  release?: () => void;
+}
+
+/** Step screenshots taken per test (`maxStepScreenshots`). */
+const stepShotCounters = new WeakMap<TestInfo, number>();
+
+const sha1 = (image: Buffer) => crypto.createHash('sha1').update(image).digest('hex');
+
+/** Same URL, scroll position and elements in the same places. */
+const sameState = (a: RawInventory, b: RawInventory) =>
+  a.url === b.url && JSON.stringify([a.viewport, a.nodes, a.elements]) === JSON.stringify([b.viewport, b.nodes, b.elements]);
 
 /**
  * Whether the test runs under Playwright component testing: the CT packages'
@@ -179,7 +196,25 @@ export class ContextRecorder {
   private transientBusy = new WeakSet<Page>();
   /** Keeps full-page captures and the test's input apart (Chromium only, see input-gate.ts). */
   private gate?: InputGate;
+  /** Holds the test's next input while a step's screenshot is taken (every engine, `steps: 'on'`). */
+  private stepGate?: InputGate;
   private finished = false;
+  /** Steps (`steps: 'on'`), in arrival order. */
+  private steps: RawStep[] = [];
+  /** Screenshots of the page after steps (`RawStep.state`). */
+  private states: RawSnapshot[] = [];
+  /** State index by screenshot hash, so a state the page returns to isn't stored twice. */
+  private stateByHash = new Map<string, number>();
+  /**
+   * Steps waiting for a screenshot, per page; `busy` while one is being
+   * taken; `release` ends the hold on the test's next input (see `addStep`).
+   */
+  private stepQueues = new WeakMap<Page, StepQueue>();
+  /** Pages of the context in creation order (`RawStep.page`). */
+  private pageIds = new WeakMap<Page, number>();
+  private pageCount = 0;
+  /** The Playwright calls in progress, to tell which one made a step. */
+  private calls?: CallTracker;
 
   private constructor(
     private context: BrowserContext,
@@ -191,6 +226,7 @@ export class ContextRecorder {
     // Firefox and WebKit full-page captures don't resize the viewport, and don't lose input.
     const engine = context.browser()?.browserType().name() ?? (context as any)._browserType?.name?.();
     if (!engine || engine === 'chromium') this.gate = inputGate(context);
+    if (this.stepsOn && options.screenshots === 'on' && options.maxStepScreenshots > 0) this.stepGate = this.gate ?? inputGate(context);
   }
 
   /** Starts recording `context`. Returns undefined if it is already being recorded. */
@@ -210,8 +246,22 @@ export class ContextRecorder {
     return recorders.get(context);
   }
 
+  private get stepsOn() {
+    return this.options.steps === 'on';
+  }
+
   private async install() {
     const transient = this.options.captureTransientStates && this.options.screenshots === 'on';
+    if (this.stepsOn) {
+      this.calls = trackCalls(this.context, {
+        // Any page renders a selector the same way; no protocol call.
+        formatLocator: (selector) => {
+          const page = this.context.pages()[0];
+          return page ? String(page.locator(selector)) : undefined;
+        },
+        baseDir: this.testInfo.project.testDir,
+      });
+    }
     await internal(this.context, async () => {
       await this.context.exposeBinding(
         '__uicovRecord',
@@ -225,14 +275,20 @@ export class ContextRecorder {
             void p.finally(() => this.pending.delete(p));
             return;
           }
+          const step = page ? this.addStep(page, event.event, page.url(), event.t) : undefined;
           if (page && frame && frame !== page.mainFrame()) {
-            const work = this.recordFromFrame(page, frame, event, inventory).catch(() => {});
+            const work = this.recordFromFrame(page, frame, event, inventory, step).catch(() => {});
             this.pending.add(work);
             void work.finally(() => this.pending.delete(work));
             return;
           }
           const map = this.intern(event.nodes);
-          this.interactions.push({ event: event.event, url: event.url, element: this.remap(event.element, map) });
+          const element = this.remap(event.element, map);
+          this.interactions.push({ event: event.event, url: event.url, element });
+          if (step) {
+            step.url = event.url;
+            step.element = element;
+          }
           if (inventory) {
             const snap = this.toSnapshot(inventory);
             if (this.addNew(this.seenKeys, snap)) this.snapshots.push(snap);
@@ -275,14 +331,16 @@ export class ContextRecorder {
    * (so it resolves to the same element as the frame's inventory entry) and it
    * counts for the page's URL.
    */
-  private async recordFromFrame(page: Page, frame: Frame, event: RawInteractionEvent, inventory?: RawInventory) {
+  private async recordFromFrame(page: Page, frame: Frame, event: RawInteractionEvent, inventory?: RawInventory, step?: RawStep) {
     const url = page.url();
     const fm = (await this.frameMap(frame)) ?? this.frameMaps.get(frame);
     if (!fm) return;
     const nodes: RawNode[] = [];
     const offset = appendFrameNodes(nodes, fm, event.nodes);
     const map = this.intern(nodes);
-    this.interactions.push({ event: event.event, url, element: { ...event.element, node: map[event.element.node + offset] } });
+    const element = { ...event.element, node: map[event.element.node + offset] };
+    this.interactions.push({ event: event.event, url, element });
+    if (step) step.element = element;
     if (inventory) {
       const combined: RawInventory = { url, dpr: inventory.dpr, nodes: [], elements: [] };
       this.addFrameInventory(combined, inventory, fm);
@@ -391,6 +449,7 @@ export class ContextRecorder {
     const map = this.intern(inv.nodes);
     const snap: RawSnapshot = { url: inv.url, dpr: inv.dpr, elements: inv.elements.map((e) => this.remap(e, map)) };
     if (inv.viewport) snap.viewport = inv.viewport;
+    snap.t = Date.now();
     return snap;
   }
 
@@ -399,7 +458,12 @@ export class ContextRecorder {
   }
 
   private watch(page: Page) {
-    page.on('load', () => void this.enqueue(page));
+    if (!this.pageIds.has(page)) this.pageIds.set(page, this.pageCount++);
+    page.on('load', () => {
+      const url = page.url();
+      if (url !== 'about:blank') this.addStep(page, 'load', url);
+      void this.enqueue(page);
+    });
     // A child frame (re)loaded: snapshot (the page's load event may be long past),
     // and remember where it is in case it's gone by the time its events arrive.
     page.on('framenavigated', (frame) => {
@@ -489,7 +553,8 @@ export class ContextRecorder {
       this.addNew(this.shotKeys, after);
       this.addNew(this.seenKeys, after);
       const name = await this.saveShot(image);
-      this.snapshots.push(height ? { ...after, screenshot: name, screenshotHeight: height } : { ...after, screenshot: name });
+      const taken: RawSnapshot = { ...after, screenshot: name, hash: sha1(image) };
+      this.snapshots.push(height ? { ...taken, screenshotHeight: height } : taken);
       return;
     }
   }
@@ -549,10 +614,118 @@ export class ContextRecorder {
       this.addNew(this.shotKeys, inClip(stable));
       this.addNew(this.seenKeys, stable);
       const name = await this.saveShot(image);
-      this.snapshots.push({ ...stable, screenshot: name, screenshotClip: clip });
+      this.snapshots.push({ ...stable, screenshot: name, screenshotClip: clip, hash: sha1(image) });
     } finally {
       this.transientBusy.delete(page);
     }
+  }
+
+  /**
+   * Records a step (`steps: 'on'`) and queues a screenshot of the page after
+   * it. Called synchronously when the event arrives, so steps keep their order
+   * (a child frame's element is filled in later).
+   */
+  private addStep(page: Page, event: string, url: string, at?: number): RawStep | undefined {
+    if (!this.stepsOn || this.finished) return undefined;
+    const step: RawStep = { t: Date.now(), event, url };
+    const id = this.pageIds.get(page);
+    if (id) step.page = id;
+    const call = this.calls?.current(event === 'load' ? 'navigation' : 'action', at);
+    if (call) step.call = call;
+    this.steps.push(step);
+    if (this.options.screenshots === 'on' && (stepShotCounters.get(this.testInfo) ?? 0) < this.options.maxStepScreenshots) {
+      let q = this.stepQueues.get(page);
+      if (!q) this.stepQueues.set(page, (q = { steps: [], busy: false }));
+      q.steps.push(step);
+      // The test's next input waits until this step's capture has started (it may
+      // wait for an earlier step's), so the screenshot shows the page after this
+      // step and not after the next one.
+      q.release ??= this.stepGate?.hold(page);
+      if (!q.busy) {
+        q.busy = true;
+        const queue = q;
+        const work = this.runStepShots(page, queue)
+          .catch(() => {})
+          .finally(() => (queue.busy = false));
+        this.pending.add(work);
+        void work.finally(() => this.pending.delete(work));
+      }
+    }
+    return step;
+  }
+
+  /**
+   * Takes the screenshots of the queued steps: one capture for all the steps
+   * that arrived before it started (a fast sequence of steps shares the state
+   * after the last of them).
+   */
+  private async runStepShots(page: Page, q: StepQueue) {
+    try {
+      while (q.steps.length) {
+        const batch = q.steps.splice(0);
+        const release = q.release;
+        q.release = undefined;
+        try {
+          const state = await this.captureState(page, release);
+          if (state !== undefined) for (const s of batch) s.state = state;
+        } finally {
+          release?.();
+        }
+      }
+    } finally {
+      q.release?.();
+      q.release = undefined;
+    }
+  }
+
+  /**
+   * A viewport screenshot of the page now, with the elements in view, as a
+   * state (index into `states`). The same image of the same URL as an earlier
+   * state is that state. Undefined when the page is gone, keeps changing, or
+   * the test's `maxStepScreenshots` is used up.
+   */
+  private async captureState(page: Page, release?: () => void): Promise<number | undefined> {
+    const used = () => stepShotCounters.get(this.testInfo) ?? 0;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (page.isClosed() || used() >= this.options.maxStepScreenshots) return undefined;
+      // The page after the action that made the step: wait until the test's input
+      // call in progress is done, and hold its next one until the capture is.
+      const capture = async () => {
+        release?.(); // the capture itself holds input now
+        const before = await this.pageInventory(page).catch(() => undefined);
+        if (!before?.viewport) return undefined;
+        const clip = viewportClip(before.viewport);
+        const image = await (before.viewport.zoom
+          ? this.shoot(page, { fullPage: true, clip, timeout: 2000 }, false)
+          : this.shoot(page, { fullPage: false, timeout: 2000 })
+        ).catch(() => undefined);
+        if (!image) return undefined;
+        const after = await this.pageInventory(page).catch(() => undefined);
+        return after && { before, after, clip, image };
+      };
+      const shot = await (this.stepGate ? this.stepGate.exclusive(page, capture) : capture());
+      if (!shot) return undefined;
+      const { before, after, clip, image } = shot;
+      if (!sameState(before, after)) continue; // changed while capturing: the boxes wouldn't match
+      const hash = sha1(image);
+      const known = this.stateByHash.get(hash);
+      if (known !== undefined && this.states[known].url === after.url) return known;
+      if (used() >= this.options.maxStepScreenshots) return undefined;
+      stepShotCounters.set(this.testInfo, used() + 1);
+      const snap = this.toSnapshot(after);
+      const name = await this.saveShot(image);
+      const index = this.states.length;
+      this.states.push({
+        ...snap,
+        elements: snap.elements.filter((e) => intersects(e, clip)),
+        screenshot: name,
+        screenshotClip: clip,
+        hash,
+      });
+      this.stateByHash.set(hash, index);
+      return index;
+    }
+    return undefined;
   }
 
   /** 'on': when this state shows elements no screenshot has shown yet; 'first-only': once per URL. */
@@ -656,8 +829,9 @@ export class ContextRecorder {
         i = this.nodes[i].parent;
       }
     };
-    for (const s of this.snapshots) s.elements.forEach((e) => mark(e.node));
+    for (const s of [...this.snapshots, ...this.states]) s.elements.forEach((e) => mark(e.node));
     for (const i of this.interactions) mark(i.element.node);
+    for (const st of this.steps) if (st.element) mark(st.element.node);
     const map: number[] = [];
     const out: RawNode[] = [];
     this.nodes.forEach((n, i) => {
@@ -665,8 +839,9 @@ export class ContextRecorder {
       map[i] = out.length;
       out.push(n.parent === undefined ? n : { ...n, parent: map[n.parent] });
     });
-    for (const s of this.snapshots) s.elements = s.elements.map((e) => markUnpainted({ ...e, node: map[e.node] }, e));
+    for (const s of [...this.snapshots, ...this.states]) s.elements = s.elements.map((e) => markUnpainted({ ...e, node: map[e.node] }, e));
     for (const i of this.interactions) i.element = { ...i.element, node: map[i.element.node] };
+    for (const st of this.steps) if (st.element) st.element = { ...st.element, node: map[st.element.node] };
     return out;
   }
 
@@ -680,6 +855,7 @@ export class ContextRecorder {
     await this.chain;
     for (const page of this.context.pages()) await this.enqueue(page); // final state (open modals, etc.)
     await Promise.all(this.pending);
+    this.calls?.dispose();
     recorders.delete(this.context);
     if (this.interactions.length === 0 && this.snapshots.length === 0) return;
     const data: RawCoverageData = {
@@ -688,6 +864,8 @@ export class ContextRecorder {
       ...(Object.keys(this.rules).length ? { rules: this.rules } : {}),
       snapshots: this.snapshots,
       interactions: this.interactions,
+      ...(this.steps.length ? { steps: this.steps } : {}),
+      ...(this.states.length ? { states: this.states } : {}),
       ...(isComponentTest(this.testInfo) && { componentTest: true }),
     };
     // Push directly (like Playwright does for videos) rather than testInfo.attach(),

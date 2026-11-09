@@ -12,7 +12,7 @@ import { toCoverageReport, type CoverageReport } from './coverage-report';
 import { selectAttempts } from './attempts';
 import { addSuggestedLocators } from './locators';
 import { indexTests, mostRepeated } from './insights';
-import { renderHtml } from './html';
+import { renderHtml, renderLazyFiles } from './html';
 import { DATA_FILE, DATA_FORMAT_VERSION, type ConfigTrace, type StoredData } from './model/raw';
 import { resolveCoverageData, type CompiledRules, type RecordedCoverageData } from './model/resolve';
 import { pickRules, validateRules, type UiCoverageRules } from './model/rules';
@@ -103,13 +103,17 @@ export interface ReportOptions extends UiCoverageRules {
 }
 
 export const DATA_DIR = 'data';
+/** Report subfolder with the data the page loads on demand (`renderLazyFiles`). */
+export const LAZY_DIR = 'steps';
 
 /** What a report is built from: the stored attempts and facts about the run. */
 export type ReportInput = Pick<StoredData, 'attempts' | 'componentTestConfig' | 'htmlReport' | 'testIdAttribute' | 'config'>;
 
-/** Snapshot screenshot references in a recording (raw and pre-0.2 data share this shape). */
-const snapshotsOf = (data: unknown): { screenshot?: string }[] =>
-  Array.isArray((data as any)?.snapshots) ? (data as any).snapshots : [];
+/** Screenshot references in a recording: snapshots and step states (raw and pre-0.2 data share this shape). */
+export const snapshotsOf = (data: unknown): { screenshot?: string }[] => [
+  ...(Array.isArray((data as any)?.snapshots) ? (data as any).snapshots : []),
+  ...(Array.isArray((data as any)?.states) ? (data as any).states : []),
+];
 
 /**
  * Writes attempts (with absolute screenshot paths) to `dataDir`: the JSON file
@@ -241,17 +245,36 @@ export function buildReport(
   fs.rmSync(screensDir, { recursive: true, force: true });
   fs.mkdirSync(screensDir, { recursive: true });
   let n = 0;
-  for (const route of summary.routes) {
-    for (const shot of route.screenshots) {
-      const file = `screens/${n++}${path.extname(shot.source) || '.png'}`;
+  /** Source file → its copy in screens/ ('' when it can't be read): each file is copied once. */
+  const copies = new Map<string, string>();
+  const copy = (source: string) => {
+    let file = copies.get(source);
+    if (file === undefined) {
+      file = `screens/${n++}${path.extname(source) || '.png'}`;
       try {
-        fs.copyFileSync(shot.source, path.join(outDir, file));
-        shot.source = file;
+        fs.copyFileSync(source, path.join(outDir, file));
       } catch {
-        shot.source = '';
+        file = '';
       }
+      copies.set(source, file);
     }
+    return file;
+  };
+  for (const route of summary.routes) {
+    for (const shot of route.screenshots) shot.source = copy(shot.source);
     route.screenshots = route.screenshots.filter((s) => s.source);
+  }
+  // States link to the data folder when it's inside the report (the usual case),
+  // instead of copying every screenshot a second time.
+  const inReport = (source: string) => {
+    const rel = path.relative(outDir, source);
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) && fs.existsSync(source) ? rel.split(path.sep).join('/') : undefined;
+  };
+  for (const route of summary.routes) {
+    if (!route.states) continue;
+    for (const st of route.states) st.source = copies.get(st.source) || inReport(st.source) || copy(st.source);
+    route.states = route.states.filter((s) => s.source);
+    if (!route.states.length) delete route.states;
   }
 
   const thresholds = evaluateThresholds(summary, options.threshold);
@@ -259,6 +282,12 @@ export function buildReport(
   if (baselineOption) report.baseline = runBaseline(report, baselineOption, outDir);
   fs.writeFileSync(path.join(outDir, 'coverage.json'), JSON.stringify(report, null, 2));
   fs.writeFileSync(path.join(outDir, 'index.html'), renderHtml(summary));
+  // What the page loads on demand (states of each view).
+  const lazyDir = path.join(outDir, LAZY_DIR);
+  fs.rmSync(lazyDir, { recursive: true, force: true });
+  const lazy = renderLazyFiles(summary);
+  if (lazy.size) fs.mkdirSync(lazyDir, { recursive: true });
+  for (const [name, content] of lazy) fs.writeFileSync(path.join(lazyDir, name), content);
 
   const pad = (s: string, n: number) => s.padEnd(n);
   const width = Math.max(10, ...summary.routes.map((r) => r.route.length));

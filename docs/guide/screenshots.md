@@ -31,8 +31,10 @@ export default defineUiCoverageConfig({
 | `maxScreenshotHeight` | `8000` | Full-page screenshots of taller pages are cropped to this height (CSS px). Elements below the crop are still counted, just not drawn on the image. `0` disables the cap. |
 | `captureTransientStates` | `true` | Screenshot short-lived states right away, see [below](#short-lived-states). Only with `screenshots: 'on'`. |
 | `snapshotDelay` | `250` | ms to wait after an interaction before taking the inventory and screenshot. |
+| `steps` | `'off'` | `'on'`: also a viewport screenshot after every step, for the report's [state stepper](./reading-the-report.md#step-through-every-state). See [Steps](../reference/recording-options.md#steps). |
+| `maxStepScreenshots` | `50` | Step screenshots per test. |
 
-The reporter option `maxScreenshotsPerRoute` (default `3`) picks the screenshots that cover the most elements for each view. Every screenshot is kept in `ui-coverage-report/data/screenshots/` (unless `saveData: false`), so a [rebuild](./how-it-works.md#rebuilding-the-report) can choose differently.
+The reporter option `maxScreenshotsPerRoute` (default `3`) picks the screenshots that cover the most elements for each view. Every screenshot is kept in `ui-coverage-report/data/screenshots/` (unless `saveData: false`), so a [rebuild](./how-it-works.md#rebuilding-the-report) can choose differently, and the report's [All states](./reading-the-report.md#step-through-every-state) goes through all of them.
 
 ## When screenshots are taken
 

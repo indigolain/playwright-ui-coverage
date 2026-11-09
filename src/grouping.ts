@@ -73,6 +73,8 @@ export function applyGrouping(tests: TestEntry[], viewOf: (url: string, view?: s
   const newKey = new Map<InventoryElement | Interaction, string>();
   const joinedItems = new Set<InventoryElement | Interaction>();
   const groups = new Map<string, Map<string, ElementGroup>>();
+  /** Per view: the key an element gets that wasn't part of the grouping (step states, step targets). */
+  const keyIn = new Map<string, (item: Pick<InventoryElement, 'key' | 'grouping'>) => string>();
   for (const [view, occs] of views) {
     const info = new Map<string, { name?: string; reason: GroupReason; members: Set<string> }>();
     const note = (key: string, reason: GroupReason, member: string, name?: string) => {
@@ -157,6 +159,14 @@ export function applyGrouping(tests: TestEntry[], viewOf: (url: string, view?: s
       if (key !== o.item.key) newKey.set(o.item, key);
       if (joined.has(u)) joinedItems.add(o.item);
     }
+    keyIn.set(view, (item) => {
+      const ex = item.grouping?.explicit;
+      if (ex) return ex.key;
+      const form = item.grouping?.form;
+      const unitKey = form && (forms.get(item.key)?.size ?? 0) > 1 ? `${form} ${item.key}` : item.key;
+      const u = units.get(unitKey);
+      return u ? (final.get(u) ?? u.key) : item.key;
+    });
     groups.set(
       view,
       new Map([...info].map(([k, g]) => [k, { ...(g.name ? { name: g.name } : {}), reason: g.reason, members: g.members.size }])),
@@ -168,12 +178,22 @@ export function applyGrouping(tests: TestEntry[], viewOf: (url: string, view?: s
     if (key === undefined) return item;
     return joinedItems.has(item) ? { ...item, key, grouping: { ...item.grouping, joined: true } } : { ...item, key };
   };
+  const other = <T extends Pick<InventoryElement, 'key' | 'grouping'>>(item: T, url: string, view?: string): T => {
+    const v = viewOf(url, view);
+    const f = v === undefined ? undefined : keyIn.get(v);
+    const key = f ? f(item) : item.key;
+    return key === item.key ? item : { ...item, key };
+  };
   const out = tests.map((t) => {
     const data: TestCoverageData = {
       ...t.data,
       snapshots: t.data.snapshots.map((s) => ({ ...s, elements: s.elements.map(rekey) })),
       interactions: t.data.interactions.map(rekey),
     };
+    const { view } = t.data;
+    if (t.data.states) data.states = t.data.states.map((s) => ({ ...s, elements: s.elements.map((e) => other(e, s.url, view)) }));
+    if (t.data.steps)
+      data.steps = t.data.steps.map((st) => (st.target ? { ...st, target: other(st.target, st.url, view) } : st));
     return { ...t, data };
   });
   return { tests: out, groups };

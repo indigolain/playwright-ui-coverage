@@ -47,13 +47,22 @@ export function selectAttempts(entries: AttemptEntry[], opts: { countFailedTests
   for (const e of entries) {
     if (e.passed) lastPassing.set(e.testId, Math.max(lastPassing.get(e.testId) ?? -1, e.retry));
   }
-  return entries.map(({ title, data, testId, retry }) => {
+  return entries.map(({ title, data, testId, retry, passed, project, trace }) => {
     let interactions: InteractionUse = 'tested';
     if (!opts.countFailedTests) {
       const pass = lastPassing.get(testId);
       if (pass === undefined) interactions = 'failing';
       else if (retry !== pass) interactions = 'ignore';
     }
-    return { title, testId, data, interactions };
+    return {
+      title,
+      testId,
+      data,
+      interactions,
+      retry,
+      passed,
+      ...(project ? { project } : {}),
+      ...(trace ? { trace } : {}),
+    };
   });
 }

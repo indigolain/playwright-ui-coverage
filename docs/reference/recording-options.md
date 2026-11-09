@@ -21,6 +21,8 @@ export default defineUiCoverageConfig({
     allowedInteractions: [               // default: []
       { selector: '.date-picker input', events: ['change'], comment: "focusing or clicking it doesn't count" },
     ],
+    steps: 'on',                         // 'on' | 'off', default: 'off'
+    maxStepScreenshots: 50,              // per test, default: 50
   },
 });
 ```
@@ -38,8 +40,30 @@ export default defineUiCoverageConfig({
 | `maxScreenshotHeight` | `8000` | Full-page screenshots of taller pages are cropped to this height (CSS px); `0` disables the cap. |
 | `interactions` | `DEFAULT_INTERACTIONS` | The events that count, see [Interaction types](../guide/which-elements-count.md#interaction-types). Unknown names fail the run with the list of supported ones. |
 | `allowedInteractions` | `[]` | `{ selector, events, comment? }` rules: for an element matching `selector` (the first matching rule wins), only `events` count, replacing `interactions`. The events listed here are recorded even if `interactions` leaves them out. |
+| `steps` | `'off'` | `'on'` records each test's steps (every counted interaction and page load, with the Playwright call and spec location) and a viewport screenshot after each one, for the [state stepper](../guide/reading-the-report.md#step-through-every-state). Doesn't change coverage. See [Steps](#steps). |
+| `maxStepScreenshots` | `50` | Step screenshots per test (`steps: 'on'`); later steps are recorded without one. `0`: steps without screenshots. |
 
 `DEFAULT_INTERACTIONS` (every type except `scroll`, `focus` and `blur`) and `INTERACTION_TYPES` (all of them) are exported from `playwright-ui-coverage`. `defaultUiCoverageOptions` has all the defaults.
+
+## Steps
+
+With `steps: 'on'`, the recorder keeps a step for every interaction it counts (the same events as coverage) and every page load:
+
+- the event (`click`, `input`, `change`, `submit`, `keydown`, …, or `load`), the element (resolved to its key and label at report time), the URL and the time;
+- the Playwright call it came from and where it is in the test, when known: `locator.click getByRole('button', { name: 'Save' })` at `users.spec.ts:15`. Typed text is never recorded (only the key of `press` and the URL of `goto`);
+- a viewport screenshot of the page right after it (with `screenshots: 'on'`). A step's screenshot holds the test's next action until it's taken, so it shows the page after this step and not after the next one. Identical states are stored once.
+
+**Overhead**, measured on the demo (14 short tests, about 70 steps, Chromium on a laptop):
+
+| | `steps: 'off'` | `steps: 'on'` |
+|---|---|---|
+| Test time (sum of all tests) | 5.0 s | 7.0 s (about 30 ms per step) |
+| Run time (wall clock) | 2.1 s | 2.4 s |
+| Report folder (with `data/`) | 1.5 MB | 3.6 MB |
+
+That's why steps are off by default: the extra time is per step, so tests with many quick steps pay the most. Turn them on where you look at the report, for example in a CI job for the main branch, or with a [profile](./configuration.md#profiles).
+
+**Which call:** Playwright's API calls are matched to the DOM events they caused through Playwright's client instrumentation, a private API (the one [register mode](../guide/getting-started.md#turn-recording-on) uses). Both setup modes record the same calls. An event is credited to the action that was in progress when it happened in the page, so a `change` that fires when a click moves the focus away from a field is credited to that click. If a Playwright release changes the instrumentation, steps are recorded without calls.
 
 ## Per project: use.uiCoverage
 

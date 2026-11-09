@@ -4,6 +4,8 @@ import type { LinkRules, UiCoverageRules } from './model/rules';
 import type { InventoryElement, TestCoverageData } from './types';
 import { boxInImage, intersects } from './model/geometry';
 import { applyGrouping, type ElementGroup } from './grouping';
+import { groupAttempts, routeStates, type AttemptSummary, type RouteState, type StateCandidate } from './steps';
+import type { Snapshot } from './types';
 
 /** Recorded role, accessible name and attributes of an element (see `InventoryElement`). */
 type ElementDetails = Pick<InventoryElement, 'role' | 'name' | 'nameFrom' | 'attrs' | 'frames' | 'autoKey'>;
@@ -135,6 +137,11 @@ export interface RouteCoverage {
   /** Untested first, then by destination view. */
   links: LinkCoverage[];
   screenshots: RouteScreenshot[];
+  /**
+   * Every distinct screenshot of the view, from every attempt, in the order
+   * they were first reached (the report's state stepper). Not in coverage.json.
+   */
+  states?: RouteState[];
 }
 
 export interface CoverageSummary {
@@ -157,6 +164,8 @@ export interface CoverageSummary {
   htmlReport?: HtmlReportLink;
   /** Elements used by the most tests. Set by the reporter. */
   mostRepeated?: RepeatedElement[];
+  /** Every test attempt (one per test and retry), which `RouteState.attempts` point into. */
+  attempts?: AttemptSummary[];
 }
 
 export { defaultNormalizeUrl, type NormalizeUrl } from './model/views';
@@ -175,6 +184,11 @@ export interface TestEntry {
   data: TestCoverageData;
   /** Default: `tested`. */
   interactions?: InteractionUse;
+  /** The attempt the data is from (`TestResult.retry`), whether it passed, and where its trace is. */
+  retry?: number;
+  passed?: boolean;
+  project?: string;
+  trace?: string;
 }
 
 const percent = (tested: number, total: number) =>
@@ -282,6 +296,20 @@ export function aggregate(
     if (!routes.has(r)) routes.set(r, { elements: new Map(), snapshots: [], kinds: new Map() });
     return routes.get(r)!;
   };
+
+  // Screenshots that are states of a view: every snapshot screenshot and step state, of every attempt.
+  const { attempts, attemptOf } = groupAttempts(tests);
+  const stateCandidates = new Map<string, StateCandidate[]>();
+  let seq = 0;
+  tests.forEach(({ data }, i) => {
+    for (const snap of [...data.snapshots, ...(data.states ?? [])]) {
+      if (!snap.screenshot) continue;
+      const route = routeName(snap.url, data.view);
+      if (route === undefined) continue;
+      if (!stateCandidates.has(route)) stateCandidates.set(route, []);
+      stateCandidates.get(route)!.push({ snap, attempt: attemptOf[i], seq: seq++ });
+    }
+  });
 
   // Views visited by counted tests (a link to them is tested), and the origins of every visited page.
   const visited = new Set<string>();
@@ -453,7 +481,7 @@ export function aggregate(
     // height, a viewport screenshot those outside the viewport. Zero-size boxes:
     // frame content scrolled out of its frame's viewport. Elements dropped above
     // (ignored external links) get no box.
-    const visible = (snap: TestCoverageData['snapshots'][number]) =>
+    const visible = (snap: Snapshot) =>
       snap.elements.filter(
         (e) =>
           counted.has(e.key) &&
@@ -463,7 +491,7 @@ export function aggregate(
             ? intersects(e, snap.screenshotClip)
             : !snap.screenshotHeight || e.y < snap.screenshotHeight),
       );
-    const box = (snap: TestCoverageData['snapshots'][number], e: TestCoverageData['snapshots'][number]['elements'][number]): ScreenshotBox => {
+    const box = (snap: Snapshot, e: Snapshot['elements'][number]): ScreenshotBox => {
       const { key, x, y, w, h, pos } = snap.screenshotClip ? boxInImage(e, snap.screenshotClip)! : e;
       return pos ? { key, x, y, w, h, pos } : { key, x, y, w, h };
     };
@@ -495,6 +523,16 @@ export function aggregate(
       });
     }
 
+    // A box is tested like the report draws it: an element by its own state, a
+    // link's <a> when every destination it leads to was visited.
+    const testedKeys = new Map<string, boolean>(elements.map((e) => [e.key, e.tested]));
+    for (const l of links) for (const e of l.referrers) testedKeys.set(e.key, (testedKeys.get(e.key) ?? true) && l.tested);
+    const { states } = routeStates(
+      stateCandidates.get(route) ?? [],
+      (snap) => visible(snap).map((e) => box(snap, e)),
+      (key) => testedKeys.get(key) ?? false,
+    );
+
     const testedLinks = links.filter((l) => l.tested).length;
     const tested = elements.filter((e) => e.tested).length + testedLinks;
     const total = elements.length + links.length;
@@ -511,6 +549,7 @@ export function aggregate(
       elements,
       links,
       screenshots: chosen,
+      ...(states.length ? { states } : {}),
     });
   }
 
@@ -540,5 +579,6 @@ export function aggregate(
     failingOnly: sum('failingOnly'),
     routes: result,
     untestedViews,
+    ...(attempts.length ? { attempts } : {}),
   };
 }
