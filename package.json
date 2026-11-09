@@ -1,6 +1,6 @@
 {
   "name": "playwright-ui-coverage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "See which buttons, links and inputs your Playwright E2E tests actually touch — screenshots with tested/untested overlays.",
   "license": "MIT",
   "author": "indigolain",
