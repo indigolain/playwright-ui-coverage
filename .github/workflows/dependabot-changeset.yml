@@ -6,10 +6,10 @@ name: Dependabot Changeset
 # (major updates are left for a human). Auto-merge waits for the checks that
 # the `main` ruleset requires.
 #
-# A push made with GITHUB_TOKEN doesn't trigger other workflows, so after
-# committing the changeset this workflow starts CI on the new commit itself
-# (workflow_dispatch is the one event GITHUB_TOKEN may trigger). Otherwise the
-# required checks would never report on the PR's head and it couldn't merge.
+# The changeset commit becomes the PR's head, so the required checks must run
+# on it. GitHub either holds the runs that push triggers for approval
+# (github-actions[bot] counts as a first-time contributor) or triggers none;
+# this workflow approves held runs, or starts CI itself.
 #
 # `pull_request_target` is required because the default `pull_request` token for
 # Dependabot is read-only and cannot push. No code from the PR is executed here:
@@ -23,7 +23,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  actions: write # to start CI on the changeset commit
+  actions: write # to approve or start CI runs on the changeset commit
 
 jobs:
   add-changeset:
@@ -89,6 +89,7 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -102,8 +103,27 @@ jobs:
           git commit -m "chore: add changeset for dependency update"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
 
-          # The push above doesn't trigger CI; run it on the new head commit.
-          gh workflow run ci.yml --ref "${{ github.event.pull_request.head.ref }}"
+          # GitHub may hold the pull_request runs this push triggers for approval
+          # (github-actions[bot] counts as a first-time contributor), and held
+          # runs block merging. Approve them; if GitHub triggered nothing,
+          # start CI directly.
+          SHA=$(git rev-parse HEAD)
+          SEEN=""
+          # Runs appear a few seconds after the push, one per workflow; keep
+          # looking for a minute and approve each held one.
+          for attempt in $(seq 1 12); do
+            sleep 5
+            RUNS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SHA" -q '.workflow_runs[] | select(.event == "pull_request") | "\(.id) \(.conclusion)"')
+            [ -n "$RUNS" ] && SEEN=1
+            for id in $(echo "$RUNS" | awk '$2 == "action_required" {print $1}'); do
+              echo "Approving held run $id"
+              gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"
+            done
+          done
+          if [ -z "$SEEN" ]; then
+            echo "No pull_request runs on $SHA; starting CI."
+            gh workflow run ci.yml --ref "$BRANCH"
+          fi
 
   auto-merge:
     needs: add-changeset
