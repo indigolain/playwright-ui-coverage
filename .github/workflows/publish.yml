@@ -25,7 +25,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
-      actions: write # to start CI on the version PR
+      actions: write # to approve or start CI runs on the version PR
 
     steps:
       - uses: actions/checkout@v5
@@ -57,10 +57,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # The version PR is pushed with GITHUB_TOKEN, which doesn't trigger CI,
-      # and `main` requires CI to pass. Start it on the PR branch explicitly.
+      # `main` requires CI to pass on the version PR, which is pushed with
+      # GITHUB_TOKEN. Make sure its runs aren't left waiting for approval.
       - name: Run CI on the version PR
         if: steps.changesets.outputs.pullRequestNumber != ''
-        run: gh workflow run ci.yml --ref changeset-release/main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: changeset-release/main
+        run: |
+          git fetch -q origin "$BRANCH"
+          git checkout -q FETCH_HEAD
+          # GitHub may hold the pull_request runs that pushes to the version PR
+          # trigger for approval (github-actions[bot] counts as a first-time contributor), and held
+          # runs block merging. Approve them; if GitHub triggered nothing,
+          # start CI directly.
+          SHA=$(git rev-parse HEAD)
+          SEEN=""
+          # Runs appear a few seconds after the push, one per workflow; keep
+          # looking for a minute and approve each held one.
+          for attempt in $(seq 1 12); do
+            sleep 5
+            RUNS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SHA" -q '.workflow_runs[] | select(.event == "pull_request") | "\(.id) \(.conclusion)"')
+            [ -n "$RUNS" ] && SEEN=1
+            for id in $(echo "$RUNS" | awk '$2 == "action_required" {print $1}'); do
+              echo "Approving held run $id"
+              gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"
+            done
+          done
+          if [ -z "$SEEN" ]; then
+            echo "No pull_request runs on $SHA; starting CI."
+            gh workflow run ci.yml --ref "$BRANCH"
+          fi
