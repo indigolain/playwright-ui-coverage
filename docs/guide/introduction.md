@@ -24,6 +24,7 @@ The two are complementary: code coverage finds logic no test reaches, UI coverag
 
 - **Every page your tests visit, with each interactive element marked.** Dynamic URL segments are grouped into views (`/users/1`, `/users/2` → `/users/:id`). See [Reading the report](./reading-the-report.md).
 - **The gaps, with the code to close them.** Each untested element has a ready-to-paste Playwright line, and each view a test skeleton. See [Suggested locators and accessibility hints](./locators-and-accessibility.md).
+- **Every state, every step.** Step through each state a page reached, or replay a single test action by action, with the Playwright call, its line in the spec and a screenshot of the element it acted on. See [Step through every state](./reading-the-report.md#step-through-every-state) and [Walk through a test](./reading-the-report.md#walk-through-a-test).
 - **Links counted by where they go.** A link is tested when a test reached its destination, by any path, and pages no test reached at all are listed as untested views. See [Links and untested views](./links.md).
 - **CI gates.** Thresholds per view, a baseline that fails only on new untested elements, and a comparison with `main` for PR comments. See [CI](../ci/thresholds.md).
 - **A machine-readable `coverage.json`**, versioned and with a JSON Schema. See [coverage.json](../coverage-json.md).
@@ -39,4 +40,4 @@ The library records while your tests run and adds a reporter that builds the rep
 Ready? Continue with [Getting started](./getting-started.md).
 
 > [!NOTE]
-> Status: early development (0.1.0). APIs may change. Supports `@playwright/test` 1.50 or later, see [Compatibility](../reference/compatibility.md).
+> Status: early development (0.x). APIs may change. Supports `@playwright/test` 1.50 or later, see [Compatibility](../reference/compatibility.md).

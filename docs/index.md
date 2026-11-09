@@ -23,6 +23,9 @@ features:
   - title: One config line to try it
     details: Import playwright-ui-coverage/register in playwright.config.ts, or merge the uiCoverage fixture. No changes to your tests either way.
     link: /guide/getting-started
+  - title: Step through every test
+    details: Go through each state a page reached, or replay a test action by action, with the Playwright call, its spec line and a screenshot of the element it used.
+    link: /guide/reading-the-report#walk-through-a-test
   - title: Write the missing tests faster
     details: A ready-to-paste Playwright locator for every untested element, a test skeleton per view, and informational accessibility hints.
     link: /guide/locators-and-accessibility

@@ -7,6 +7,7 @@ See which buttons, links and inputs your Playwright E2E tests **actually touch**
 - **No test changes.** One import in `playwright.config.ts`, or a fixture you merge with `mergeTests`.
 - **Find the gaps, close them fast.** Filter to untested elements, copy a ready-made Playwright locator for each, or a whole test skeleton per page.
 - **Stable identity.** Elements are matched by attributes and position, never by text; repeated controls (a "Delete" on every row) count once; links count by the page they lead to.
+- **Step through what happened.** Go through every state a page reached, or replay a test step by step: each action with its Playwright call, spec line and a screenshot with the element outlined (opt-in).
 - **CI gates.** Per-view thresholds, a baseline that fails only on *new* untested elements, and run-to-run comparison for sticky PR comments.
 - **Change rules without re-running.** Filters, views and identity rules apply at report time; rebuild the report from stored data with one command.
 - **Works where your tests run:** Chromium, Firefox, WebKit, iframes, shadow DOM, retries, sharding with `merge-reports`, and component tests. `coverage.json` is versioned, with a JSON Schema.
@@ -40,7 +41,7 @@ Register mode relies on a private Playwright hook. For long-term use, merge the 
 
 ## Status
 
-Early development (0.1.0): APIs may change. Requires `@playwright/test` 1.50 or later; CI covers Chromium, Firefox and WebKit on 1.50.0 and the latest release. See [Compatibility](docs/reference/compatibility.md) and [Known limitations](docs/reference/limitations.md). Working on the library: [Contributing](docs/reference/contributing.md).
+Early development (0.x): APIs may change. Requires `@playwright/test` 1.50 or later; CI covers Chromium, Firefox and WebKit on 1.50.0 and the latest release. See [Compatibility](docs/reference/compatibility.md) and [Known limitations](docs/reference/limitations.md). Working on the library: [Contributing](docs/reference/contributing.md).
 
 ## License
 
