@@ -48,19 +48,20 @@ jobs:
 
       - name: Create release PR or publish
         id: changesets
-        uses: changesets/action@v1
+        # v2 is the release line for Changesets v3 (v1 doesn't recognise v3's
+        # publish output, so it never pushed tags or created GitHub releases).
+        uses: changesets/action@v2
         with:
-          publish: npm run release
-          version: npm run version-packages
-          title: "chore: version packages"
-          commit: "chore: version packages"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          publish-script: npm run release
+          version-script: npm run version-packages
+          pr-title: "chore: version packages"
+          commit-message: "chore: version packages"
 
       # `main` requires CI to pass on the version PR, which is pushed with
       # GITHUB_TOKEN. Make sure its runs aren't left waiting for approval.
       - name: Run CI on the version PR
-        if: steps.changesets.outputs.pullRequestNumber != ''
+        if: steps.changesets.outputs.pr-number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: changeset-release/main
