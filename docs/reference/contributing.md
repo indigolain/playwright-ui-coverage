@@ -71,7 +71,9 @@ Releases are made with [Changesets](https://github.com/changesets/changesets).
 
 Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): no npm token is stored in the repository. The package's trusted publisher on npmjs.com names this repository, the `publish.yml` workflow and the `npm` environment, so renaming the workflow file or the environment breaks publishing.
 
-Dependabot opens weekly PRs for npm dependencies; `.github/workflows/dependabot-changeset.yml` adds a patch changeset to each one, so dependency updates appear in the changelog and get released.
+Dependabot opens weekly PRs for npm dependencies. `.github/workflows/dependabot-changeset.yml` adds a patch changeset to each one, so dependency updates appear in the changelog and get released. For patch and minor updates it also approves the PR and enables auto-merge, so the PR merges by itself once CI passes; major updates wait for a human review.
+
+The `main` ruleset requires the CI checks (`typecheck, build, unit tests` and every `demo (…)` job) to pass before merging. Commits pushed by workflows (a Dependabot PR's changeset commit, the version PR) don't trigger CI on their own, so those workflows start `ci.yml` on the branch explicitly.
 
 ## Documentation
 

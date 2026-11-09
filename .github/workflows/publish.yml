@@ -25,6 +25,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+      actions: write # to start CI on the version PR
 
     steps:
       - uses: actions/checkout@v5
@@ -55,3 +56,11 @@ jobs:
           commit: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The version PR is pushed with GITHUB_TOKEN, which doesn't trigger CI,
+      # and `main` requires CI to pass. Start it on the PR branch explicitly.
+      - name: Run CI on the version PR
+        if: steps.changesets.outputs.pullRequestNumber != ''
+        run: gh workflow run ci.yml --ref changeset-release/main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

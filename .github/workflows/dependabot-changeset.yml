@@ -1,7 +1,15 @@
 name: Dependabot Changeset
 
 # Dependabot PRs don't carry a changeset, so dependency bumps never reach the
-# changelog or trigger a release. This workflow writes one into the PR branch.
+# changelog or trigger a release. This workflow writes one into the PR branch,
+# then approves the PR and enables auto-merge for patch and minor updates
+# (major updates are left for a human). Auto-merge waits for the checks that
+# the `main` ruleset requires.
+#
+# A push made with GITHUB_TOKEN doesn't trigger other workflows, so after
+# committing the changeset this workflow starts CI on the new commit itself
+# (workflow_dispatch is the one event GITHUB_TOKEN may trigger). Otherwise the
+# required checks would never report on the PR's head and it couldn't merge.
 #
 # `pull_request_target` is required because the default `pull_request` token for
 # Dependabot is read-only and cannot push. No code from the PR is executed here:
@@ -14,12 +22,15 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
+  actions: write # to start CI on the changeset commit
 
 jobs:
   add-changeset:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
+    outputs:
+      update-type: ${{ steps.metadata.outputs.update-type }}
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
@@ -77,6 +88,7 @@ jobs:
       - name: Commit changeset
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -89,3 +101,20 @@ jobs:
 
           git commit -m "chore: add changeset for dependency update"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+
+          # The push above doesn't trigger CI; run it on the new head commit.
+          gh workflow run ci.yml --ref "${{ github.event.pull_request.head.ref }}"
+
+  auto-merge:
+    needs: add-changeset
+    # Patch and minor updates only; major updates may need code changes.
+    if: needs.add-changeset.outputs.update-type != 'version-update:semver-major'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Approve and enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr review --approve "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"
