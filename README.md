@@ -38,8 +38,6 @@ Register mode relies on a private Playwright hook. For long-term use, merge the 
 
 **https://indigolain.github.io/playwright-ui-coverage/**: guides, CI setup, and the full configuration, CLI and `coverage.json` reference.
 
-> Until the site is launched, read the same pages in the repository: [docs/](docs/README.md), starting with [Getting started](docs/guide/getting-started.md), [Configuration](docs/reference/configuration.md) and [CLI](docs/reference/cli.md).
-
 ## Status
 
 Early development (0.1.0): APIs may change. Requires `@playwright/test` 1.50 or later; CI covers Chromium, Firefox and WebKit on 1.50.0 and the latest release. See [Compatibility](docs/reference/compatibility.md) and [Known limitations](docs/reference/limitations.md). Working on the library: [Contributing](docs/reference/contributing.md).
