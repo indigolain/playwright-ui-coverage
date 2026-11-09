@@ -4,7 +4,16 @@ import type { LinkRules, UiCoverageRules } from './model/rules';
 import type { InventoryElement, TestCoverageData } from './types';
 import { boxInImage, intersects } from './model/geometry';
 import { applyGrouping, type ElementGroup } from './grouping';
-import { groupAttempts, routeStates, type AttemptSummary, type RouteState, type StateCandidate } from './steps';
+import {
+  firstSteps,
+  groupAttempts,
+  routeStates,
+  walkSteps,
+  type AttemptSummary,
+  type RouteState,
+  type StateCandidate,
+  type StateRef,
+} from './steps';
 import type { Snapshot } from './types';
 
 /** Recorded role, accessible name and attributes of an element (see `InventoryElement`). */
@@ -62,6 +71,11 @@ export interface ElementCoverage {
   suggestedLocator?: string;
   /** Informational accessibility hints (see `a11y.ts`). Don't affect coverage. */
   a11yHints?: A11yHint[];
+  /**
+   * Per test id in `testIds`: the index of the first step of that test's
+   * counted attempt that acted on this element (the walkthrough). Not in coverage.json.
+   */
+  firstStep?: Record<string, number>;
 }
 
 export interface ScreenshotBox {
@@ -299,6 +313,8 @@ export function aggregate(
 
   // Screenshots that are states of a view: every snapshot screenshot and step state, of every attempt.
   const { attempts, attemptOf } = groupAttempts(tests);
+  /** Where each state screenshot ended up: its view and index there (for the walkthrough). */
+  const stateRefs = new Map<Snapshot, StateRef>();
   const stateCandidates = new Map<string, StateCandidate[]>();
   let seq = 0;
   tests.forEach(({ data }, i) => {
@@ -527,11 +543,12 @@ export function aggregate(
     // link's <a> when every destination it leads to was visited.
     const testedKeys = new Map<string, boolean>(elements.map((e) => [e.key, e.tested]));
     for (const l of links) for (const e of l.referrers) testedKeys.set(e.key, (testedKeys.get(e.key) ?? true) && l.tested);
-    const { states } = routeStates(
+    const { states, indexOf } = routeStates(
       stateCandidates.get(route) ?? [],
       (snap) => visible(snap).map((e) => box(snap, e)),
       (key) => testedKeys.get(key) ?? false,
     );
+    for (const [snap, index] of indexOf) stateRefs.set(snap, { route, index });
 
     const testedLinks = links.filter((l) => l.tested).length;
     const tested = elements.filter((e) => e.tested).length + testedLinks;
@@ -554,6 +571,17 @@ export function aggregate(
   }
 
   result.sort((a, b) => a.route.localeCompare(b.route));
+  // The walkthrough of each attempt, and links from "Tested by" to its steps.
+  walkSteps(tests, attemptOf, attempts, routeName, (snap) => stateRefs.get(snap));
+  const first = firstSteps(attempts);
+  for (const r of result) {
+    const byKey = first.get(r.route);
+    if (!byKey) continue;
+    for (const e of allElements(r)) {
+      const byTest = byKey.get(e.key);
+      if (byTest?.size) e.firstStep = Object.fromEntries([...byTest].sort(([a], [b]) => a.localeCompare(b)));
+    }
+  }
   const sum = (k: 'total' | 'tested' | 'totalLinks' | 'testedLinks' | 'failingOnly') => result.reduce((s, r) => s + r[k], 0);
   // A view seen only in attempts that don't count is in `routes` already; its links stay untested.
   const listed = new Set(result.map((r) => r.route));

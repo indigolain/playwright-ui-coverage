@@ -44,6 +44,7 @@ const SHOT_H = 2400;
 }
 
 const STATES = 20;
+const TESTS = 1000;
 const segs = ['users', 'orders', 'settings', 'billing', 'reports', 'admin', 'projects', 'teams', 'inbox', 'search'];
 const routes = [];
 let total = 0;
@@ -99,7 +100,26 @@ const summary = {
   tested: testedTotal,
   percent: Math.round((testedTotal / total) * 1000) / 10,
   routes,
-  attempts: [0, 1, 2].map((k) => ({ title: `spec ${k} › visits`, retry: 0, passed: true, use: 'tested' })),
+  // 1000 test runs of 30 steps each (steps: 'on'); each walkthrough is loaded on demand from steps/test-<i>.js.
+  attempts: Array.from({ length: TESTS }, (_, k) => ({
+    title: `spec ${k % 40} › test ${k}`,
+    retry: 0,
+    passed: k % 17 !== 0,
+    use: 'tested',
+    steps: Array.from({ length: 30 }, (_, j) => {
+      const r = routes[(k + Math.floor(j / 10)) % ROUTES];
+      const e = r.elements[(k + j) % r.elements.length];
+      return {
+        t: j,
+        event: j % 10 === 0 ? 'load' : 'click',
+        url: `http://localhost${r.route}`,
+        route: r.route,
+        ...(j % 10 === 0 ? {} : { key: e.key, label: e.label, call: { api: 'locator.click', locator: `getByRole('button', { name: 'Item ${j}' })`, file: `spec-${k % 40}.spec.ts`, line: 10 + j } }),
+        ...(j % 10 === 0 ? {} : { before: { route: r.route, index: (j - 1) % STATES } }),
+        after: { route: r.route, index: j % STATES },
+      };
+    }),
+  })),
 };
 // Same post-processing as the reporter.
 addSuggestedLocators(summary);
@@ -112,7 +132,7 @@ for (const [name, content] of renderLazyFiles(summary)) {
   fs.writeFileSync(path.join(out, 'steps', name), content);
   lazyBytes += content.length;
 }
-console.log(`${STATES} states per route in steps/: ${(lazyBytes / ROUTES / 1024).toFixed(0)} KB per route, loaded on demand`);
+console.log(`steps/: ${STATES} states per route, ${TESTS} tests × 30 steps, ${(lazyBytes / 1024 / 1024).toFixed(1)} MB in all, loaded on demand`);
 console.log(`${ROUTES} routes x ${ELEMENTS} elements, index.html ${(html.length / 1024 / 1024).toFixed(2)} MB`);
 
 const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
@@ -180,6 +200,18 @@ for (let i = 0; i < 10; i++)
   steps.push(await time(() => dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))));
 console.log(`next state (→): ${stats(steps)}`);
 await page.locator('.seg button[data-mode=best]').click();
+
+// Tests: the list, and a test's walkthrough (loads its steps), then stepping.
+await page.locator('#tabTests').click();
+const t2 = Date.now();
+await page.locator('#testList button').nth(7).click();
+await page.locator('.walk .box').first().waitFor();
+console.log(`open a test's walkthrough (loads its steps): ${Date.now() - t2} ms`);
+const walk = [];
+for (let i = 0; i < 10; i++)
+  walk.push(await time(() => dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))));
+console.log(`next step (→): ${stats(walk)}`);
+await page.locator('#tabViews').click();
 
 const dom = await page.evaluate(() => document.getElementsByTagName('*').length);
 console.log(`DOM nodes: ${dom}`);

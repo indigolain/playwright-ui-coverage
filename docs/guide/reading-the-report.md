@@ -28,6 +28,21 @@ The three screenshots are the overview. **All states** goes through every screen
 
 Without the recording option [`steps`](../reference/recording-options.md#steps), the states are the screenshots the recorder takes anyway (when new elements appear). With `steps: 'on'`, there's a screenshot after every step of every test, so you can follow what a page went through. The address bar keeps the state (`#%2Fusers&state=3`), so you can link to it.
 
+## Walk through a test
+
+With [`steps: 'on'`](../reference/recording-options.md#steps), the **Tests** tab in the sidebar lists every test run, with its status and number of steps; filter it by name like the views. Select one to go through what it did, `◀ Step n of N ▶` (or <kbd>←</kbd> and <kbd>→</kbd>):
+
+- the action and the element (`click button "Save"`), the Playwright call and where it is in the test (`locator.click getByRole('button', { name: 'Save' })` at `users.spec.ts:15:52`), when they were recorded;
+- the view, linked to the state in [All states](#step-through-every-state), and the URL;
+- the screenshot, with the element the step acted on outlined in blue and the other boxes green or red as everywhere else. **Before** shows the page the step acted on, **After** the page right after it; by default you see Before when it shows the element, After otherwise;
+- every step of the test as a compact list (`1 load /users · 2 click button "Add user" · 3 input textbox "Name" · …`), to jump to one.
+
+![The walkthrough of "add a user via the modal": step 4 of 8, input combobox "Role" by locator.selectOption getByLabel('Role') at users.spec.ts:14:33, with the Role select outlined in blue on the screenshot of the open modal, and the Tests list in the sidebar](../images/report-walkthrough.png)
+
+Each test run has its own walkthrough: a flaky test that failed once and passed on retry is listed twice, the failed run marked *failed* (and the run whose interactions didn't count marked *not counted*, see [Retries and failed tests](./retries.md)). Under "Tested by", a **step n** link next to each test opens the step that acted on that element, and in All states each test under "Reached by" links to its steps. The walkthrough also links to the test's entry in Playwright's HTML report and its trace.
+
+Each test's steps are loaded only when you open it (from `steps/` next to `index.html`), so the report stays quick with many tests.
+
 ## Find what's missing
 
 Turn on **Untested only** to hide everything that's already covered:

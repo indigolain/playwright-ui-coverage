@@ -1,15 +1,10 @@
 import type { CoverageSummary, ElementCoverage, RouteCoverage, ScreenshotBox } from './aggregate';
+import type { StateRef } from './steps';
 import { mostRepeated } from './insights';
 import { testSkeleton } from './locators';
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-/**
- * Shrinks the embedded data: screenshot boxes become `[elementIndex, x, y, w, h]`
- * (plus `'fixed'`/`'sticky'` for fixed and sticky elements)
- * (instead of repeating each element key per box) with coordinates rounded to
- * 0.1 px. coverage.json keeps the full format.
- */
 /** The <a> elements of a route's link units, once each: `links[].refs` and boxes index into them. */
 const linkElsOf = (r: RouteCoverage) => [...new Set((r.links ?? []).flatMap((l) => l.referrers))];
 
@@ -36,15 +31,20 @@ function compactAttempts(summary: CoverageSummary, testIndex: Map<string, number
       ...(test !== undefined ? { test } : { title: a.title }),
       run: a.retry,
       ...(a.passed ? {} : { failed: 1 }),
+      // Its interactions don't count: a retry other than the one that passed.
+      ...(a.use === 'ignore' ? { ignored: 1 } : {}),
       ...(a.trace ? { trace: a.trace } : {}),
+      ...(a.project ? { project: a.project } : {}),
+      steps: a.steps.length,
     };
   });
 }
 
 /**
  * The files the page loads on demand, by name in the `steps/` folder: each
- * view's states (`view-<i>.js`), so a large report stays quick to open.
- * Each calls `__uicovData(kind, index, payload)`.
+ * view's states (`view-<i>.js`) and each attempt's walkthrough
+ * (`test-<i>.js`), so a large report stays quick to open. Each calls
+ * `__uicovData(kind, index, payload)`.
  */
 export function renderLazyFiles(summary: CoverageSummary): Map<string, string> {
   const files = new Map<string, string>();
@@ -65,16 +65,65 @@ export function renderLazyFiles(summary: CoverageSummary): Map<string, string> {
     };
     files.set(`view-${i}.js`, lazyScript('view', i, payload));
   });
+  // Walkthroughs: steps refer to states as "<route index>.<state index>"; the
+  // states a test shows are included (boxes index into that route's elements).
+  const routeIndex = new Map(summary.routes.map((r, i) => [r.route, i]));
+  const boxers = new Map<number, ReturnType<typeof boxCompactor>>();
+  (summary.attempts ?? []).forEach((a, i) => {
+    if (!a.steps.length) return;
+    const states: Record<string, unknown> = {};
+    const ref = (s?: StateRef) => {
+      const ri = s && routeIndex.get(s.route);
+      const st = ri !== undefined ? summary.routes[ri].states?.[s!.index] : undefined;
+      if (ri === undefined || !st) return undefined;
+      const id = `${ri}.${s!.index}`;
+      if (!states[id]) {
+        if (!boxers.has(ri)) boxers.set(ri, boxCompactor(summary.routes[ri]));
+        const box = boxers.get(ri)!;
+        states[id] = { source: st.source, dpr: st.dpr, ...(st.viewport ? { viewport: 1 } : {}), boxes: st.boxes.map(box) };
+      }
+      return id;
+    };
+    const steps = a.steps.map((st) => {
+      const route = st.route !== undefined ? routeIndex.get(st.route) : undefined;
+      const before = ref(st.before);
+      const after = ref(st.after);
+      return {
+        t: st.t,
+        event: st.event,
+        url: st.url,
+        ...(route !== undefined ? { route } : {}),
+        ...(st.key !== undefined ? { key: st.key } : {}),
+        ...(st.label !== undefined ? { label: st.label } : {}),
+        ...(st.call ? { call: st.call } : {}),
+        ...(before ? { before } : {}),
+        ...(after ? { after } : {}),
+      };
+    });
+    files.set(`test-${i}.js`, lazyScript('test', i, { steps, states }));
+  });
   return files;
 }
 
 const lazyScript = (kind: string, i: number, payload: unknown) =>
   `__uicovData(${JSON.stringify(kind)},${i},${JSON.stringify(payload).replace(/</g, '\\u003c')});\n`;
 
+/**
+ * Shrinks the embedded data: screenshot boxes become `[elementIndex, x, y, w, h]`
+ * (plus `'fixed'`/`'sticky'` for fixed and sticky elements)
+ * (instead of repeating each element key per box) with coordinates rounded to
+ * 0.1 px. coverage.json keeps the full format.
+ */
 function compact(summary: CoverageSummary) {
   const tests = summary.tests ?? [];
   const testIndex = new Map(tests.map((t, i) => [t.id, i]));
+  const testIdList = tests.map((t) => t.id);
   const { attempts: _, ...rest } = summary;
+  /** Test id → index of its counted attempt (the one "Tested by" links to). */
+  const counted = new Map<string, number>();
+  (summary.attempts ?? []).forEach((a, i) => {
+    if (a.use === 'tested' && a.testId !== undefined) counted.set(a.testId, i);
+  });
   return {
     ...rest,
     tests,
@@ -88,7 +137,7 @@ function compact(summary: CoverageSummary) {
       // The page needs neither the raw recorded data nor locators for tested elements.
       // Hints become their messages.
       const slim = ({ role, name, nameFrom, attrs, suggestedLocator, a11yHints, ...e }: ElementCoverage, keepLocator: boolean) => ({
-        ...compactTestIds(e, testIndex),
+        ...compactTestIds(e, testIndex, counted, testIdList),
         ...(keepLocator && suggestedLocator ? { suggestedLocator } : {}),
         ...(a11yHints?.length ? { a11yHints: a11yHints.map((h) => h.message) } : {}),
       });
@@ -109,14 +158,25 @@ function compact(summary: CoverageSummary) {
 
 /**
  * Test ids become `ti` / `tf`: indexes into `tests` (which is sorted by title),
- * so "Tested by" lists them in title order.
+ * so "Tested by" lists them in title order. `ts` (when any test has steps):
+ * for each `ti` entry, `[attempt, step]` of the first step that acted on the
+ * element, or 0.
  */
-function compactTestIds(e: ElementCoverage, testIndex: Map<string, number>) {
-  const { testIds, failingTestIds, ...rest } = e;
+function compactTestIds(e: ElementCoverage, testIndex: Map<string, number>, counted: Map<string, number>, tests: string[]) {
+  const { testIds, failingTestIds, firstStep, ...rest } = e;
   if (!testIds) return rest;
   const idx = (ids: string[] = []) =>
     ids.map((id) => testIndex.get(id)).filter((i): i is number => i !== undefined).sort((a, b) => a - b);
-  return { ...rest, ti: idx(testIds), tf: idx(failingTestIds) };
+  const ti = idx(testIds);
+  const ts = firstStep
+    ? ti.map((i) => {
+        const id = tests[i];
+        const step = firstStep[id];
+        const attempt = counted.get(id);
+        return step !== undefined && attempt !== undefined ? [attempt, step] : 0;
+      })
+    : undefined;
+  return { ...rest, ti, tf: idx(failingTestIds), ...(ts ? { ts } : {}) };
 }
 
 /**
@@ -276,6 +336,29 @@ h2.section { font-size: 15px; margin: 24px 0 8px; display: flex; gap: 10px; alig
 .reached a { color: inherit; }
 .reached a:hover { color: var(--accent); }
 .reached .trace { margin-left: 6px; color: var(--accent); }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: -2px 0 2px; }
+.tabs button { all: unset; cursor: pointer; padding: 4px 10px 6px; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs button:hover { color: var(--text); }
+.tabs button:focus-visible { outline: 2px solid var(--accent); }
+.tabs button[aria-selected=true] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+#testList { padding: 6px 8px 8px; }
+#testList button { all: unset; display: block; width: 100%; box-sizing: border-box; padding: 7px 10px; border-radius: 6px; cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 48px; }
+#testList button[hidden] { display: none; }
+#testList button:hover { background: var(--bg); }
+#testList button:focus-visible { outline: 2px solid var(--accent); }
+#testList button[aria-current=true] { background: var(--bg); outline: 1px solid var(--border); }
+#testList .title { overflow-wrap: anywhere; }
+.bad-text { color: var(--bad); }
+.box.target { border-width: 3px; outline: 3px solid var(--accent); outline-offset: 2px; z-index: 3; }
+.stepinfo { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; display: grid; gap: 4px; }
+.stepinfo .action { font-weight: 600; }
+.stepinfo code { overflow-wrap: anywhere; }
+.steplist { list-style: none; margin: 16px 0 24px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.steplist button { font: inherit; font-size: 12px; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; cursor: pointer; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steplist button:hover { background: var(--bg); }
+.steplist button[aria-current=true] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.steplist .n { color: var(--muted); margin-right: 4px; font-variant-numeric: tabular-nums; }
+.steplink { font-size: 12px; margin-left: 6px; color: var(--accent); }
 </style>
 </head>
 <body>
@@ -288,16 +371,21 @@ h2.section { font-size: 15px; margin: 24px 0 8px; display: flex; gap: 10px; alig
 <div class="layout">
   <nav aria-label="Routes">
     <div class="navtools">
+      <div class="tabs" role="tablist" id="tabs" hidden>
+        <button role="tab" id="tabViews" data-tab="views" aria-selected="true" aria-controls="viewsPane">Views</button>
+        <button role="tab" id="tabTests" data-tab="tests" aria-selected="false" aria-controls="testsPane">Tests <span class="muted" id="testsCount"></span></button>
+      </div>
       <input type="search" id="search" placeholder="Filter routes" title="Filter routes (press /)" aria-label="Filter routes" autocomplete="off" spellcheck="false">
       <div class="row">
         <span class="muted" id="navCount"></span>
-        <label class="muted">Sort <select id="sort" aria-label="Sort routes">
+        <label class="muted" id="sortLabel">Sort <select id="sort" aria-label="Sort routes">
           <option value="name">Name</option>
           <option value="coverage">Lowest coverage</option>
           <option value="untested">Most untested</option>
         </select></label>
       </div>
     </div>
+    <div id="viewsPane" role="tabpanel" aria-labelledby="tabViews">
     <button id="insightsNav" aria-current="false"><div class="row"><span>Most repeated elements</span><span class="muted" id="insightsCount"></span></div>
       <div class="sub muted" id="insightsSub"></div></button>
     <div id="navList"></div>
@@ -305,6 +393,11 @@ h2.section { font-size: 15px; margin: 24px 0 8px; display: flex; gap: 10px; alig
     <div id="untestedNav" hidden>
       <div class="navhead" title="Views that links point to but no test visited">Untested views <span id="untestedCount"></span></div>
       <div id="untestedList"></div>
+    </div>
+    </div>
+    <div id="testsPane" role="tabpanel" aria-labelledby="tabTests" hidden>
+      <div id="testList"></div>
+      <p class="muted" id="testEmpty" hidden style="padding:8px 10px">No tests match.</p>
     </div>
   </nav>
   <main id="main"></main>
@@ -383,6 +476,7 @@ function applySort() {
   navList.appendChild(frag);
 }
 function applyFilter() {
+  if (tab === 'tests') return filterTests();
   const q = search.value.trim().toLowerCase();
   let n = 0;
   for (const x of items) {
@@ -394,10 +488,12 @@ function applyFilter() {
   $('#navEmpty').hidden = n > 0;
 }
 const firstVisible = () => navList.querySelector('button:not([hidden])');
+let tab = 'views';
 sortSel.onchange = () => { store.set('sort', sortSel.value); applySort(); };
 search.oninput = applyFilter;
 search.onkeydown = e => {
-  if (e.key === 'Enter') { const b = firstVisible(); if (b) show(+b.dataset.i, true); }
+  if (e.key === 'Enter' && tab === 'tests') { const b = testList.querySelector('button:not([hidden])'); if (b) showTest(+b.dataset.a); }
+  else if (e.key === 'Enter') { const b = firstVisible(); if (b) show(+b.dataset.i, true); }
   else if (e.key === 'Escape') { search.value = ''; applyFilter(); }
 };
 addEventListener('keydown', e => {
@@ -484,9 +580,9 @@ function linkRows(r) {
 }
 
 // Overlay boxes are placed only once each (lazy) image has loaded.
-function wireShot(el, r, s, tested) {
+function wireShot(el, r, s, tested, placed) {
   const img = el.querySelector('img');
-  const place = () => placeBoxes(el, r, s, tested);
+  const place = () => { placeBoxes(el, r, s, tested); if (placed) placed(); };
   if (img.complete && img.naturalWidth) place();
   else {
     img.addEventListener('load', place, { once: true });
@@ -565,15 +661,19 @@ function attemptItem(a) {
   if (!a) return '';
   const t = a.test != null ? tests[a.test] : null;
   const label = t ? testItem({ ...t, run: a.run, trace: a.trace }, !!a.failed) : esc(a.title) + (a.failed ? ' (failed)' : '');
-  return label + (a.run ? ' <span class="muted">(retry #' + a.run + ')</span>' : '');
+  const i = data.attempts.indexOf(a);
+  return label + (a.run ? ' <span class="muted">(retry #' + a.run + ')</span>' : '') +
+    (a.steps ? '<a class="steplink" href="' + TEST_HASH + i + '" data-attempt="' + i + '" title="Step through this test">steps</a>' : '');
 }
 const stepping = () => current >= 0 && shotMode === 'states' && states && $('#main .stepper .stepbar');
 addEventListener('keydown', e => {
   if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
   if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  const by = e.key === 'ArrowLeft' ? -1 : 1;
+  if (walking()) { e.preventDefault(); showStep(currentTest, stepAt + by); return; }
   if (!stepping()) return;
   e.preventDefault();
-  showState(current, stateAt + (e.key === 'ArrowLeft' ? -1 : 1), boxInfo(data.routes[current]));
+  showState(current, stateAt + by, boxInfo(data.routes[current]));
 });
 
 function show(i, fromUser, focusKey, state) {
@@ -582,6 +682,7 @@ function show(i, fromUser, focusKey, state) {
   try { history.replaceState(null, '', '#' + encodeURIComponent(r.route)); } catch {}
   clearCurrent();
   states = null;
+  setTab('views');
   current = i;
   buttons[i].setAttribute('aria-current', 'true');
   if (!fromUser) buttons[i].scrollIntoView({ block: 'nearest' });
@@ -721,8 +822,11 @@ function testItem(t, failed) {
 }
 function testedByCell(e) {
   if (!e.ti) return e.testedBy.map(esc).concat((e.testedByFailing || []).map(t => esc(t) + ' (failed)')).join('<br>') || '—';
-  return e.ti.map(i => testItem(tests[i], false)).concat((e.tf || []).map(i => testItem(tests[i], true))).join('<br>') || '—';
+  return e.ti.map((i, j) => testItem(tests[i], false) + stepLink(e.ts && e.ts[j]))
+    .concat((e.tf || []).map(i => testItem(tests[i], true))).join('<br>') || '—';
 }
+// A link to the step of the test's walkthrough that acted on the element.
+const stepLink = (at) => at ? '<a class="steplink" href="' + TEST_HASH + at[0] + '&step=' + (at[1] + 1) + '" data-attempt="' + at[0] + '" data-step="' + at[1] + '" title="Show this step of the test">step ' + (at[1] + 1) + '</a>' : '';
 
 // "Most repeated": elements used by the most tests, often setup steps such as signing in.
 const repeated = data.mostRepeated || [];
@@ -764,7 +868,7 @@ function wireGoto(root) {
     const i = routeIndex.get(a.dataset.route);
     if (i === undefined) return;
     ev.preventDefault();
-    show(i, true, a.dataset.key);
+    show(i, true, a.dataset.key, a.dataset.state != null ? +a.dataset.state : undefined);
   });
 }
 
@@ -773,6 +877,9 @@ const untestedNav = $('#untestedNav');
 const untestedList = $('#untestedList');
 let currentUntested = -1;
 function clearCurrent() {
+  if (testButtons[currentTest]) testButtons[currentTest].setAttribute('aria-current', 'false');
+  currentTest = -1;
+  walk = null;
   insightsNav.setAttribute('aria-current', 'false');
   if (buttons[current]) buttons[current].setAttribute('aria-current', 'false');
   if (untestedList.children[currentUntested]) untestedList.children[currentUntested].setAttribute('aria-current', 'false');
@@ -865,6 +972,12 @@ async function copyText(text, btn) {
   area.select();
 }
 $('#main').addEventListener('click', e => {
+  const sl = e.target.closest('a[data-attempt]');
+  if (sl) {
+    e.preventDefault();
+    showTest(+sl.dataset.attempt, sl.dataset.step != null ? +sl.dataset.step : undefined);
+    return;
+  }
   const btn = e.target.closest('button[data-copy]');
   if (btn) {
     const r = data.routes[current];
@@ -886,11 +999,164 @@ $('#main').addEventListener('click', e => {
   }
 });
 
+// ---- Tests: one walkthrough per attempt, its steps one at a time.
+const TEST_HASH = '#test:';
+const attempts = data.attempts || [];
+const attemptTitle = (a) => a.test != null ? tests[a.test].title : a.title;
+const attemptProject = (a) => a.test != null ? tests[a.test].project : a.project;
+const testList = $('#testList');
+// Sorted by title, retries in order.
+const testOrder = attempts.map((a, i) => i).sort((x, y) => collator.compare(attemptTitle(attempts[x]), attemptTitle(attempts[y])) || attempts[x].run - attempts[y].run);
+testList.innerHTML = testOrder.map(i => {
+  const a = attempts[i];
+  const status = a.failed ? '<span class="bad-text">failed</span>' : a.ignored ? 'passed, not counted' : 'passed';
+  return '<button data-a="' + i + '" aria-current="false"><div class="title">' + esc(attemptTitle(a)) +
+    (multiProject && attemptProject(a) ? ' <span class="muted">[' + esc(attemptProject(a)) + ']</span>' : '') + '</div>' +
+    '<div class="sub muted">' + (a.run ? 'retry #' + a.run + ' · ' : '') + status + ' · ' + (a.steps ? plural(a.steps, 'step') : 'no steps') + '</div></button>';
+}).join('');
+const testButtons = [];
+testList.querySelectorAll('button[data-a]').forEach(b => testButtons[+b.dataset.a] = b);
+testList.addEventListener('click', e => { const b = e.target.closest('button[data-a]'); if (b) showTest(+b.dataset.a); });
+const withSteps = attempts.filter(a => a.steps).length;
+if (withSteps) {
+  $('#tabs').hidden = false;
+  $('#testsCount').textContent = String(attempts.length);
+}
+function filterTests() {
+  const q = search.value.trim().toLowerCase();
+  let n = 0;
+  for (const i of testOrder) {
+    const hit = !q || attemptTitle(attempts[i]).toLowerCase().includes(q);
+    testButtons[i].hidden = !hit;
+    if (hit) n++;
+  }
+  $('#navCount').textContent = (q ? n + ' of ' : '') + plural(attempts.length, 'test run');
+  $('#testEmpty').hidden = n > 0;
+}
+function setTab(name) {
+  if (tab === name) return;
+  tab = name;
+  $('#tabs').querySelectorAll('button[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  $('#viewsPane').hidden = name !== 'views';
+  $('#testsPane').hidden = name !== 'tests';
+  $('#sortLabel').style.display = name === 'views' ? '' : 'none';
+  search.placeholder = name === 'tests' ? 'Filter tests' : 'Filter routes';
+  search.setAttribute('aria-label', search.placeholder);
+  applyFilter();
+}
+$('#tabs').addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (b) setTab(b.dataset.tab); });
+
+let currentTest = -1;
+let walk = null;
+let stepAt = 0;
+// Which screenshot a step shows: the page before it (with the element it acts on) or after it.
+let stepView = 'auto';
+const walking = () => currentTest >= 0 && walk && walk.steps.length && $('#main .walk');
+const testOfHash = () => {
+  const m = /^#test:(\\d+)(?:&step=(\\d+))?$/.exec(location.hash);
+  return m && attempts[+m[1]] ? { a: +m[1], step: m[2] ? +m[2] - 1 : undefined } : { a: -1 };
+};
+function showTest(a, step) {
+  const at = attempts[a];
+  if (!at) return;
+  clearCurrent();
+  current = -1;
+  states = null;
+  currentTest = a;
+  setTab('tests');
+  testButtons[a].setAttribute('aria-current', 'true');
+  testButtons[a].scrollIntoView({ block: 'nearest' });
+  const main = $('#main');
+  litKey = null; lit = [];
+  main.className = '';
+  const t = at.test != null ? tests[at.test] : null;
+  main.innerHTML =
+    '<div class="toolbar"><span class="big">' + esc(attemptTitle(at)) + '</span>' +
+      (at.run ? '<span class="muted">retry #' + at.run + '</span>' : '') +
+      '<span class="pill ' + (at.failed ? 'bad">failed' : 'ok">passed') + '</span>' +
+      (at.ignored ? '<span class="muted" title="Another attempt of this test passed later; its interactions count instead">not counted</span>' : '') +
+      (t && pw ? '<span class="tests"><a href="' + esc(testHref({ ...t, run: at.run })) + '" target="_blank" rel="noopener">Open in the HTML report</a>' +
+        (at.trace ? '<a class="trace" href="' + esc(traceHref({ trace: at.trace })) + '" target="_blank" rel="noopener">trace</a>' : '') + '</span>' : '') +
+    '</div><div class="walk">' + (at.steps ? '<p class="muted">Loading steps…</p>' : '<p class="muted">No steps were recorded for this test. Turn on the recording option <code>steps</code> to record them.</p>') + '</div>';
+  if (!at.steps) { setTestHash(a); return; }
+  loadLazy('test', a).then(payload => {
+    if (currentTest !== a) return;
+    walk = payload;
+    stepView = 'auto';
+    showStep(a, Math.max(0, Math.min(step || 0, walk.steps.length - 1)));
+  }, () => { if (currentTest === a) $('#main .walk').innerHTML = '<p class="muted">The steps of this test weren’t found (steps/test-' + a + '.js).</p>'; });
+}
+const setTestHash = (a, k) => { try { history.replaceState(null, '', TEST_HASH + a + (k != null ? '&step=' + (k + 1) : '')); } catch {} };
+const pathOf = (url) => { try { const u = new URL(url); return u.pathname + u.search + u.hash; } catch { return url; } };
+// "click button "Save"", "load /users"
+const stepText = (st) => st.event + ' ' + (st.event === 'load' ? pathOf(st.url) : st.label || '');
+const callText = (c) => c.api + (c.locator ? ' ' + c.locator : '') + (c.arg ? ' ' + JSON.stringify(c.arg) : '');
+function showStep(a, k) {
+  const n = walk.steps.length;
+  if (k < 0 || k >= n) return;
+  stepAt = k;
+  const st = walk.steps[k];
+  const has = (id) => id && walk.states[id];
+  const contains = (id) => has(id) && st.key != null && walk.states[id].boxes.some(b => {
+    const r = data.routes[+id.split('.')[0]];
+    return (Array.isArray(b) ? elementAt(r, b[0]).key : b.key) === st.key;
+  });
+  // By default the page before the step when it shows the element acted on, else after.
+  const view = stepView !== 'auto' && has(stepView === 'before' ? st.before : st.after) ? stepView
+    : contains(st.before) || !has(st.after) ? 'before' : 'after';
+  const id = view === 'before' ? st.before : st.after;
+  const r = st.route != null ? data.routes[st.route] : null;
+  const stateOf = (sid) => sid && +sid.split('.')[0] === st.route ? +sid.split('.')[1] : undefined;
+  const linkState = stateOf(st.after) != null ? stateOf(st.after) : stateOf(st.before);
+  const c = st.call;
+  const shot = has(id) ? walk.states[id] : null;
+  const shotRoute = shot ? data.routes[+id.split('.')[0]] : null;
+  const marked = shot && contains(id);
+  $('#main .walk').innerHTML =
+    '<div class="stepbar"><button class="btn" data-walk-step="-1" title="Previous step (←)" aria-label="Previous step"' + (k === 0 ? ' disabled' : '') + '>◀</button>' +
+      '<span class="pos">Step <b>' + (k + 1) + '</b> of ' + n + '</span>' +
+      '<button class="btn" data-walk-step="1" title="Next step (→)" aria-label="Next step"' + (k === n - 1 ? ' disabled' : '') + '>▶</button>' +
+      '<span class="muted"><span class="kbd">←</span> <span class="kbd">→</span></span>' +
+      (has(st.before) && has(st.after) ? '<span class="seg" role="group" aria-label="Screenshot" style="margin-left:auto">' +
+        '<button data-view="before" aria-pressed="' + (view === 'before') + '" title="The page when the step acted on it">Before</button>' +
+        '<button data-view="after" aria-pressed="' + (view === 'after') + '" title="The page right after the step">After</button></span>' : '') +
+    '</div>' +
+    '<div class="stepinfo"><div class="action">' + esc(st.event) + ' ' + (st.event === 'load' ? '<span class="route">' + esc(pathOf(st.url)) + '</span>' : esc(st.label || '(element not in the report)')) + '</div>' +
+      (c ? '<div><code>' + esc(callText(c)) + '</code>' + (c.file ? ' <span class="muted">at ' + esc(c.file + ':' + c.line + (c.column ? ':' + c.column : '')) + '</span>' : '') + '</div>' : '') +
+      '<div class="muted">' + (r ? 'View ' + '<a class="goto route" href="#' + esc(encodeURIComponent(r.route)) + '" data-route="' + esc(r.route) + '"' +
+        (linkState != null ? ' data-state="' + linkState + '"' : '') + ' title="Show this view' + (linkState != null ? ' at this state' : '') + '">' + esc(r.route) + '</a> · ' : '') +
+        '<span class="urls">' + esc(st.url) + '</span></div></div>' +
+    (shot
+      ? '<figure><div class="shot"><img decoding="async" src="' + esc(shot.source) + '" alt="The page ' + view + ' step ' + (k + 1) + '"></div>' +
+        '<figcaption>' + (view === 'before' ? 'Before this step' : 'After this step') +
+        (st.key != null && !marked ? ' · the element it acted on isn’t in this screenshot' : st.key != null ? ' · the element it acted on is outlined in blue' : '') + '</figcaption></figure>'
+      : '<p class="muted">No screenshot of this step (the page was gone or changing, or the test’s <code>maxStepScreenshots</code> was used up).</p>') +
+    '<ol class="steplist">' + walk.steps.map((s, j) => '<li><button data-k="' + j + '"' + (j === k ? ' aria-current="true"' : '') + ' title="' + esc(stepText(s)) + '"><span class="n">' + (j + 1) + '</span>' + esc(stepText(s)) + '</button></li>').join('') + '</ol>';
+  const w = $('#main .walk');
+  w.querySelectorAll('[data-walk-step]').forEach(b => b.onclick = () => showStep(a, stepAt + +b.dataset.walkStep));
+  w.querySelectorAll('.seg button[data-view]').forEach(b => b.onclick = () => { stepView = b.dataset.view; showStep(a, stepAt); });
+  w.querySelectorAll('.steplist button[data-k]').forEach(b => b.onclick = () => showStep(a, +b.dataset.k));
+  if (shot) wireShot(w.querySelector('.shot'), shotRoute, shot, boxInfo(shotRoute), () => {
+    if (st.key != null) w.querySelectorAll('.box[data-key="' + CSS.escape(st.key) + '"]').forEach(b => b.classList.add('target'));
+  });
+  wireGoto(w);
+  // Preload the neighbours' screenshots.
+  [k - 1, k + 1].forEach(j => { const s = walk.steps[j]; if (s) [s.before, s.after].forEach(x => { if (has(x)) new Image().src = walk.states[x].source; }); });
+  setTestHash(a, k);
+}
+
 // '#<route>' or '#<route>&state=<n>' (route names are encoded, so '&' only separates).
 const hashParts = () => { const [route, query] = location.hash.split('&'); const m = /^state=(\\d+)$/.exec(query || ''); return { route, state: m ? +m[1] - 1 : undefined }; };
 const indexOfHash = () => data.routes.findIndex(r => '#' + encodeURIComponent(r.route) === hashParts().route);
 const untestedOfHash = () => untestedViews.findIndex(v => UNTESTED_HASH + encodeURIComponent(v.view) === location.hash);
 addEventListener('hashchange', () => {
+  if (location.hash.startsWith(TEST_HASH)) {
+    const { a, step } = testOfHash();
+    if (a < 0) return;
+    if (a !== currentTest) showTest(a, step);
+    else if (step !== undefined && step !== stepAt && walking()) showStep(a, step);
+    return;
+  }
   if (location.hash === REPEATED_HASH) { if (current !== -1) showRepeated(); return; }
   if (location.hash.startsWith(UNTESTED_HASH)) { const u = untestedOfHash(); if (u >= 0 && u !== currentUntested) showUntested(u); return; }
   const i = indexOfHash();
@@ -902,7 +1168,8 @@ addEventListener('hashchange', () => {
 });
 const fromHash = indexOfHash();
 const first = firstVisible();
-if (location.hash === REPEATED_HASH) showRepeated();
+if (location.hash.startsWith(TEST_HASH) && testOfHash().a >= 0) showTest(testOfHash().a, testOfHash().step);
+else if (location.hash === REPEATED_HASH) showRepeated();
 else if (untestedOfHash() >= 0) showUntested(untestedOfHash());
 else show(fromHash >= 0 ? fromHash : first ? +first.dataset.i : 0, false, undefined, fromHash >= 0 ? hashParts().state : undefined);
 </script>

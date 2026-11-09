@@ -6,18 +6,21 @@ exports[`aggregate > matches the snapshot 1`] = `
     {
       "passed": true,
       "retry": 0,
+      "steps": [],
       "title": "users › search",
       "use": "tested",
     },
     {
       "passed": true,
       "retry": 0,
+      "steps": [],
       "title": "users › add",
       "use": "tested",
     },
     {
       "passed": true,
       "retry": 0,
+      "steps": [],
       "title": "app › hash routes",
       "use": "tested",
     },
