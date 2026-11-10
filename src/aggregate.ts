@@ -1,7 +1,7 @@
 import type { HtmlReportLink, RepeatedElement, TestInfo } from './insights';
 import type { A11yHint } from './a11y';
 import type { LinkRules, UiCoverageRules } from './model/rules';
-import type { InventoryElement, TestCoverageData } from './types';
+import type { InstanceLevel, InventoryElement, TestCoverageData } from './types';
 import { boxInImage, intersects } from './model/geometry';
 import { applyGrouping, type ElementGroup } from './grouping';
 import {
@@ -315,6 +315,8 @@ export function aggregate(
   const { attempts, attemptOf } = groupAttempts(tests);
   /** Where each state screenshot ended up: its view and index there (for the walkthrough). */
   const stateRefs = new Map<Snapshot, StateRef>();
+  /** The exact place of the element each box shows (for the walkthrough; not in the report data). */
+  const boxInstance = new WeakMap<ScreenshotBox, InstanceLevel[]>();
   const stateCandidates = new Map<string, StateCandidate[]>();
   let seq = 0;
   tests.forEach(({ data }, i) => {
@@ -509,7 +511,9 @@ export function aggregate(
       );
     const box = (snap: Snapshot, e: Snapshot['elements'][number]): ScreenshotBox => {
       const { key, x, y, w, h, pos } = snap.screenshotClip ? boxInImage(e, snap.screenshotClip)! : e;
-      return pos ? { key, x, y, w, h, pos } : { key, x, y, w, h };
+      const b: ScreenshotBox = pos ? { key, x, y, w, h, pos } : { key, x, y, w, h };
+      if (e.instance) boxInstance.set(b, e.instance);
+      return b;
     };
     // Greedy set cover: pick screenshots that show the most not-yet-shown elements.
     const chosen: RouteScreenshot[] = [];
@@ -572,7 +576,10 @@ export function aggregate(
 
   result.sort((a, b) => a.route.localeCompare(b.route));
   // The walkthrough of each attempt, and links from "Tested by" to its steps.
-  walkSteps(tests, attemptOf, attempts, routeName, (snap) => stateRefs.get(snap));
+  const statesOf = new Map(result.map((r) => [r.route, r.states ?? []]));
+  walkSteps(tests, attemptOf, attempts, routeName, (snap) => stateRefs.get(snap), (ref) =>
+    (statesOf.get(ref.route)?.[ref.index]?.boxes ?? []).map((b) => ({ key: b.key, instance: boxInstance.get(b) })),
+  );
   const first = firstSteps(attempts);
   for (const r of result) {
     const byKey = first.get(r.route);

@@ -6,7 +6,7 @@
  */
 import type { InteractionUse, ScreenshotBox, TestEntry } from './aggregate';
 import type { RawCall } from './model/raw';
-import type { Snapshot } from './types';
+import type { InstanceLevel, Snapshot, StepTarget } from './types';
 
 /** A distinct state of a view: a screenshot, from any test, with its own coverage. */
 export interface RouteState {
@@ -42,9 +42,20 @@ export interface WalkStep {
   key?: string;
   label?: string;
   call?: RawCall;
+  /**
+   * Which instance it acted on, when the page showed the element several
+   * times (a "Delete" on every row): `row 2 of 3 · #user-2`. See `instanceHint`.
+   */
+  instance?: string;
   /** The page before and after the step, when screenshots were taken. */
   before?: StateRef;
   after?: StateRef;
+  /**
+   * Index into the boxes of `before`: the one instance the step acted on,
+   * when an identity tells it apart from the others. Absent: outline every
+   * box of the element.
+   */
+  box?: number;
 }
 
 /** One test attempt: a walkthrough, and a state's "Reached by". */
@@ -151,6 +162,8 @@ export function walkSteps(
   attempts: AttemptSummary[],
   routeName: (url: string, view?: string) => string | undefined,
   stateRef: (snap: Snapshot) => StateRef | undefined,
+  /** The boxes of a state, with the exact place of each (`InventoryElement.instance`). */
+  stateBoxes: (ref: StateRef) => { key: string; instance?: InstanceLevel[] }[] = () => [],
 ): void {
   const byAttempt = new Map<number, { rec: number; data: TestEntry['data'] }[]>();
   tests.forEach((t, rec) => {
@@ -164,16 +177,17 @@ export function walkSteps(
       (data.steps ?? []).map((step, i) => ({ step, rec, i, data })),
     );
     all.sort((x, y) => x.step.t - y.step.t || x.rec - y.rec || x.i - y.i);
-    /** The last state of each page (recording and page). */
-    const lastState = new Map<string, StateRef>();
+    /** The last state of each page (recording and page), and its screenshot. */
+    const lastState = new Map<string, { ref: StateRef; snap: Snapshot }>();
     attempts[a].steps = all.map(({ step, rec, data }) => {
       const page = `${rec}:${step.page ?? 0}`;
       const route = routeName(step.url, data.view);
       const snap = step.state !== undefined ? data.states?.[step.state] : undefined;
       const after = snap && stateRef(snap);
       // A load starts a new document: what the page showed before isn't this step's "before".
-      const before = step.event === 'load' ? undefined : lastState.get(page);
-      if (after) lastState.set(page, after);
+      const last = step.event === 'load' ? undefined : lastState.get(page);
+      const before = last?.ref;
+      if (after) lastState.set(page, { ref: after, snap: snap! });
       const out: WalkStep = { t: step.t, event: step.event, url: step.url };
       if (route !== undefined) out.route = route;
       if (step.target) {
@@ -181,8 +195,21 @@ export function walkSteps(
         out.label = step.target.label;
       } else if (step.name) out.label = step.name;
       if (step.call) out.call = step.call;
+      // The page the step acted on: before it, else right after it.
+      const seen = last?.snap ?? snap;
+      const hint = step.target && seen ? instanceHint(step.target, seen) : undefined;
+      if (hint) out.instance = hint.text;
       if (before) out.before = before;
       if (after) out.after = after;
+      if (hint?.anchors.length && before) {
+        const boxes = stateBoxes(before);
+        const matches: number[] = [];
+        boxes.forEach((b, i) => {
+          if (b.key === step.target!.key && b.instance && hint.anchors.every((d) => b.instance![d]?.id === step.target!.instance![d].id))
+            matches.push(i);
+        });
+        if (matches.length === 1) out.box = matches[0];
+      }
       return out;
     });
   }
@@ -207,4 +234,79 @@ export function firstSteps(attempts: AttemptSummary[]): Map<string, Map<string, 
     });
   }
   return out;
+}
+
+const ROW_GROUPS = new Set(['tbody', 'thead', 'tfoot']);
+const sameLevel = (a: InstanceLevel, b: InstanceLevel | undefined) =>
+  !!b && a.tag === b.tag && a.id === b.id && a.nth === b.nth;
+
+/**
+ * Names the instance of a grouped element a step acted on, from the other
+ * instances of its key on the page (`snap`, the screenshot before the step):
+ * each level where they part from it, outermost first, by position and by
+ * identity when that identity is its own (`row 2 of 3 · #order-7 › row 1`,
+ * `item 2 of 3 · [data-testid="product-2"]`). Positions are the element's
+ * own, from the DOM when it was acted on, not from the screenshot.
+ *
+ * `anchors`: the levels whose identity tells this instance apart from every
+ * other there. Only those can find it again in a screenshot: a position
+ * can hold another record by then (a re-sort, a deleted row).
+ * Undefined when the page didn't show the element more than once.
+ */
+export function instanceHint(
+  target: Pick<StepTarget, 'key' | 'instance'>,
+  snap: Pick<Snapshot, 'elements'>,
+): { text: string; anchors: number[] } | undefined {
+  const own = target.instance;
+  if (!own?.length) return undefined;
+  let others: InstanceLevel[][] = [];
+  let present = false;
+  for (const e of snap.elements) {
+    if (e.key !== target.key || !e.instance || e.grouping?.joined) continue;
+    if (e.instance === own || (e.instance.length === own.length && own.every((l, i) => sameLevel(l, e.instance![i])))) present = true;
+    else if (!others.includes(e.instance)) others.push(e.instance);
+  }
+  const partsAt = (o: InstanceLevel[]) => own.findIndex((l, i) => !sameLevel(l, o[i]));
+  if (!present) {
+    // The page changed since (a row above was deleted): the one other instance
+    // with this one's identity where they part is the same record, moved.
+    const moved = others.filter((o) => {
+      const d = partsAt(o);
+      return d >= 0 && own[d].id !== undefined && o[d]?.id === own[d].id;
+    });
+    if (moved.length === 1) others = others.filter((o) => o !== moved[0]);
+  }
+  /** Level index → the other instances that part from this one there. */
+  const parts = new Map<number, InstanceLevel[][]>();
+  for (const o of others) {
+    const d = partsAt(o);
+    if (d < 0) continue;
+    if (!parts.has(d)) parts.set(d, []);
+    parts.get(d)!.push(o);
+  }
+  if (!parts.size) return undefined;
+  const last = own.length - 1;
+  const ownId = (d: number, against: InstanceLevel[][]) =>
+    own[d].id !== undefined && against.every((o) => o[d]?.id !== own[d].id) ? own[d].id : undefined;
+  const anchors: number[] = [];
+  const text: string[] = [];
+  for (const d of [...parts.keys()].sort((a, b) => a - b)) {
+    const l = own[d];
+    const noun = l.row ? 'row' : ROW_GROUPS.has(l.tag) ? 'row group' : 'item';
+    const pos = l.pos !== undefined ? `${noun} ${l.pos}${l.count !== undefined ? ` of ${l.count}` : ''}` : '';
+    const id = ownId(d, parts.get(d)!);
+    if (id) anchors.push(d);
+    const t = [pos, id].filter(Boolean).join(' · ');
+    if (t) text.push(t);
+  }
+  // The element's own identity, when it names the record (`[data-testid="delete-42"]`).
+  if (!parts.has(last)) {
+    const id = ownId(last, others);
+    if (id) {
+      anchors.push(last);
+      if (text.length) text[text.length - 1] += ` · ${id}`;
+      else text.push(id);
+    }
+  }
+  return text.length ? { text: text.join(' › '), anchors } : undefined;
 }

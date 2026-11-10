@@ -76,6 +76,15 @@ await page.locator('.walk .box.target').first().waitFor();
 await page.mouse.move(0, 0);
 await page.screenshot({ path: path.join(out, 'report-walkthrough.png') });
 
+// 7b. A step on one of several "Add to cart" buttons: the hint names the card, only it is outlined.
+await page.locator('#testList button', { hasText: 'add to cart, rate, sign in' }).click();
+await page.locator('.walk .steplist button', { hasText: 'Add to cart' }).first().click();
+await page.locator('.walk .box.target').first().waitFor();
+await page.mouse.move(0, 0);
+// Clicking the step list scrolled the step's header out of view.
+await page.evaluate(() => { scrollTo(0, 0); document.querySelectorAll('#main, main').forEach((m) => (m.scrollTop = 0)); });
+await page.screenshot({ path: path.join(out, 'report-walkthrough-instance.png') });
+
 // 8. Dark mode.
 await page.emulateMedia({ colorScheme: 'dark' });
 await open('/');

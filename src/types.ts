@@ -54,6 +54,33 @@ export interface InventoryElement {
   h: number;
   /** `position: fixed` / `sticky` (itself or an ancestor): drawn where it was on screen. See `RawElement.pos`. */
   pos?: 'fixed' | 'sticky';
+  /** Where exactly the element was (internal, see `InstanceLevel`). Shared by elements on the same node. */
+  instance?: InstanceLevel[];
+}
+
+/**
+ * One level of an element's exact place in the page, outermost first, the
+ * element last (`<html>` and `<body>` left out; frames and shadow hosts
+ * included). Unlike the key, it keeps every position and identity, so it
+ * tells the instances of a grouped element (a "Delete" on every row) apart.
+ * Internal: the walkthrough uses it to name the instance a step acted on.
+ */
+export interface InstanceLevel {
+  tag: string;
+  /** A table or grid row (`<tr>`, `role="row"`). */
+  row?: true;
+  /** Its identity (`#user-2`, `[data-testid="product-2"]`), as in keys. */
+  id?: string;
+  /** 1-based position among same-tag siblings; absent when it has none. */
+  nth?: number;
+  of?: number;
+  /**
+   * Its position as shown to people, when known: `nth`/`of`, or for rows
+   * `aria-rowindex`/`aria-rowcount`. A `<tr>` in a table with several
+   * `<tbody>` and a `role="row"` without `aria-rowindex` have none.
+   */
+  pos?: number;
+  count?: number;
 }
 
 /** Why elements were merged into one (`group.reason` in coverage.json). */
@@ -144,7 +171,7 @@ export interface Snapshot extends Inventory {
 }
 
 /** The element a step acted on, resolved like an interaction's. */
-export type StepTarget = Pick<Interaction, 'key' | 'label' | 'grouping' | 'frames'>;
+export type StepTarget = Pick<Interaction, 'key' | 'label' | 'grouping' | 'frames'> & { instance?: InstanceLevel[] };
 
 /** One step of a test (recording option `steps`): an interaction, or a page load. */
 export interface Step {
