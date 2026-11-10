@@ -42,6 +42,10 @@ With [`steps: 'on'`](../reference/recording-options.md#steps), the **Tests** tab
 
 ![The walkthrough of "add a user via the modal": step 4 of 8, input combobox "Role" by locator.selectOption getByLabel('Role') at users.spec.ts:14:33, with the Role select outlined in blue on the screenshot of the open modal, and the Tests list in the sidebar](../images/report-walkthrough.png)
 
+On a repeated element with an identity per record, the step names its card or row and outlines only it:
+
+![The walkthrough of "add to cart, rate, sign in" at step 2: click button "Add to cart" item 2 of 3 · [data-testid="product-2"], with only the second card's Add to cart outlined in blue, and the stars step listed as item 4 of 5](../images/report-walkthrough-instance.png)
+
 Each test run has its own walkthrough: a flaky test that failed once and passed on retry is listed twice, the failed run marked *failed* (and the run whose interactions didn't count marked *not counted*, see [Retries and failed tests](./retries.md)). Under "Tested by", a **step n** link next to each test opens the step that acted on that element, and in All states each test under "Reached by" links to its steps. The walkthrough also links to the test's entry in Playwright's HTML report and its trace.
 
 Each test's steps are loaded only when you open it (from `steps/` next to `index.html`), so the report stays quick with many tests.

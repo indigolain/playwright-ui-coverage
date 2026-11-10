@@ -76,6 +76,14 @@ await page.locator('.walk .box.target').first().waitFor();
 await page.mouse.move(0, 0);
 await page.screenshot({ path: path.join(out, 'report-walkthrough.png') });
 
+// 7b. A step on one of the repeated "Add to cart" buttons: named by its card, and only it outlined.
+await page.locator('#testList button', { hasText: 'add to cart' }).click();
+await page.locator('.walk .steplist button', { hasText: 'Add to cart' }).first().click();
+await page.locator('.walk .box.target').first().waitFor();
+await page.locator('.walk .box.target').first().evaluate((b) => b.scrollIntoView({ block: 'center' }));
+await page.mouse.move(0, 0);
+await page.screenshot({ path: path.join(out, 'report-walkthrough-instance.png') });
+
 // 8. Dark mode.
 await page.emulateMedia({ colorScheme: 'dark' });
 await open('/');
