@@ -100,7 +100,6 @@ export function renderLazyFiles(summary: CoverageSummary): Map<string, string> {
         ...(before ? { before } : {}),
         ...(after ? { after } : {}),
         ...(before && st.beforeBox !== undefined ? { beforeBox: st.beforeBox } : {}),
-        ...(after && st.afterBox !== undefined ? { afterBox: st.afterBox } : {}),
       };
     });
     files.set(`test-${i}.js`, lazyScript('test', i, { steps, states }));
@@ -1144,8 +1143,9 @@ function showStep(a, k) {
   w.querySelectorAll('.steplist button[data-k]').forEach(b => b.onclick = () => showStep(a, +b.dataset.k));
   if (shot) wireShot(w.querySelector('.shot'), shotRoute, shot, boxInfo(shotRoute), () => {
     if (st.key == null) return;
-    // The instance acted on when it's known (the "Delete" of that row), else every box of the element.
-    const at = view === 'before' ? st.beforeBox : st.afterBox;
+    // The instance acted on when it's known (the "Delete" of that row, in the page
+    // right before the step), else every box of the element.
+    const at = view === 'before' ? st.beforeBox : undefined;
     const one = at != null && w.querySelector('.box[data-i="' + at + '"][data-key="' + CSS.escape(st.key) + '"]');
     (one ? [one] : w.querySelectorAll('.box[data-key="' + CSS.escape(st.key) + '"]')).forEach(b => b.classList.add('target'));
   });

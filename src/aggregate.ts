@@ -590,7 +590,12 @@ export function aggregate(
       const i = boxes.findIndex((x) => x.key === key && near(x.x, b.x) && near(x.y, b.y) && near(x.w, b.w) && near(x.h, b.h));
       return i < 0 ? undefined : i;
     },
-    (route, key) => !!byRoute.get(route)?.elements.find((e) => e.key === key)?.group,
+    // Only for elements seen several times at once: not a label merged into its
+    // control, nor an explicit group of one. Links that lead elsewhere are referrers.
+    (route, key) => {
+      const r = byRoute.get(route);
+      return !!r && (allElements(r).find((e) => e.key === key)?.instances ?? 0) > 1;
+    },
   );
   const first = firstSteps(attempts);
   for (const r of result) {

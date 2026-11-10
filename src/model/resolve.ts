@@ -104,6 +104,9 @@ const treeTop = (n: Node): Node => {
 };
 const firstRole = (n: Node) => (n.attrs.role ?? '').trim().toLowerCase().split(/\s+/)[0];
 const isRow = (n: Node) => n.tag === 'tr' || n.attrs.role === 'row';
+const ROW_SECTIONS = new Set(['tbody', 'thead', 'tfoot']);
+/** The parent element, across shadow roots and frames (skipping their boundary nodes). */
+const up = (n: Node): Node | undefined => (n.parent && isBoundary(n.parent) ? n.parent.parent : n.parent);
 const isRowContainer = (n: Node) => n.tag === 'table' || ['grid', 'table', 'treegrid'].includes(firstRole(n));
 const isForm = (n: Node) => n.tag === 'form' || firstRole(n) === 'form';
 /**
@@ -461,14 +464,17 @@ export class Resolver {
 
   /**
    * Where this one element is in the page: every level from the top
-   * document down, each with its position among same-tag siblings, rows
-   * included. Unlike keys it tells instances apart (the "Delete" of row 2 and
-   * of row 3), so a step can be matched to its box in a screenshot.
+   * document down, by its identity where it has one (`tr#user-2`), else by
+   * its position among same-tag siblings, rows included. Unlike keys it tells
+   * instances apart (the "Delete" of row 2 and of row 3), so a step can be
+   * matched to its box in a screenshot. Identities keep a record that moved
+   * (row 3 sliding up when row 2 is deleted) from matching another's place.
    */
   instancePath(node: Node): string {
     let p = this.paths.get(node);
     if (p === undefined) {
-      const own = node.of > 1 ? `${node.tag}:${node.nth}` : node.tag;
+      const id = isBoundary(node) ? '' : this.identityOf(node);
+      const own = id ? `${node.tag}${id}` : node.of > 1 ? `${node.tag}:${node.nth}` : node.tag;
       p = node.parent ? `${this.instancePath(node.parent)}/${own}` : own;
       this.paths.set(node, p);
     }
@@ -476,27 +482,111 @@ export class Resolver {
   }
 
   /**
-   * Which of several repeated elements this is, for people: its row in a
-   * table or grid (`row 2 of 3`), else its item among repeated siblings
-   * (`item 2 of 3`), then the identities that point at the record: the row's
-   * or item's (`#user-42`) and the element's own when it has digits
-   * (`[data-testid="delete-42"]`), which the grouping ignores. Undefined when
-   * there's nothing to tell.
+   * Which of several repeated elements this is, for people: its rows in
+   * tables or grids, outermost first (`row 2 of 3 · #order-7 › row 1`), else
+   * its item among repeated siblings (`item 2 of 3`), then the element's own
+   * identity when it has digits (`[data-testid="delete-42"]`), which the
+   * grouping ignores. Crosses shadow roots and frames, like the grouping.
+   * Undefined when there's nothing to tell.
    */
   instanceHint(node: Node): string | undefined {
-    let item: Node | undefined;
-    for (let n: Node | undefined = node; n && !item; n = treeParent(n)) if (isRow(n)) item = n;
-    const isRowItem = !!item;
-    for (let n = treeParent(node); n && !item; n = treeParent(n)) if (n.of > 1 && n.tag !== 'body' && n.tag !== 'html') item = n;
     const parts: string[] = [];
-    if (item) parts.push(`${isRowItem ? 'row' : 'item'} ${item.nth}${item.of > 1 ? ` of ${item.of}` : ''}`);
-    const itemId = item ? this.identityOf(item) : '';
-    if (itemId) parts.push(itemId);
+    const rows: Node[] = [];
+    for (let n: Node | undefined = node; n; n = up(n)) if (isRow(n)) rows.unshift(n);
+    let itemId = '';
+    if (rows.length) {
+      const described = rows.map((r) => this.rowHint(r)).filter((h) => h);
+      if (described.length) parts.push(described.join(' › '));
+      itemId = this.identityOf(rows[rows.length - 1]);
+    } else {
+      const item = this.repeatedItem(node);
+      if (item) {
+        itemId = this.identityOf(item);
+        parts.push([`item ${item.nth} of ${item.of}`, itemId].filter((x) => x).join(' · '));
+      }
+    }
     // The element's own identity only when it looks per record (digits, as in the
     // grouping heuristics): `[data-action="delete-user"]` on every row tells nothing.
     const ownId = this.identityOf(node);
     if (ownId && ownId !== itemId && /\d/.test(ownId)) parts.push(ownId);
     return parts.length ? parts.join(' · ') : undefined;
+  }
+
+  /**
+   * One row: `aria-rowindex` (and the grid's `aria-rowcount`) when set, as
+   * virtualized grids do; else its position when it can be trusted: a `<tr>`
+   * in the only `<tbody>` (or `<thead>`, `<tfoot>`) of its table, or a
+   * `role=row` in the only `role=rowgroup` of its parent; not one of several
+   * row groups, where positions restart. Then its identity.
+   */
+  private rowHint(row: Node): string {
+    let pos = '';
+    const index = row.attrs['aria-rowindex']?.trim();
+    if (index && /^\d+$/.test(index)) {
+      let grid: Node | undefined;
+      for (let n = up(row); n && !grid; n = up(n)) if (isRowContainer(n)) grid = n;
+      const count = grid?.attrs['aria-rowcount']?.trim();
+      pos = `row ${index}${count && /^\d+$/.test(count) ? ` of ${count}` : ''}`;
+    } else {
+      const section = treeParent(row);
+      const trusted =
+        row.tag === 'tr'
+          ? section && (isRowContainer(section) || (ROW_SECTIONS.has(section.tag) && section.of === 1))
+          : section && firstRole(section) === 'rowgroup' && section.of === 1;
+      if (trusted) pos = `row ${row.nth}${row.of > 1 ? ` of ${row.of}` : ''}`;
+    }
+    return [pos, this.identityOf(row)].filter((x) => x).join(' · ');
+  }
+
+  /**
+   * The repeated item an element is (a star of a rating group) or is in (a
+   * card, a list item): the nearest level with a recorded same-tag sibling
+   * that holds an element at the same place (the "Add" of the next card), so
+   * wrappers that every card has at the same position (`div.title` +
+   * `div.actions`) aren't taken for it. Falls back to the nearest ancestor
+   * with same-tag siblings.
+   */
+  private repeatedItem(node: Node): Node | undefined {
+    const below: string[] = [];
+    let fallback: Node | undefined;
+    for (let n: Node | undefined = node; n; n = up(n)) {
+      if (n.tag === 'body' || n.tag === 'html') break;
+      if (n === node) {
+        // Itself only among siblings of its explicit group (the stars of a rating),
+        // not next to other controls ("Add to cart" beside "Save for later").
+        const group = this.explicitGroup(node);
+        if (group && this.nodes.some((m) => m !== node && m.parent === node.parent && m.tag === node.tag && this.explicitGroup(m) === group))
+          return node;
+      } else if (n.of > 1) {
+        fallback ??= n;
+        if (this.repeatsAt(n, below)) return n;
+      }
+      below.push(n.tag);
+    }
+    return fallback;
+  }
+
+  /** The key of the explicit group (`data-uicov-group`, `elementGroups`) the element is in, if any. */
+  private explicitGroup(node: Node): string | undefined {
+    let cached = this.hints.get(node);
+    if (!cached) this.hints.set(node, (cached = this.structuralHints(node)));
+    return cached.hints?.explicit?.key;
+  }
+
+  /**
+   * Whether a recorded same-tag sibling of `item` holds a node along the tags
+   * `below` (the levels from the element up to `item`, element first; empty
+   * when `item` is the element itself).
+   */
+  private repeatsAt(item: Node, below: string[]): boolean {
+    return this.nodes.some((m) => {
+      let n: Node | undefined = m;
+      for (const tag of below) {
+        if (!n || n.tag !== tag) return false;
+        n = up(n);
+      }
+      return !!n && n !== item && n.tag === item.tag && n.parent === item.parent;
+    });
   }
 
   /** Keys of the `<iframe>`/`<frame>` elements the node is inside, outermost first. */

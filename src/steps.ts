@@ -51,12 +51,14 @@ export interface WalkStep {
   before?: StateRef;
   after?: StateRef;
   /**
-   * Index into the boxes of the `before` / `after` state of the instance
-   * acted on, when it's in the screenshot. The walkthrough outlines only it,
-   * not every instance of the element.
+   * Index into the boxes of the `before` state of the instance acted on. The
+   * walkthrough outlines only it, not every instance of the element. Set only
+   * when `before` is the page right before the step (the previous step on the
+   * page took it) and the instance is in it. There's none for `after`: the
+   * step may have removed or moved the element (a deleted row), and another
+   * record can be in its place.
    */
   beforeBox?: number;
-  afterBox?: number;
 }
 
 /**
@@ -185,17 +187,24 @@ export function walkSteps(
       (data.steps ?? []).map((step, i) => ({ step, rec, i, data })),
     );
     all.sort((x, y) => x.step.t - y.step.t || x.rec - y.rec || x.i - y.i);
-    /** The last state of each page (recording and page), with its screenshot. */
-    const lastState = new Map<string, { ref: StateRef; snap: Snapshot }>();
+    /**
+     * The last state of each page (recording and page), with its screenshot,
+     * and whether the last step on the page took it (else it may be outdated).
+     */
+    const lastState = new Map<string, { ref: StateRef; snap: Snapshot; fresh: boolean }>();
     attempts[a].steps = all.map(({ step, rec, data }) => {
       const page = `${rec}:${step.page ?? 0}`;
       const route = routeName(step.url, data.view);
       const snap = step.state !== undefined ? data.states?.[step.state] : undefined;
       const after = snap && stateRef(snap);
       // A load starts a new document: what the page showed before isn't this step's "before".
-      const prev = step.event === 'load' ? undefined : lastState.get(page);
+      const last = lastState.get(page);
+      const prev = step.event === 'load' ? undefined : last;
       const before = prev?.ref;
-      if (after) lastState.set(page, { ref: after, snap: snap! });
+      const freshBefore = !!prev?.fresh;
+      // A step without a screenshot leaves the last one behind what the page shows.
+      if (after) lastState.set(page, { ref: after, snap: snap!, fresh: true });
+      else if (last) last.fresh = false;
       const out: WalkStep = { t: step.t, event: step.event, url: step.url };
       if (route !== undefined) out.route = route;
       const target = step.target;
@@ -207,11 +216,9 @@ export function walkSteps(
       if (step.call) out.call = step.call;
       if (before) out.before = before;
       if (after) out.after = after;
-      if (target?.instance && instanceBox) {
-        const b = before && instanceBox(prev!.snap, before, target.key, target.instance);
-        const a = after && instanceBox(snap!, after, target.key, target.instance);
+      if (target?.instance && instanceBox && before && freshBefore) {
+        const b = instanceBox(prev!.snap, before, target.key, target.instance);
         if (b !== undefined) out.beforeBox = b;
-        if (a !== undefined) out.afterBox = a;
       }
       return out;
     });

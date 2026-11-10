@@ -115,103 +115,248 @@ describe('walkthroughs', () => {
   });
 
   describe('a step on one of several repeated elements', () => {
-    /**
-     * /users: a table with a "Delete" button on each of 3 rows (`tr#user-N`),
-     * grouped into one element. The test clicks the Delete of row 2.
-     */
-    const raw = (rowAttrs: (i: number) => Record<string, string> = (i) => ({ id: `user-${i}` })): RawCoverageData => {
-      const nodes: RawNode[] = [
-        { tag: 'html' },
-        { tag: 'body', parent: 0 },
-        { tag: 'table', parent: 1, attrs: { 'data-testid': 'users' } },
-        { tag: 'tbody', parent: 2 },
-      ];
-      const buttons: number[] = [];
-      for (let i = 1; i <= 3; i++) {
-        nodes.push({ tag: 'tr', parent: 3, nth: i, of: 3, attrs: rowAttrs(i) });
-        nodes.push({ tag: 'td', parent: nodes.length - 1 });
-        nodes.push({ tag: 'button', parent: nodes.length - 1 });
-        buttons.push(nodes.length - 1);
-      }
-      const elements = buttons.map((node, i) => ({ node, name: 'Delete', x: 10, y: 10 + i * 30, w: 50, h: 20 }));
-      const state = (hash: string, t: number, rows = elements): RawSnapshot => ({
-        url: 'http://app/users',
-        dpr: 1,
-        elements: rows,
-        screenshot: `shot-${hash}`,
-        screenshotClip: { x: 0, y: 0, width: 800, height: 600 },
-        t,
-        hash,
-      });
-      const row2 = { node: buttons[1], name: 'Delete' };
-      return {
-        formatVersion: 4,
-        nodes,
-        snapshots: [{ url: 'http://app/users', dpr: 1, elements, t: 1000 }],
-        interactions: [{ event: 'click', url: 'http://app/users', element: row2 }],
-        steps: [
-          { t: 900, event: 'load', url: 'http://app/users', state: 0 },
-          { t: 1100, event: 'click', url: 'http://app/users', element: row2, state: 1 },
-        ],
-        // After the click, row 2 is gone: row 3 moved up into its place.
-        states: [state('all', 950), state('deleted', 1150, [elements[0], { ...elements[2], y: 40 }])],
-      };
+    /** A raw node tree under <html><body>; `add` returns the new node's index. */
+    const tree = () => {
+      const nodes: RawNode[] = [{ tag: 'html' }, { tag: 'body', parent: 0 }];
+      const add = (tag: string, parent: number, extra: Partial<RawNode> = {}) => (nodes.push({ tag, parent, ...extra }), nodes.length - 1);
+      return { nodes, add };
     };
+    const at = (node: number, y: number, name = 'Delete') => ({ node, name, x: 10, y, w: 50, h: 20 });
+    const shot = (url: string, hash: string, t: number, elements: RawSnapshot['elements']): RawSnapshot => ({
+      url, dpr: 1, elements, screenshot: `shot-${hash}`, screenshotClip: { x: 0, y: 0, width: 800, height: 600 }, t, hash,
+    });
     const run = (data: RawCoverageData) =>
       aggregate([{ title: 't', testId: 't', retry: 0, passed: true, data: resolveCoverageData(data) }], opts);
+    const hint = (data: RawCoverageData, i = 0) => resolveCoverageData(data).steps![i].target?.hint;
+    const raw = (nodes: RawNode[], url: string, extra: Partial<RawCoverageData>): RawCoverageData => ({
+      formatVersion: 4, nodes, snapshots: [], interactions: [], ...extra,
+    });
 
-    it('names the row it was in and outlines only that instance', () => {
-      const summary = run(raw());
-      const users = summary.routes[0];
-      expect(users.elements.map((e) => [e.label, e.group?.reason, e.instances])).toEqual([['button "Delete"', 'row', 3]]);
+    /**
+     * /users: a table (`tbody`) with a "Delete" button on each of 3 rows,
+     * grouped into one element. `rowAttrs` gives each row's attributes.
+     */
+    const users = (rowAttrs: (i: number) => Record<string, string> = (i) => ({ id: `user-${i}` })) => {
+      const t = tree();
+      const tbody = t.add('tbody', t.add('table', 1, { attrs: { 'data-testid': 'users' } }));
+      /** A row as the tracker records it in one inventory: its position among the rows there. */
+      const row = (i: number, nth: number, of: number) => t.add('button', t.add('td', t.add('tr', tbody, { nth, of, attrs: rowAttrs(i) })));
+      return { ...t, row, buttons: [1, 2, 3].map((i) => row(i, i, 3)) };
+    };
+    const url = 'http://app/users';
+
+    it('names the row and outlines only that instance, in the page right before the step', () => {
+      const u = users();
+      const elements = u.buttons.map((b, i) => at(b, 10 + i * 30));
+      // After the click, row 2 is gone and row 3 is the 2nd of 2 rows (a new node, as the tracker records it).
+      const after = [at(u.row(1, 1, 2), 10), at(u.row(3, 2, 2), 40)];
+      const summary = run(raw(u.nodes, url, {
+        snapshots: [{ url, dpr: 1, elements, t: 1000 }],
+        interactions: [{ event: 'click', url, element: { node: u.buttons[1], name: 'Delete' } }],
+        steps: [
+          { t: 900, event: 'load', url, state: 0 },
+          { t: 1100, event: 'click', url, element: { node: u.buttons[1], name: 'Delete' }, state: 1 },
+        ],
+        states: [shot(url, 'all', 950, elements), shot(url, 'deleted', 1150, after)],
+      }));
+      const users_ = summary.routes[0];
+      expect(users_.elements.map((e) => [e.label, e.group?.reason, e.instances])).toEqual([['button "Delete"', 'row', 3]]);
       const step = summary.attempts![0].steps[1];
-      expect(step).toMatchObject({ key: users.elements[0].key, instance: 'row 2 of 3 · #user-2' });
-      // Before: the second of the three boxes. After: row 2 isn't there any more.
-      expect(step.beforeBox).toBe(1);
-      expect(users.states![step.before!.index].boxes[1]).toMatchObject({ y: 40 });
-      expect(step.afterBox).toBeUndefined();
-      // The walkthrough file carries both.
+      expect(step).toMatchObject({ key: users_.elements[0].key, instance: 'row 2 of 3 · #user-2', beforeBox: 1 });
+      expect(users_.states![step.before!.index].boxes[1]).toMatchObject({ y: 40 });
       let payload: any;
       new Function('__uicovData', renderLazyFiles(summary).get('test-0.js')!)((_k: string, _i: number, p: unknown) => (payload = p));
       expect(payload.steps[1]).toMatchObject({ instance: 'row 2 of 3 · #user-2', beforeBox: 1 });
-      expect(payload.steps[1].afterBox).toBeUndefined();
     });
 
-    it('without row identities, gives the position, plus the element’s own identity', () => {
-      const data = raw(() => ({}));
-      const button = data.interactions[0].element.node;
-      data.nodes[button].attrs = { 'data-testid': 'delete-user-2' };
-      const step = run(data).attempts![0].steps[1];
-      expect(step.instance).toBe('row 2 of 3 · [data-testid="delete-user-2"]');
+    it('never picks a box after the step, where another record can have taken its place', () => {
+      // No row identities: row 3 moved up into row 2's exact place and position.
+      const u = users(() => ({}));
+      const elements = u.buttons.map((b, i) => at(b, 10 + i * 30));
+      const after = [at(u.row(1, 1, 2), 10), at(u.row(3, 2, 2), 40)];
+      const step = run(raw(u.nodes, url, {
+        snapshots: [{ url, dpr: 1, elements }],
+        steps: [
+          { t: 1, event: 'load', url, state: 0 },
+          { t: 2, event: 'click', url, element: { node: u.buttons[1], name: 'Delete' }, state: 1 },
+        ],
+        states: [shot(url, 'all', 1, elements), shot(url, 'deleted', 3, after)],
+      })).attempts![0].steps[1];
+      expect(step.instance).toBe('row 2 of 3');
+      expect(step.beforeBox).toBe(1);
+      expect(Object.keys(step)).not.toContain('afterBox');
+    });
+
+    it('doesn’t pick a box in an outdated Before (an earlier step took no screenshot)', () => {
+      const u = users();
+      const add = u.add('button', 1, { attrs: { id: 'add' } });
+      const elements = [at(add, 0, 'Add'), ...u.buttons.map((b, i) => at(b, 10 + i * 30))];
+      const step = run(raw(u.nodes, url, {
+        snapshots: [{ url, dpr: 1, elements }],
+        steps: [
+          { t: 1, event: 'load', url, state: 0 },
+          // Adds a row at the top; screenshots were used up (`maxStepScreenshots`).
+          { t: 2, event: 'click', url, element: { node: add, name: 'Add' } },
+          { t: 3, event: 'click', url, element: { node: u.buttons[1], name: 'Delete' } },
+        ],
+        states: [shot(url, 'all', 1, elements)],
+      })).attempts![0].steps[2];
+      expect(step.before).toBeDefined();
+      expect(step.beforeBox).toBeUndefined();
+    });
+
+    it('identity paths keep a moved record from matching', () => {
+      const u = users();
+      // Row 3 after row 2 is deleted: same position as row 2 before, different record.
+      const moved = u.row(3, 2, 2);
+      const data = resolveCoverageData(raw(u.nodes, url, {
+        snapshots: [{ url, dpr: 1, elements: [at(u.buttons[1], 40), at(moved, 40)] }],
+      }));
+      const [before, now] = data.snapshots[0].elements.map((e) => e.instance);
+      expect(before).not.toBe(now);
+    });
+
+    it('without row identities, gives the position, plus the element’s own identity when it has digits', () => {
+      const u = users(() => ({}));
+      u.nodes[u.buttons[1]].attrs = { 'data-testid': 'delete-user-2' };
+      const data = raw(u.nodes, url, { steps: [{ t: 1, event: 'click', url, element: { node: u.buttons[1], name: 'Delete' } }] });
+      expect(hint(data)).toBe('row 2 of 3 · [data-testid="delete-user-2"]');
       // The same identity on every row (no digits) doesn't point at a record.
-      data.nodes[button].attrs = { 'data-action': 'delete-user' };
-      expect(run(data).attempts![0].steps[1].instance).toBe('row 2 of 3');
+      u.nodes[u.buttons[1]].attrs = { 'data-testid': 'delete-user' };
+      expect(hint(data)).toBe('row 2 of 3');
     });
 
-    it('in repeated items outside a table: the item', () => {
-      const nodes: RawNode[] = [{ tag: 'html' }, { tag: 'body', parent: 0 }, { tag: 'ul', parent: 1 }];
-      for (let i = 1; i <= 2; i++) {
-        nodes.push({ tag: 'li', parent: 2, nth: i, of: 2, attrs: { 'data-sku': `sku-${i}` } });
-        nodes.push({ tag: 'button', parent: nodes.length - 1 });
-      }
-      const elements = [4, 6].map((node, i) => ({ node, name: 'Add to cart', x: 0, y: i * 30, w: 50, h: 20 }));
-      const data = resolveCoverageData({
-        formatVersion: 4,
-        nodes,
-        snapshots: [{ url: 'http://app/shop', dpr: 1, elements }],
-        interactions: [],
-        steps: [{ t: 1, event: 'click', url: 'http://app/shop', element: { node: 6, name: 'Add to cart' } }],
+    it('names the card, not a wrapper every card has at the same place', () => {
+      // ul > li.card × 3 > (div.title, div.actions > (button "Add", button "Save"))
+      const t = tree();
+      const ul = t.add('ul', 1);
+      const buttons = [1, 2, 3].map((i) => {
+        const li = t.add('li', ul, { nth: i, of: 3, attrs: { class: 'card' } });
+        t.add('div', li, { nth: 1, of: 2, attrs: { class: 'title' } });
+        const actions = t.add('div', li, { nth: 2, of: 2, attrs: { class: 'actions' } });
+        t.add('button', actions, { nth: 2, of: 2 }); // "Save for later", next to it
+        return t.add('button', actions, { nth: 1, of: 2 });
       });
-      // `data-sku` isn't an identity attribute: just the position.
-      expect(data.steps![0].target?.hint).toBe('item 2 of 2');
-      const step = aggregate([{ title: 't', testId: 't', retry: 0, passed: true, data }], opts).attempts![0].steps[0];
-      expect(step.instance).toBe('item 2 of 2');
+      const shop = 'http://app/shop';
+      const data = raw(t.nodes, shop, {
+        snapshots: [{ url: shop, dpr: 1, elements: buttons.map((b, i) => at(b, i * 30, 'Add')) }],
+        steps: buttons.map((node, i) => ({ t: i, event: 'click', url: shop, element: { node, name: 'Add' } })),
+      });
+      expect([0, 1, 2].map((i) => hint(data, i))).toEqual(['item 1 of 3', 'item 2 of 3', 'item 3 of 3']);
+      const steps = run(data).attempts![0].steps;
+      expect(steps.map((s) => s.instance)).toEqual(['item 1 of 3', 'item 2 of 3', 'item 3 of 3']);
     });
 
-    it('says nothing for an element that stands for one', () => {
-      const summary = aggregate([{ title: 't', testId: 't', retry: 0, passed: true, data: recording() }], opts);
-      expect(summary.attempts![0].steps.some((s) => 'instance' in s || 'beforeBox' in s)).toBe(false);
+    it('names the element itself when it is the repeated one (a star of a rating group)', () => {
+      const t = tree();
+      const wrap = t.add('div', 1, { nth: 1, of: 2, attrs: { 'data-uicov-group': 'star-rating' } });
+      t.add('div', 1, { nth: 2, of: 2 });
+      const stars = [1, 2, 3, 4, 5].map((i) => t.add('button', wrap, { nth: i, of: 5 }));
+      const shop = 'http://app/shop';
+      const data = raw(t.nodes, shop, {
+        snapshots: [{ url: shop, dpr: 1, elements: stars.map((b, i) => ({ node: b, name: `${i + 1} stars`, x: i * 20, y: 0, w: 20, h: 20 })) }],
+        steps: [{ t: 1, event: 'click', url: shop, element: { node: stars[3], name: '4 stars' } }],
+      });
+      expect(run(data).attempts![0].steps[0].instance).toBe('item 4 of 5');
+    });
+
+    it('in repeated items outside a table: the item and its identity', () => {
+      const t = tree();
+      const ul = t.add('ul', 1);
+      const buttons = [1, 2].map((i) => t.add('button', t.add('li', ul, { nth: i, of: 2, attrs: { 'data-testid': `sku-${i}` } })));
+      const shop = 'http://app/shop';
+      const data = raw(t.nodes, shop, {
+        snapshots: [{ url: shop, dpr: 1, elements: buttons.map((b, i) => at(b, i * 30, 'Add to cart')) }],
+        steps: [{ t: 1, event: 'click', url: shop, element: { node: buttons[1], name: 'Add to cart' } }],
+      });
+      expect(run(data).attempts![0].steps[0].instance).toBe('item 2 of 2 · [data-testid="sku-2"]');
+    });
+
+    it('says nothing for an element seen once: a field merged with its label, an explicit group of one', () => {
+      const t = tree();
+      const form = t.add('form', 1, { attrs: { id: 'signup' } });
+      const elements: RawSnapshot['elements'] = [];
+      const fields = ['email', 'password', 'name'].map((name, i) => {
+        const field = t.add('div', form, { nth: i + 1, of: 3, attrs: { class: 'field' } });
+        elements.push({ node: t.add('label', field, { attrs: { for: name, tabindex: '0' } }), name, x: 0, y: i * 40, w: 50, h: 20 });
+        const input = t.add('input', field, { attrs: { id: name } });
+        elements.push({ node: input, name, x: 60, y: i * 40, w: 100, h: 20 });
+        return { field, input };
+      });
+      const page = 'http://app/signup';
+      const data = (shown = elements) => raw(t.nodes, page, {
+        snapshots: [{ url: page, dpr: 1, elements: shown }],
+        steps: [{ t: 1, event: 'input', url: page, element: { node: fields[1].input, name: 'password' } }],
+      });
+      const summary = run(data());
+      expect(summary.routes[0].elements.find((e) => e.key === '#password')?.group?.reason).toBe('label');
+      expect(summary.attempts![0].steps[0].instance).toBeUndefined();
+      // Each field an explicit group, with only its input counted: a group of one.
+      fields.forEach((f, i) => (t.nodes[f.field].attrs = { 'data-uicov-group': `field-${i}` }));
+      const inputs = elements.filter((e) => t.nodes[e.node].tag === 'input');
+      const grouped = run(data(inputs));
+      expect(grouped.routes[0].elements.find((e) => e.key === '[data-uicov-group="field-1"]')?.group?.reason).toBe('markup');
+      expect(grouped.attempts![0].steps[0].instance).toBeUndefined();
+    });
+
+    it('names the row of a link that leads to another view', () => {
+      const t = tree();
+      const tbody = t.add('tbody', t.add('table', 1));
+      const links = [1, 2, 3].map((i) => t.add('a', t.add('td', t.add('tr', tbody, { nth: i, of: 3 })), { attrs: { href: `/users/${i}` } }));
+      const step = run(raw(t.nodes, url, {
+        snapshots: [{ url, dpr: 1, elements: links.map((l, i) => at(l, i * 30, 'Open')) }],
+        steps: [{ t: 1, event: 'click', url, element: { node: links[1], name: 'Open' } }],
+      })).attempts![0].steps[0];
+      expect(step.instance).toBe('row 2 of 3');
+    });
+
+    it('finds the row across a shadow root', () => {
+      // tr#user-N > td > row-actions >> (div.menu, div > button)
+      const t = tree();
+      const tbody = t.add('tbody', t.add('table', 1));
+      const buttons = [1, 2, 3].map((i) => {
+        const host = t.add('row-actions', t.add('td', t.add('tr', tbody, { nth: i, of: 3, attrs: { id: `user-${i}` } })));
+        const root = t.add('#shadow-root', host);
+        t.add('div', root, { nth: 1, of: 2, attrs: { class: 'menu' } });
+        return t.add('button', t.add('div', root, { nth: 2, of: 2 }));
+      });
+      const data = raw(t.nodes, url, { steps: [{ t: 1, event: 'click', url, element: { node: buttons[1], name: 'Delete' } }] });
+      expect(hint(data)).toBe('row 2 of 3 · #user-2');
+    });
+
+    describe('row positions', () => {
+      const step = (nodes: RawNode[], node: number) => raw(nodes, url, { steps: [{ t: 1, event: 'click', url, element: { node, name: 'Delete' } }] });
+
+      it('use aria-rowindex and aria-rowcount when set (virtualized grids)', () => {
+        const t = tree();
+        const group = t.add('div', t.add('div', 1, { attrs: { role: 'grid', 'aria-rowcount': '100' } }), { attrs: { role: 'rowgroup' } });
+        const b = t.add('button', t.add('div', group, { nth: 3, of: 20, attrs: { role: 'row', 'aria-rowindex': '42' } }));
+        expect(hint(step(t.nodes, b))).toBe('row 42 of 100');
+      });
+
+      it('are left out where they restart or count other elements', () => {
+        // The 1st row of a table's 2nd tbody: only its identity.
+        const t = tree();
+        const table = t.add('table', 1);
+        t.add('tbody', table, { nth: 1, of: 2 });
+        const row = t.add('tr', t.add('tbody', table, { nth: 2, of: 2 }), { nth: 1, of: 2 });
+        const b = t.add('button', t.add('td', row));
+        expect(hint(step(t.nodes, b))).toBeUndefined();
+        t.nodes[row].attrs = { id: 'user-3' };
+        expect(hint(step(t.nodes, b))).toBe('#user-3');
+        // A role=row among the grid's other elements (a header, a toolbar).
+        const g = tree();
+        const gb = g.add('button', g.add('div', g.add('div', 1, { attrs: { role: 'grid' } }), { nth: 2, of: 4, attrs: { role: 'row' } }));
+        expect(hint(step(g.nodes, gb))).toBeUndefined();
+      });
+
+      it('name the outer record of a nested table first', () => {
+        const t = tree();
+        const outer = t.add('tr', t.add('tbody', t.add('table', 1)), { nth: 2, of: 3, attrs: { id: 'order-7' } });
+        const inner = t.add('tr', t.add('tbody', t.add('table', t.add('td', outer))));
+        const b = t.add('button', t.add('td', inner));
+        expect(hint(step(t.nodes, b))).toBe('row 2 of 3 · #order-7 › row 1');
+      });
     });
   });
 });
-
