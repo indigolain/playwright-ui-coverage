@@ -44,7 +44,7 @@ With [`steps: 'on'`](../reference/recording-options.md#steps), the **Tests** tab
 
 On a repeated element with an identity per record, the step names its card or row and outlines only it:
 
-![The walkthrough of "add to cart, rate, sign in" at step 2: click button "Add to cart" item 2 of 3 · [data-testid="product-2"], with only the second card's Add to cart outlined in blue, and the stars step listed as item 4 of 5](../images/report-walkthrough-instance.png)
+![The walkthrough of the shop test at step 2, a click on Add to cart named as item 2 of 3 with product-2 test ids; only the second card's Add to cart is outlined in blue](../images/report-walkthrough-instance.png)
 
 Each test run has its own walkthrough: a flaky test that failed once and passed on retry is listed twice, the failed run marked *failed* (and the run whose interactions didn't count marked *not counted*, see [Retries and failed tests](./retries.md)). Under "Tested by", a **step n** link next to each test opens the step that acted on that element, and in All states each test under "Reached by" links to its steps. The walkthrough also links to the test's entry in Playwright's HTML report and its trace.
 
