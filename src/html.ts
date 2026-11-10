@@ -96,8 +96,10 @@ export function renderLazyFiles(summary: CoverageSummary): Map<string, string> {
         ...(st.key !== undefined ? { key: st.key } : {}),
         ...(st.label !== undefined ? { label: st.label } : {}),
         ...(st.call ? { call: st.call } : {}),
+        ...(st.instance ? { instance: st.instance } : {}),
         ...(before ? { before } : {}),
         ...(after ? { after } : {}),
+        ...(before && st.box !== undefined ? { box: st.box } : {}),
       };
     });
     files.set(`test-${i}.js`, lazyScript('test', i, { steps, states }));
@@ -349,6 +351,7 @@ h2.section { font-size: 15px; margin: 24px 0 8px; display: flex; gap: 10px; alig
 #testList button[aria-current=true] { background: var(--bg); outline: 1px solid var(--border); }
 #testList .title { overflow-wrap: anywhere; }
 .bad-text { color: var(--bad); }
+.stepinfo .instance { font-weight: normal; color: var(--muted); margin-left: .35em; }
 .box.target { border-width: 3px; outline: 3px solid var(--accent); outline-offset: 2px; z-index: 3; }
 .stepinfo { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; display: grid; gap: 4px; }
 .stepinfo .action { font-weight: 600; }
@@ -510,10 +513,10 @@ function placeBoxes(el, r, s, tested) {
   if (!cssW || !cssH) return;
   el.querySelectorAll('.box').forEach(b => b.remove());
   const frag = document.createDocumentFragment();
-  for (const raw of s.boxes) {
+  s.boxes.forEach((raw, i) => {
     const b = Array.isArray(raw) ? { key: elementAt(r, raw[0]).key, x: raw[1], y: raw[2], w: raw[3], h: raw[4], pos: raw[5] } : raw;
     // The screenshot may be cropped (maxScreenshotHeight): drop or clip boxes outside it.
-    if (b.y >= cssH || b.x >= cssW) continue;
+    if (b.y >= cssH || b.x >= cssW) return;
     const w = Math.min(b.w, cssW - b.x);
     const h = Math.min(b.h, cssH - b.y);
     const info = tested.get(b.key);
@@ -521,13 +524,14 @@ function placeBoxes(el, r, s, tested) {
     // Fixed and sticky elements are drawn where they were on screen when the screenshot was taken.
     d.className = 'box' + (info && info.tested ? ' ok' : info && failingOnly(info) ? ' warn' : '') + (b.pos ? ' pinned' : '');
     d.dataset.key = b.key;
+    d.dataset.i = i;
     d.title = (info ? info.label : b.key) + (info && info.dests ? ' → ' + info.dests + (info.tested ? ' — destination visited' : ' — destination never visited') :
         info && info.tested ? ' — tested' : info && failingOnly(info) ? ' — failing tests only' : ' — untested') +
       (b.pos ? ' (position: ' + b.pos + ', shown where it was on screen)' : '') +
       (info && info.suggestedLocator ? '\\n' + info.suggestedLocator + '\\n(click to show it in the table)' : '');
     d.style.cssText = 'left:' + (b.x / cssW * 100) + '%;top:' + (b.y / cssH * 100) + '%;width:' + (w / cssW * 100) + '%;height:' + (h / cssH * 100) + '%';
     frag.appendChild(d);
-  }
+  });
   el.appendChild(frag);
   el.classList.add('loaded');
 }
@@ -1089,7 +1093,7 @@ function showTest(a, step) {
 const setTestHash = (a, k) => { try { history.replaceState(null, '', TEST_HASH + a + (k != null ? '&step=' + (k + 1) : '')); } catch {} };
 const pathOf = (url) => { try { const u = new URL(url); return u.pathname + u.search + u.hash; } catch { return url; } };
 // "click button "Save"", "load /users"
-const stepText = (st) => st.event + ' ' + (st.event === 'load' ? pathOf(st.url) : st.label || '');
+const stepText = (st) => st.event + ' ' + (st.event === 'load' ? pathOf(st.url) : st.label || '') + (st.instance ? ' (' + st.instance + ')' : '');
 const callText = (c) => c.api + (c.locator ? ' ' + c.locator : '') + (c.arg ? ' ' + JSON.stringify(c.arg) : '');
 function showStep(a, k) {
   const n = walk.steps.length;
@@ -1112,6 +1116,9 @@ function showStep(a, k) {
   const shot = has(id) ? walk.states[id] : null;
   const shotRoute = shot ? data.routes[+id.split('.')[0]] : null;
   const marked = shot && contains(id);
+  // One instance of a repeated element, when an identity tells it apart; else every instance.
+  const one = view === 'before' && st.box != null;
+  const outlined = marked && !one && shot.boxes.filter(b => (Array.isArray(b) ? elementAt(shotRoute, b[0]).key : b.key) === st.key).length;
   $('#main .walk').innerHTML =
     '<div class="stepbar"><button class="btn" data-walk-step="-1" title="Previous step (←)" aria-label="Previous step"' + (k === 0 ? ' disabled' : '') + '>◀</button>' +
       '<span class="pos">Step <b>' + (k + 1) + '</b> of ' + n + '</span>' +
@@ -1121,7 +1128,8 @@ function showStep(a, k) {
         '<button data-view="before" aria-pressed="' + (view === 'before') + '" title="The page when the step acted on it">Before</button>' +
         '<button data-view="after" aria-pressed="' + (view === 'after') + '" title="The page right after the step">After</button></span>' : '') +
     '</div>' +
-    '<div class="stepinfo"><div class="action">' + esc(st.event) + ' ' + (st.event === 'load' ? '<span class="route">' + esc(pathOf(st.url)) + '</span>' : esc(st.label || '(element not in the report)')) + '</div>' +
+    '<div class="stepinfo"><div class="action">' + esc(st.event) + ' ' + (st.event === 'load' ? '<span class="route">' + esc(pathOf(st.url)) + '</span>' : esc(st.label || '(element not in the report)')) +
+      (st.instance ? ' <span class="instance" title="Which of the element’s instances on the page it acted on">' + esc(st.instance) + '</span>' : '') + '</div>' +
       (c ? '<div><code>' + esc(callText(c)) + '</code>' + (c.file ? ' <span class="muted">at ' + esc(c.file + ':' + c.line + (c.column ? ':' + c.column : '')) + '</span>' : '') + '</div>' : '') +
       '<div class="muted">' + (r ? 'View ' + '<a class="goto route" href="#' + esc(encodeURIComponent(r.route)) + '" data-route="' + esc(r.route) + '"' +
         (linkState != null ? ' data-state="' + linkState + '"' : '') + ' title="Show this view' + (linkState != null ? ' at this state' : '') + '">' + esc(r.route) + '</a> · ' : '') +
@@ -1129,7 +1137,7 @@ function showStep(a, k) {
     (shot
       ? '<figure><div class="shot"><img decoding="async" src="' + esc(shot.source) + '" alt="The page ' + view + ' step ' + (k + 1) + '"></div>' +
         '<figcaption>' + (view === 'before' ? 'Before this step' : 'After this step') +
-        (st.key != null && !marked ? ' · the element it acted on isn’t in this screenshot' : st.key != null ? ' · the element it acted on is outlined in blue' : '') + '</figcaption></figure>'
+        (st.key != null && !marked ? ' · the element it acted on isn’t in this screenshot' : st.key != null ? ' · the element it acted on is outlined in blue' + (outlined > 1 ? ' (all ' + outlined + ' of its instances' + (st.instance ? ', it acted on ' + esc(st.instance) : '') + ')' : '') : '') + '</figcaption></figure>'
       : '<p class="muted">No screenshot of this step (the page was gone or changing, or the test’s <code>maxStepScreenshots</code> was used up).</p>') +
     '<ol class="steplist">' + walk.steps.map((s, j) => '<li><button data-k="' + j + '"' + (j === k ? ' aria-current="true"' : '') + ' title="' + esc(stepText(s)) + '"><span class="n">' + (j + 1) + '</span>' + esc(stepText(s)) + '</button></li>').join('') + '</ol>';
   const w = $('#main .walk');
@@ -1137,7 +1145,8 @@ function showStep(a, k) {
   w.querySelectorAll('.seg button[data-view]').forEach(b => b.onclick = () => { stepView = b.dataset.view; showStep(a, stepAt); });
   w.querySelectorAll('.steplist button[data-k]').forEach(b => b.onclick = () => showStep(a, +b.dataset.k));
   if (shot) wireShot(w.querySelector('.shot'), shotRoute, shot, boxInfo(shotRoute), () => {
-    if (st.key != null) w.querySelectorAll('.box[data-key="' + CSS.escape(st.key) + '"]').forEach(b => b.classList.add('target'));
+    if (one) w.querySelectorAll('.box[data-i="' + st.box + '"]').forEach(b => b.classList.add('target'));
+    else if (st.key != null) w.querySelectorAll('.box[data-key="' + CSS.escape(st.key) + '"]').forEach(b => b.classList.add('target'));
   });
   wireGoto(w);
   // Preload the neighbours' screenshots.

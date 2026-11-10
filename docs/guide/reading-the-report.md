@@ -39,6 +39,20 @@ With [`steps: 'on'`](../reference/recording-options.md#steps), the **Tests** tab
 
 ![The walkthrough of "add a user via the modal": step 4 of 8, input combobox "Role" by locator.selectOption getByLabel('Role') at users.spec.ts:14:33, with the Role select outlined in blue on the screenshot of the open modal, and the Tests list in the sidebar](../images/report-walkthrough.png)
 
+### Which instance a step acted on
+
+When the page showed the element several times, as one element of the report (a "Delete" on every row, an "Add to cart" on every card, see [Element grouping](./element-grouping.md)), the step also says which one it acted on, next to the action and in the step list:
+
+- `row 2 of 3 · #user-2`: a table or grid row, by its position and, when it has one, its own identity. Grids number rows by `aria-rowindex` and `aria-rowcount`; a nested table names the outer row first (`row 2 of 3 › row 1 of 4`);
+- `item 2 of 3 · [data-testid="product-2"]`: any other repeated structure (cards, list items, the stars of a rating), at the level where the instances part;
+- the element's own identity when it names the record (`[data-testid="add-to-cart-2"]`).
+
+Positions are the element's place in the page when the step acted on it. An identity is shown only when it is that instance's own: one every row has (`[data-testid="row"]`) isn't.
+
+When an identity tells the instance apart, Before outlines only that one, even if rows moved in between. Otherwise (rows without identities) every instance is outlined, and the caption says so: a position alone can hold another record by the time of the screenshot.
+
+![Step 2 of the shop test: click button "Add to cart", item 2 of 3 · [data-testid="product-2"], with only the second card's button outlined in blue](../images/report-walkthrough-instance.png)
+
 Each test run has its own walkthrough: a flaky test that failed once and passed on retry is listed twice, the failed run marked *failed* (and the run whose interactions didn't count marked *not counted*, see [Retries and failed tests](./retries.md)). Under "Tested by", a **step n** link next to each test opens the step that acted on that element, and in All states each test under "Reached by" links to its steps. The walkthrough also links to the test's entry in Playwright's HTML report and its trace.
 
 Each test's steps are loaded only when you open it (from `steps/` next to `index.html`), so the report stays quick with many tests.

@@ -10,7 +10,7 @@
  * structural `tag:nth-of-type(n)` path up to the nearest identified ancestor.
  * Elements in frames and shadow trees are prefixed by their host's key and `>>`.
  */
-import type { GroupHints, GroupLevel, Interaction, InventoryElement, Snapshot, Step, TestCoverageData } from '../types';
+import type { GroupHints, GroupLevel, InstanceLevel, Interaction, InventoryElement, Snapshot, Step, TestCoverageData } from '../types';
 import { inputType, roleOf } from './elements';
 import {
   READABLE_RECORDING_FORMAT_VERSIONS,
@@ -105,6 +105,11 @@ const treeTop = (n: Node): Node => {
 const firstRole = (n: Node) => (n.attrs.role ?? '').trim().toLowerCase().split(/\s+/)[0];
 const isRow = (n: Node) => n.tag === 'tr' || n.attrs.role === 'row';
 const isRowContainer = (n: Node) => n.tag === 'table' || ['grid', 'table', 'treegrid'].includes(firstRole(n));
+/** `aria-rowcount` of the row's table or grid (it's set there, not on rows). */
+const treeParentRowCount = (row: Node): string | undefined => {
+  for (let n = treeParent(row); n; n = treeParent(n)) if (isRowContainer(n)) return n.attrs['aria-rowcount'];
+  return undefined;
+};
 const isForm = (n: Node) => n.tag === 'form' || firstRole(n) === 'form';
 /**
  * Links aren't grouped by the row and repeated-structure heuristics: links
@@ -138,6 +143,7 @@ export class Resolver {
   private pins = new Map<Node, { key: string; label?: string }>();
   private ids?: { size: number; byTree: Map<Node, Map<string, Node>> };
   private hints = new Map<Node, { hints?: GroupHints; shape?: { sig: string; levels: GroupLevel[] } }>();
+  private instances = new Map<Node, InstanceLevel[]>();
 
   /**
    * `data.nodes` may grow after construction (the recorder appends to it);
@@ -458,6 +464,47 @@ export class Resolver {
     return undefined;
   }
 
+  /**
+   * The element's exact place: every level with its identity and position
+   * (see `InstanceLevel`). Memoized: elements on the same node share the array.
+   */
+  instance(node: Node): InstanceLevel[] {
+    let out = this.instances.get(node);
+    if (!out) {
+      out = this.levels(node).map(({ node: n }) => {
+        const level: InstanceLevel = { tag: n.tag };
+        const id = this.identityOf(n);
+        if (id) level.id = n.attrs[UICOV_ID_ATTRIBUTE] !== undefined ? `[data-uicov-id=${quote(id)}]` : id;
+        if (n.of > 1) {
+          level.nth = n.nth;
+          level.of = n.of;
+        }
+        if (isRow(n)) {
+          level.row = true;
+          const index = Number(n.attrs['aria-rowindex']);
+          const count = Number(n.attrs['aria-rowcount'] ?? treeParentRowCount(n));
+          if (Number.isInteger(index) && index > 0) {
+            level.pos = index;
+            if (Number.isInteger(count) && count >= index) level.count = count;
+          } else if (n.tag === 'tr' && n.of > 1) {
+            // Rows of several <tbody> are numbered per body: no position people could check.
+            const body = treeParent(n);
+            if (!body || !['tbody', 'thead', 'tfoot'].includes(body.tag) || body.of <= 1) {
+              level.pos = n.nth;
+              level.count = n.of;
+            }
+          }
+        } else if (n.of > 1) {
+          level.pos = n.nth;
+          level.count = n.of;
+        }
+        return level;
+      });
+      this.instances.set(node, out);
+    }
+    return out;
+  }
+
   /** Keys of the `<iframe>`/`<frame>` elements the node is inside, outermost first. */
   frames(node: Node): string[] {
     const out: string[] = [];
@@ -541,6 +588,7 @@ export function resolveCoverageData(
         w: el.w,
         h: el.h,
         ...(el.pos ? { pos: el.pos } : {}),
+        instance: r.instance(node),
       });
     }
     const out: Snapshot = { url: snap.url, dpr: snap.dpr, elements };
@@ -567,7 +615,7 @@ export function resolveCoverageData(
       const node = st.element && r.node(st.element);
       if (node && !r.isExcluded(node)) {
         const { key, label, grouping, frames } = r.describe(st.element!, node);
-        step.target = { key, label, ...(grouping ? { grouping } : {}), ...(frames ? { frames } : {}) };
+        step.target = { key, label, ...(grouping ? { grouping } : {}), ...(frames ? { frames } : {}), instance: r.instance(node) };
       } else if (st.element?.name) step.name = st.element.name;
       if (st.call) step.call = st.call;
       if (st.state !== undefined) step.state = st.state;
