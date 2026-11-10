@@ -151,9 +151,12 @@ export interface Snapshot extends Inventory {
 
 /** The element a step acted on, resolved like an interaction's. */
 export type StepTarget = Pick<Interaction, 'key' | 'label' | 'grouping' | 'frames'> & {
-  /** See `InventoryElement.instance`. */
+  /**
+   * See `InventoryElement.instance`. Only when a row, the repeated item or the
+   * element has an identity that names its record (see `Resolver.instance`).
+   */
   instance?: string;
-  /** Which instance it was, for people: `row 2 of 3 · #user-42`. See `Resolver.instanceHint`. */
+  /** Which instance it was, for people: `row 2 of 3 · #user-42`. See `Resolver.instance`. */
   hint?: string;
 };
 

@@ -169,8 +169,9 @@ describe('walkthroughs', () => {
       expect(payload.steps[1]).toMatchObject({ instance: 'row 2 of 3 · #user-2', beforeBox: 1 });
     });
 
-    it('never picks a box after the step, where another record can have taken its place', () => {
-      // No row identities: row 3 moved up into row 2's exact place and position.
+    it('without an identity that names the record, names the row but outlines every instance', () => {
+      // No row identities: a re-sort, a recycled row or a late delete can put
+      // another record at row 2's place in any screenshot, so no box is picked.
       const u = users(() => ({}));
       const elements = u.buttons.map((b, i) => at(b, 10 + i * 30));
       const after = [at(u.row(1, 1, 2), 10), at(u.row(3, 2, 2), 40)];
@@ -183,8 +184,63 @@ describe('walkthroughs', () => {
         states: [shot(url, 'all', 1, elements), shot(url, 'deleted', 3, after)],
       })).attempts![0].steps[1];
       expect(step.instance).toBe('row 2 of 3');
-      expect(step.beforeBox).toBe(1);
+      expect(Object.keys(step)).not.toContain('beforeBox');
       expect(Object.keys(step)).not.toContain('afterBox');
+    });
+
+    it('items sharing an identity: neither named by it nor told apart by it', () => {
+      // ul > li[data-testid="todo-item"] × 3 > button: the testid is the same on every item.
+      const t = tree();
+      const ul = t.add('ul', 1);
+      const buttons = [1, 2, 3].map((i) => t.add('button', t.add('li', ul, { nth: i, of: 3, attrs: { 'data-testid': 'todo-item' } })));
+      const todos = 'http://app/todos';
+      const elements = buttons.map((b, i) => at(b, 10 + i * 30));
+      const data = raw(t.nodes, todos, {
+        snapshots: [{ url: todos, dpr: 1, elements }],
+        steps: [
+          { t: 1, event: 'load', url: todos, state: 0 },
+          { t: 2, event: 'click', url: todos, element: { node: buttons[1], name: 'Delete' } },
+        ],
+        states: [shot(todos, 'all', 1, elements)],
+      });
+      const step = run(data).attempts![0].steps[1];
+      expect(step.instance).toBe('item 2 of 3');
+      expect(step.beforeBox).toBeUndefined();
+      // Their paths still differ by position: no two instances share one.
+      const paths = resolveCoverageData(data).snapshots[0].elements.map((e) => e.instance);
+      expect(new Set(paths).size).toBe(3);
+      // With identities per record, the right one is outlined.
+      buttons.forEach((b, i) => (t.nodes[t.nodes[b].parent!].attrs = { 'data-testid': `todo-${i + 1}` }));
+      expect(run(data).attempts![0].steps[1]).toMatchObject({ instance: 'item 2 of 3 · [data-testid="todo-2"]', beforeBox: 1 });
+    });
+
+    it('several events of one action share the screenshot after it: the record taken away isn’t outlined in it', () => {
+      // check() on todo 2 under an "Active" filter: click, input and change, one screenshot after
+      // all three, where todo 2 is gone and todo 3 is the 2nd item.
+      const t = tree();
+      const ul = t.add('ul', 1);
+      const item = (i: number, nth: number, of: number) =>
+        t.add('input', t.add('li', ul, { nth, of, attrs: { id: `todo-${i}` } }), { attrs: { type: 'checkbox' } });
+      const boxes = [1, 2, 3].map((i) => item(i, i, 3));
+      const todos = 'http://app/todos';
+      const elements = boxes.map((b, i) => at(b, 10 + i * 30, 'done'));
+      const after = [at(item(1, 1, 2), 10, 'done'), at(item(3, 2, 2), 40, 'done')];
+      const target = { node: boxes[1], name: 'done' };
+      const steps = run(raw(t.nodes, todos, {
+        snapshots: [{ url: todos, dpr: 1, elements }],
+        steps: [
+          { t: 1, event: 'load', url: todos, state: 0 },
+          { t: 2, event: 'click', url: todos, element: target, state: 1 },
+          { t: 3, event: 'input', url: todos, element: target, state: 1 },
+          { t: 4, event: 'change', url: todos, element: target, state: 1 },
+        ],
+        states: [shot(todos, 'all', 1, elements), shot(todos, 'done', 5, after)],
+      })).attempts![0].steps;
+      expect(steps.slice(1).map((s) => [s.event, s.before?.index, s.beforeBox])).toEqual([
+        ['click', 0, 1],
+        ['input', 1, undefined],
+        ['change', 1, undefined],
+      ]);
     });
 
     it('doesn’t pick a box in an outdated Before (an earlier step took no screenshot)', () => {
@@ -258,6 +314,80 @@ describe('walkthroughs', () => {
         steps: [{ t: 1, event: 'click', url: shop, element: { node: stars[3], name: '4 stars' } }],
       });
       expect(run(data).attempts![0].steps[0].instance).toBe('item 4 of 5');
+    });
+
+    it('names the card when its header and footer both hold a button', () => {
+      // div.card × 3 > (div.header > button "Favorite", div.footer > button "Add")
+      const t = tree();
+      const list = t.add('div', 1, { attrs: { class: 'list' } });
+      const elements: RawSnapshot['elements'] = [];
+      const adds = [1, 2, 3].map((i) => {
+        const card = t.add('div', list, { nth: i, of: 3, attrs: { class: 'card' } });
+        const fav = t.add('button', t.add('div', card, { nth: 1, of: 2, attrs: { class: 'header' } }));
+        const add = t.add('button', t.add('div', card, { nth: 2, of: 2, attrs: { class: 'footer' } }));
+        elements.push(at(fav, i * 100, 'Favorite'), at(add, i * 100 + 50, 'Add'));
+        return add;
+      });
+      const shop = 'http://app/shop';
+      const data = raw(t.nodes, shop, {
+        snapshots: [{ url: shop, dpr: 1, elements }],
+        steps: adds.map((node, i) => ({ t: i, event: 'click', url: shop, element: { node, name: 'Add' } })),
+      });
+      expect([0, 1, 2].map((i) => hint(data, i))).toEqual(['item 1 of 3', 'item 2 of 3', 'item 3 of 3']);
+    });
+
+    it('no hint when nothing repeats: one identity on a header and a footer button', () => {
+      const t = tree();
+      const save = (wrapper: string, nth: number) =>
+        t.add('button', t.add(wrapper, t.add('div', 1, { nth, of: 2 })), { attrs: { 'data-testid': 'save' } });
+      const [top, bottom] = [save('header', 1), save('footer', 2)];
+      const page = 'http://app/edit';
+      const data = raw(t.nodes, page, {
+        snapshots: [{ url: page, dpr: 1, elements: [at(top, 0, 'Save'), at(bottom, 500, 'Save')] }],
+        steps: [{ t: 1, event: 'click', url: page, element: { node: bottom, name: 'Save' } }],
+      });
+      const summary = run(data);
+      expect(summary.routes[0].elements[0]).toMatchObject({ key: '[data-testid="save"]', instances: 2 });
+      expect(summary.attempts![0].steps[0].instance).toBeUndefined();
+    });
+
+    it('names the card around a frame', () => {
+      // ul > li × 3 > iframe >> html > body > (div, div > button "Pay")
+      const t = tree();
+      const ul = t.add('ul', 1);
+      const pays = [1, 2, 3].map((i) => {
+        const body = t.add('body', t.add('html', t.add('#document', t.add('iframe', t.add('li', ul, { nth: i, of: 3 })))));
+        t.add('div', body, { nth: 1, of: 2 });
+        return t.add('button', t.add('div', body, { nth: 2, of: 2 }));
+      });
+      const shop = 'http://app/shop';
+      const data = raw(t.nodes, shop, {
+        snapshots: [{ url: shop, dpr: 1, elements: pays.map((b, i) => at(b, i * 100, 'Pay')) }],
+        steps: [{ t: 1, event: 'click', url: shop, element: { node: pays[1], name: 'Pay' } }],
+      });
+      expect(hint(data)).toBe('item 2 of 3');
+    });
+
+    it('an explicit group on each card: names the card, not the control in it', () => {
+      const t = tree();
+      const ul = t.add('ul', 1);
+      const elements: RawSnapshot['elements'] = [];
+      const cards = [1, 2, 3].map((i) => {
+        const li = t.add('li', ul, { nth: i, of: 3, attrs: { 'data-uicov-group': 'card' } });
+        const add = t.add('button', li, { nth: 1, of: 2 });
+        const save = t.add('button', li, { nth: 2, of: 2 });
+        elements.push(at(add, i * 100, 'Add'), at(save, i * 100 + 30, 'Save'));
+        return { add, save };
+      });
+      const shop = 'http://app/shop';
+      const data = raw(t.nodes, shop, {
+        snapshots: [{ url: shop, dpr: 1, elements }],
+        steps: [
+          { t: 1, event: 'click', url: shop, element: { node: cards[1].add, name: 'Add' } },
+          { t: 2, event: 'click', url: shop, element: { node: cards[2].save, name: 'Save' } },
+        ],
+      });
+      expect([hint(data, 0), hint(data, 1)]).toEqual(['item 2 of 3', 'item 3 of 3']);
     });
 
     it('in repeated items outside a table: the item and its identity', () => {
@@ -348,6 +478,17 @@ describe('walkthroughs', () => {
         const g = tree();
         const gb = g.add('button', g.add('div', g.add('div', 1, { attrs: { role: 'grid' } }), { nth: 2, of: 4, attrs: { role: 'row' } }));
         expect(hint(step(g.nodes, gb))).toBeUndefined();
+      });
+
+      it('of a role=row come only from aria-rowindex: spacers and panels count as rows otherwise', () => {
+        // grid > rowgroup > (spacer div, row, row, row): the 1st row is the 2nd div.
+        const t = tree();
+        const group = t.add('div', t.add('div', 1, { attrs: { role: 'grid' } }), { attrs: { role: 'rowgroup' } });
+        const row = t.add('div', group, { nth: 2, of: 4, attrs: { role: 'row' } });
+        const b = t.add('button', row);
+        expect(hint(step(t.nodes, b))).toBeUndefined();
+        t.nodes[row].attrs = { role: 'row', 'aria-rowindex': '1' };
+        expect(hint(step(t.nodes, b))).toBe('row 1');
       });
 
       it('name the outer record of a nested table first', () => {

@@ -126,7 +126,10 @@ const classShape = (n: Node) =>
     .sort()
     .map((c) => `.${c}`)
     .join('');
+const classSet = (n: Node) => new Set((n.attrs.class ?? '').split(/\s+/).filter((c) => c && !/\d/.test(c)));
 const withoutDigits = (s: string) => s.replace(/\d+/g, '#');
+/** An identity that names one record rather than a kind of element: it has digits, as in the grouping heuristics. */
+const isRecordId = (id: string) => /\d/.test(id);
 type Level = { node: Node; sep: string };
 const DETAIL_ATTRS = new Set(['id', 'name', 'role', 'type', 'aria-label', 'href', 'tabindex', 'contenteditable']);
 const directive = (n: Node) => (n.attrs['data-uicov-interactive'] ?? '').trim().toLowerCase();
@@ -142,6 +145,8 @@ export class Resolver {
   private ids?: { size: number; byTree: Map<Node, Map<string, Node>> };
   private hints = new Map<Node, { hints?: GroupHints; shape?: { sig: string; levels: GroupLevel[] } }>();
   private paths = new Map<Node, string>();
+  /** Accessible names each node was recorded with (digits ignored), as `node` sees them. */
+  private names = new Map<Node, Set<string>>();
 
   /**
    * `data.nodes` may grow after construction (the recorder appends to it);
@@ -160,7 +165,13 @@ export class Resolver {
       if (n.parent !== undefined) node.parent = this.nodes[n.parent];
       this.nodes.push(node);
     }
-    return this.nodes[ref.node];
+    const node = this.nodes[ref.node];
+    const name = ref.name?.trim();
+    if (node && name) {
+      if (!this.names.has(node)) this.names.set(node, new Set());
+      this.names.get(node)!.add(withoutDigits(name));
+    }
+    return node;
   }
 
   /**
@@ -463,18 +474,19 @@ export class Resolver {
   }
 
   /**
-   * Where this one element is in the page: every level from the top
-   * document down, by its identity where it has one (`tr#user-2`), else by
-   * its position among same-tag siblings, rows included. Unlike keys it tells
-   * instances apart (the "Delete" of row 2 and of row 3), so a step can be
-   * matched to its box in a screenshot. Identities keep a record that moved
-   * (row 3 sliding up when row 2 is deleted) from matching another's place.
+   * Where this one element is in the page: every level from the top document
+   * down, by its identity when that names one record (has digits: `tr#user-2`),
+   * else by its identity if any and its position among same-tag siblings
+   * (`li[data-testid="todo-item"]:2`). Unlike keys it tells instances apart
+   * (the "Delete" of row 2 and of row 3), so a step can be matched to its box
+   * in a screenshot; a record's identity keeps it from matching another
+   * record that moved into its place.
    */
   instancePath(node: Node): string {
     let p = this.paths.get(node);
     if (p === undefined) {
       const id = isBoundary(node) ? '' : this.identityOf(node);
-      const own = id ? `${node.tag}${id}` : node.of > 1 ? `${node.tag}:${node.nth}` : node.tag;
+      const own = isRecordId(id) ? `${node.tag}${id}` : `${node.tag}${id}${node.of > 1 ? `:${node.nth}` : ''}`;
       p = node.parent ? `${this.instancePath(node.parent)}/${own}` : own;
       this.paths.set(node, p);
     }
@@ -482,42 +494,50 @@ export class Resolver {
   }
 
   /**
-   * Which of several repeated elements this is, for people: its rows in
-   * tables or grids, outermost first (`row 2 of 3 · #order-7 › row 1`), else
-   * its item among repeated siblings (`item 2 of 3`), then the element's own
-   * identity when it has digits (`[data-testid="delete-42"]`), which the
-   * grouping ignores. Crosses shadow roots and frames, like the grouping.
-   * Undefined when there's nothing to tell.
+   * Which of several repeated elements this is. `hint`, for people: its rows
+   * in tables or grids, outermost first (`row 2 of 3 · #order-7 › row 1`),
+   * else the repeated item it is or is in (`item 2 of 3`), then the element's
+   * own identity; identities only when they name one record (have digits, as
+   * in the grouping heuristics: `[data-testid="todo-item"]` on every item
+   * tells nothing). `anchored`: a row, the item or the element has such an
+   * identity, so its box can be told from another record's that took its
+   * place (a deleted, sorted or recycled row). Crosses shadow roots and
+   * frames, like the grouping.
    */
-  instanceHint(node: Node): string | undefined {
+  instance(node: Node, name?: string): { hint?: string; anchored: boolean } {
     const parts: string[] = [];
+    let anchored = false;
+    let itemId = '';
     const rows: Node[] = [];
     for (let n: Node | undefined = node; n; n = up(n)) if (isRow(n)) rows.unshift(n);
-    let itemId = '';
     if (rows.length) {
       const described = rows.map((r) => this.rowHint(r)).filter((h) => h);
       if (described.length) parts.push(described.join(' › '));
-      itemId = this.identityOf(rows[rows.length - 1]);
+      anchored = rows.some((r) => isRecordId(this.identityOf(r)));
     } else {
-      const item = this.repeatedItem(node);
+      const item = this.repeatedItem(node, name);
       if (item) {
-        itemId = this.identityOf(item);
+        const id = this.identityOf(item);
+        itemId = isRecordId(id) ? id : '';
+        anchored = !!itemId;
         parts.push([`item ${item.nth} of ${item.of}`, itemId].filter((x) => x).join(' · '));
       }
     }
-    // The element's own identity only when it looks per record (digits, as in the
-    // grouping heuristics): `[data-action="delete-user"]` on every row tells nothing.
     const ownId = this.identityOf(node);
-    if (ownId && ownId !== itemId && /\d/.test(ownId)) parts.push(ownId);
-    return parts.length ? parts.join(' · ') : undefined;
+    if (isRecordId(ownId)) {
+      anchored = true;
+      if (ownId !== itemId) parts.push(ownId);
+    }
+    return { ...(parts.length ? { hint: parts.join(' · ') } : {}), anchored };
   }
 
   /**
    * One row: `aria-rowindex` (and the grid's `aria-rowcount`) when set, as
-   * virtualized grids do; else its position when it can be trusted: a `<tr>`
-   * in the only `<tbody>` (or `<thead>`, `<tfoot>`) of its table, or a
-   * `role=row` in the only `role=rowgroup` of its parent; not one of several
-   * row groups, where positions restart. Then its identity.
+   * virtualized grids do. Else, for a `<tr>`, its position when it can be
+   * trusted: in the only `<tbody>` (or `<thead>`, `<tfoot>`) of its table,
+   * not one of several, where positions restart. A `role=row` gets none: its
+   * same-tag siblings can be spacers or panels, which aren't recorded. Then
+   * its identity when it names one record.
    */
   private rowHint(row: Node): string {
     let pos = '';
@@ -527,43 +547,49 @@ export class Resolver {
       for (let n = up(row); n && !grid; n = up(n)) if (isRowContainer(n)) grid = n;
       const count = grid?.attrs['aria-rowcount']?.trim();
       pos = `row ${index}${count && /^\d+$/.test(count) ? ` of ${count}` : ''}`;
-    } else {
+    } else if (row.tag === 'tr') {
       const section = treeParent(row);
-      const trusted =
-        row.tag === 'tr'
-          ? section && (isRowContainer(section) || (ROW_SECTIONS.has(section.tag) && section.of === 1))
-          : section && firstRole(section) === 'rowgroup' && section.of === 1;
-      if (trusted) pos = `row ${row.nth}${row.of > 1 ? ` of ${row.of}` : ''}`;
+      if (section && (isRowContainer(section) || (ROW_SECTIONS.has(section.tag) && section.of === 1)))
+        pos = `row ${row.nth}${row.of > 1 ? ` of ${row.of}` : ''}`;
     }
-    return [pos, this.identityOf(row)].filter((x) => x).join(' · ');
+    const id = this.identityOf(row);
+    return [pos, isRecordId(id) ? id : ''].filter((x) => x).join(' · ');
   }
 
   /**
-   * The repeated item an element is (a star of a rating group) or is in (a
-   * card, a list item): the nearest level with a recorded same-tag sibling
-   * that holds an element at the same place (the "Add" of the next card), so
-   * wrappers that every card has at the same position (`div.title` +
-   * `div.actions`) aren't taken for it. Falls back to the nearest ancestor
-   * with same-tag siblings.
+   * The repeated item an element is in (a card, a list item) or is (a star
+   * of a rating group): the nearest level with a recorded sibling of the
+   * same shape that holds an element of the same shape at the same place
+   * (the "Add" of the next card), so wrappers that every card has at the
+   * same position (`div.title` + `div.actions`, `div.header > button` +
+   * `div.footer > button`) aren't taken for it. Counterparts recorded with
+   * the element's accessible name (digits ignored) are looked for first, so
+   * a "Favorite" in `div > button` isn't taken for the counterpart of an
+   * "Add" in `div > button`; then any (names can name the record: "Add
+   * Apple"). The element itself counts only among siblings of its explicit
+   * group, and only when no level above it repeats (a rating in each
+   * product card: the card). Undefined when nothing repeats.
    */
-  private repeatedItem(node: Node): Node | undefined {
-    const below: string[] = [];
-    let fallback: Node | undefined;
+  private repeatedItem(node: Node, name?: string): Node | undefined {
+    const named = name?.trim() ? withoutDigits(name.trim()) : undefined;
+    return (named && this.repeatedItemBy(node, named)) || this.repeatedItemBy(node);
+  }
+
+  private repeatedItemBy(node: Node, name?: string): Node | undefined {
+    const below: Node[] = [];
+    let self: Node | undefined;
     for (let n: Node | undefined = node; n; n = up(n)) {
-      if (n.tag === 'body' || n.tag === 'html') break;
+      // The top document's <body>; a frame's goes on to the <iframe> and its item.
+      if ((n.tag === 'body' || n.tag === 'html') && !treeTop(n).parent) break;
       if (n === node) {
-        // Itself only among siblings of its explicit group (the stars of a rating),
-        // not next to other controls ("Add to cart" beside "Save for later").
+        // Not next to other controls ("Add to cart" beside "Save for later").
         const group = this.explicitGroup(node);
         if (group && this.nodes.some((m) => m !== node && m.parent === node.parent && m.tag === node.tag && this.explicitGroup(m) === group))
-          return node;
-      } else if (n.of > 1) {
-        fallback ??= n;
-        if (this.repeatsAt(n, below)) return n;
-      }
-      below.push(n.tag);
+          self = node;
+      } else if (n.of > 1 && this.repeatsAt(n, below, name)) return n;
+      below.push(n);
     }
-    return fallback;
+    return self;
   }
 
   /** The key of the explicit group (`data-uicov-group`, `elementGroups`) the element is in, if any. */
@@ -574,19 +600,36 @@ export class Resolver {
   }
 
   /**
-   * Whether a recorded same-tag sibling of `item` holds a node along the tags
-   * `below` (the levels from the element up to `item`, element first; empty
-   * when `item` is the element itself).
+   * Whether a recorded sibling of `item` like it (`sameShape`) holds a node
+   * along the levels `below` (from the element up to `item`, element first;
+   * empty when `item` is the element itself), each like its counterpart;
+   * with `name`, an element recorded with that accessible name.
    */
-  private repeatsAt(item: Node, below: string[]): boolean {
+  private repeatsAt(item: Node, below: Node[], name?: string): boolean {
     return this.nodes.some((m) => {
+      if (name && below.length && !this.names.get(m)?.has(name)) return false;
       let n: Node | undefined = m;
-      for (const tag of below) {
-        if (!n || n.tag !== tag) return false;
+      for (let i = 0; i < below.length; i++) {
+        if (!n || !this.sameShape(n, below[i], i === 0)) return false;
         n = up(n);
       }
-      return !!n && n !== item && n.tag === item.tag && n.parent === item.parent;
+      return !!n && n !== item && n.parent === item.parent && this.sameShape(n, item, below.length === 0);
     });
+  }
+
+  /**
+   * Whether two nodes look like the same part of repeated items: same tag,
+   * classes (digits ignored, as in the grouping) of one all on the other
+   * (which may add a state like `.selected`), and for the element itself the
+   * same role. Not identities, which can name the record (`add-apple`).
+   */
+  private sameShape(a: Node, b: Node, element: boolean): boolean {
+    if (a.tag !== b.tag || (element && roleOf(a) !== roleOf(b))) return false;
+    const ca = classSet(a);
+    const cb = classSet(b);
+    const [small, big] = ca.size <= cb.size ? [ca, cb] : [cb, ca];
+    for (const c of small) if (!big.has(c)) return false;
+    return true;
   }
 
   /** Keys of the `<iframe>`/`<frame>` elements the node is inside, outermost first. */
@@ -699,13 +742,14 @@ export function resolveCoverageData(
       const node = st.element && r.node(st.element);
       if (node && !r.isExcluded(node)) {
         const { key, label, grouping, frames } = r.describe(st.element!, node);
-        const hint = r.instanceHint(node);
+        const { hint, anchored } = r.instance(node, st.element!.name);
         step.target = {
           key,
           label,
           ...(grouping ? { grouping } : {}),
           ...(frames ? { frames } : {}),
-          instance: r.instancePath(node),
+          // Matched to a box only when an identity names its record (see `Resolver.instance`).
+          ...(anchored ? { instance: r.instancePath(node) } : {}),
           ...(hint ? { hint } : {}),
         };
       } else if (st.element?.name) step.name = st.element.name;

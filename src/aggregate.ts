@@ -573,6 +573,10 @@ export function aggregate(
   result.sort((a, b) => a.route.localeCompare(b.route));
   // The walkthrough of each attempt, and links from "Tested by" to its steps.
   const byRoute = new Map(result.map((r) => [r.route, r]));
+  /** Per state's boxes: indices of each key's boxes, in order. */
+  const boxesByKey = new WeakMap<ScreenshotBox[], Map<string, number[]>>();
+  /** Per route: element key → its instances (the first element with that key, as `find` would). */
+  const instancesByRoute = new Map<string, Map<string, number>>();
   walkSteps(
     tests,
     attemptOf,
@@ -582,19 +586,38 @@ export function aggregate(
     (snap, ref, key, instance) => {
       // The instance in this recording's screenshot, then the same box in the
       // view's state (the first screenshot with that hash, drawn for everyone).
+      // A linear scan: each screenshot is the "before" of one step only.
       const e = snap.elements.find((x) => x.instance === instance && x.key === key);
       const b = e && (snap.screenshotClip ? boxInImage(e, snap.screenshotClip) : e);
       const boxes = byRoute.get(ref.route)?.states?.[ref.index]?.boxes;
       if (!b || !boxes) return undefined;
+      let keyed = boxesByKey.get(boxes);
+      if (!keyed) {
+        boxesByKey.set(boxes, (keyed = new Map()));
+        boxes.forEach((x, i) => {
+          const l = keyed!.get(x.key);
+          if (l) l.push(i);
+          else keyed!.set(x.key, [i]);
+        });
+      }
       const near = (u: number, v: number) => Math.abs(u - v) < 0.5;
-      const i = boxes.findIndex((x) => x.key === key && near(x.x, b.x) && near(x.y, b.y) && near(x.w, b.w) && near(x.h, b.h));
-      return i < 0 ? undefined : i;
+      const i = keyed.get(key)?.find((j) => {
+        const x = boxes[j];
+        return near(x.x, b.x) && near(x.y, b.y) && near(x.w, b.w) && near(x.h, b.h);
+      });
+      return i;
     },
     // Only for elements seen several times at once: not a label merged into its
     // control, nor an explicit group of one. Links that lead elsewhere are referrers.
     (route, key) => {
-      const r = byRoute.get(route);
-      return !!r && (allElements(r).find((e) => e.key === key)?.instances ?? 0) > 1;
+      let instances = instancesByRoute.get(route);
+      if (!instances) {
+        const r = byRoute.get(route);
+        if (!r) return false;
+        instancesByRoute.set(route, (instances = new Map()));
+        for (const e of allElements(r)) if (!instances.has(e.key)) instances.set(e.key, e.instances ?? 0);
+      }
+      return (instances.get(key) ?? 0) > 1;
     },
   );
   const first = firstSteps(attempts);

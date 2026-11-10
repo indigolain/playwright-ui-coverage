@@ -53,10 +53,11 @@ export interface WalkStep {
   /**
    * Index into the boxes of the `before` state of the instance acted on. The
    * walkthrough outlines only it, not every instance of the element. Set only
-   * when `before` is the page right before the step (the previous step on the
-   * page took it) and the instance is in it. There's none for `after`: the
-   * step may have removed or moved the element (a deleted row), and another
-   * record can be in its place.
+   * when an identity names the instance's record (`StepTarget.instance`),
+   * `before` is the page right before the step (the previous step on the page
+   * took it) and the instance is in it. Without such an identity, a re-sort,
+   * a recycled row or a late delete can put another record at its place.
+   * There's none for `after`: the step may have removed or moved the element.
    */
   beforeBox?: number;
 }
