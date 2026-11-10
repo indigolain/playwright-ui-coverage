@@ -54,6 +54,12 @@ export interface InventoryElement {
   h: number;
   /** `position: fixed` / `sticky` (itself or an ancestor): drawn where it was on screen. See `RawElement.pos`. */
   pos?: 'fixed' | 'sticky';
+  /**
+   * This one element's place in the page (positions of every level, rows
+   * included), to tell instances sharing a key apart. Internal: matches a
+   * step to its box. Absent in pre-0.2 recordings.
+   */
+  instance?: string;
 }
 
 /** Why elements were merged into one (`group.reason` in coverage.json). */
@@ -144,7 +150,12 @@ export interface Snapshot extends Inventory {
 }
 
 /** The element a step acted on, resolved like an interaction's. */
-export type StepTarget = Pick<Interaction, 'key' | 'label' | 'grouping' | 'frames'>;
+export type StepTarget = Pick<Interaction, 'key' | 'label' | 'grouping' | 'frames'> & {
+  /** See `InventoryElement.instance`. */
+  instance?: string;
+  /** Which instance it was, for people: `row 2 of 3 · #user-42`. See `Resolver.instanceHint`. */
+  hint?: string;
+};
 
 /** One step of a test (recording option `steps`): an interaction, or a page load. */
 export interface Step {

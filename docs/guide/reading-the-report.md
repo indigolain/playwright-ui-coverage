@@ -35,6 +35,7 @@ With [`steps: 'on'`](../reference/recording-options.md#steps), the **Tests** tab
 - the action and the element (`click button "Save"`), the Playwright call and where it is in the test (`locator.click getByRole('button', { name: 'Save' })` at `users.spec.ts:15:52`), when they were recorded;
 - the view, linked to the state in [All states](#step-through-every-state), and the URL;
 - the screenshot, with the element the step acted on outlined in blue and the other boxes green or red as everywhere else. **Before** shows the page the step acted on, **After** the page right after it; by default you see Before when it shows the element, After otherwise;
+- for a repeated element (a "Delete" button on every row, see [Element grouping](./element-grouping.md)), which one it was: only that instance is outlined, and the step says where it was, `click button "Delete" row 2 of 3 · #user-42`. That's the row (or item, outside tables) and its identity, plus the element's own identity when it has digits (`[data-testid="delete-42"]`), so a step that hit the right button on the wrong record stands out;
 - every step of the test as a compact list (`1 load /users · 2 click button "Add user" · 3 input textbox "Name" · …`), to jump to one.
 
 ![The walkthrough of "add a user via the modal": step 4 of 8, input combobox "Role" by locator.selectOption getByLabel('Role') at users.spec.ts:14:33, with the Role select outlined in blue on the screenshot of the open modal, and the Tests list in the sidebar](../images/report-walkthrough.png)

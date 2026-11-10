@@ -138,6 +138,7 @@ export class Resolver {
   private pins = new Map<Node, { key: string; label?: string }>();
   private ids?: { size: number; byTree: Map<Node, Map<string, Node>> };
   private hints = new Map<Node, { hints?: GroupHints; shape?: { sig: string; levels: GroupLevel[] } }>();
+  private paths = new Map<Node, string>();
 
   /**
    * `data.nodes` may grow after construction (the recorder appends to it);
@@ -458,6 +459,46 @@ export class Resolver {
     return undefined;
   }
 
+  /**
+   * Where this one element is in the page: every level from the top
+   * document down, each with its position among same-tag siblings, rows
+   * included. Unlike keys it tells instances apart (the "Delete" of row 2 and
+   * of row 3), so a step can be matched to its box in a screenshot.
+   */
+  instancePath(node: Node): string {
+    let p = this.paths.get(node);
+    if (p === undefined) {
+      const own = node.of > 1 ? `${node.tag}:${node.nth}` : node.tag;
+      p = node.parent ? `${this.instancePath(node.parent)}/${own}` : own;
+      this.paths.set(node, p);
+    }
+    return p;
+  }
+
+  /**
+   * Which of several repeated elements this is, for people: its row in a
+   * table or grid (`row 2 of 3`), else its item among repeated siblings
+   * (`item 2 of 3`), then the identities that point at the record: the row's
+   * or item's (`#user-42`) and the element's own when it has digits
+   * (`[data-testid="delete-42"]`), which the grouping ignores. Undefined when
+   * there's nothing to tell.
+   */
+  instanceHint(node: Node): string | undefined {
+    let item: Node | undefined;
+    for (let n: Node | undefined = node; n && !item; n = treeParent(n)) if (isRow(n)) item = n;
+    const isRowItem = !!item;
+    for (let n = treeParent(node); n && !item; n = treeParent(n)) if (n.of > 1 && n.tag !== 'body' && n.tag !== 'html') item = n;
+    const parts: string[] = [];
+    if (item) parts.push(`${isRowItem ? 'row' : 'item'} ${item.nth}${item.of > 1 ? ` of ${item.of}` : ''}`);
+    const itemId = item ? this.identityOf(item) : '';
+    if (itemId) parts.push(itemId);
+    // The element's own identity only when it looks per record (digits, as in the
+    // grouping heuristics): `[data-action="delete-user"]` on every row tells nothing.
+    const ownId = this.identityOf(node);
+    if (ownId && ownId !== itemId && /\d/.test(ownId)) parts.push(ownId);
+    return parts.length ? parts.join(' · ') : undefined;
+  }
+
   /** Keys of the `<iframe>`/`<frame>` elements the node is inside, outermost first. */
   frames(node: Node): string[] {
     const out: string[] = [];
@@ -535,6 +576,7 @@ export function resolveCoverageData(
       if (!node || el.candidateOnly || r.isExcluded(node)) continue;
       elements.push({
         ...r.describe(el, node),
+        instance: r.instancePath(node),
         tag: node.tag,
         x: el.x,
         y: el.y,
@@ -567,7 +609,15 @@ export function resolveCoverageData(
       const node = st.element && r.node(st.element);
       if (node && !r.isExcluded(node)) {
         const { key, label, grouping, frames } = r.describe(st.element!, node);
-        step.target = { key, label, ...(grouping ? { grouping } : {}), ...(frames ? { frames } : {}) };
+        const hint = r.instanceHint(node);
+        step.target = {
+          key,
+          label,
+          ...(grouping ? { grouping } : {}),
+          ...(frames ? { frames } : {}),
+          instance: r.instancePath(node),
+          ...(hint ? { hint } : {}),
+        };
       } else if (st.element?.name) step.name = st.element.name;
       if (st.call) step.call = st.call;
       if (st.state !== undefined) step.state = st.state;

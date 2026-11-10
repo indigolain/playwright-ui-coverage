@@ -572,7 +572,26 @@ export function aggregate(
 
   result.sort((a, b) => a.route.localeCompare(b.route));
   // The walkthrough of each attempt, and links from "Tested by" to its steps.
-  walkSteps(tests, attemptOf, attempts, routeName, (snap) => stateRefs.get(snap));
+  const byRoute = new Map(result.map((r) => [r.route, r]));
+  walkSteps(
+    tests,
+    attemptOf,
+    attempts,
+    routeName,
+    (snap) => stateRefs.get(snap),
+    (snap, ref, key, instance) => {
+      // The instance in this recording's screenshot, then the same box in the
+      // view's state (the first screenshot with that hash, drawn for everyone).
+      const e = snap.elements.find((x) => x.instance === instance && x.key === key);
+      const b = e && (snap.screenshotClip ? boxInImage(e, snap.screenshotClip) : e);
+      const boxes = byRoute.get(ref.route)?.states?.[ref.index]?.boxes;
+      if (!b || !boxes) return undefined;
+      const near = (u: number, v: number) => Math.abs(u - v) < 0.5;
+      const i = boxes.findIndex((x) => x.key === key && near(x.x, b.x) && near(x.y, b.y) && near(x.w, b.w) && near(x.h, b.h));
+      return i < 0 ? undefined : i;
+    },
+    (route, key) => !!byRoute.get(route)?.elements.find((e) => e.key === key)?.group,
+  );
   const first = firstSteps(attempts);
   for (const r of result) {
     const byKey = first.get(r.route);

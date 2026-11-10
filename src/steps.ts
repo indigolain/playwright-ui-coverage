@@ -42,10 +42,28 @@ export interface WalkStep {
   key?: string;
   label?: string;
   call?: RawCall;
+  /**
+   * Which instance of a repeated element it acted on (`row 2 of 3 · #user-42`),
+   * set when the element stands for several (a group, or instances sharing a key).
+   */
+  instance?: string;
   /** The page before and after the step, when screenshots were taken. */
   before?: StateRef;
   after?: StateRef;
+  /**
+   * Index into the boxes of the `before` / `after` state of the instance
+   * acted on, when it's in the screenshot. The walkthrough outlines only it,
+   * not every instance of the element.
+   */
+  beforeBox?: number;
+  afterBox?: number;
 }
+
+/**
+ * The box of the instance a step acted on (`StepTarget.instance`) in a state:
+ * its index in the state's boxes, or undefined when it isn't there.
+ */
+export type InstanceBox = (snap: Snapshot, ref: StateRef, key: string, instance: string) => number | undefined;
 
 /** One test attempt: a walkthrough, and a state's "Reached by". */
 export interface AttemptSummary {
@@ -151,6 +169,9 @@ export function walkSteps(
   attempts: AttemptSummary[],
   routeName: (url: string, view?: string) => string | undefined,
   stateRef: (snap: Snapshot) => StateRef | undefined,
+  instanceBox?: InstanceBox,
+  /** The view's element for `key` stands for several (shows `WalkStep.instance`). */
+  repeated?: (route: string, key: string) => boolean,
 ): void {
   const byAttempt = new Map<number, { rec: number; data: TestEntry['data'] }[]>();
   tests.forEach((t, rec) => {
@@ -164,25 +185,34 @@ export function walkSteps(
       (data.steps ?? []).map((step, i) => ({ step, rec, i, data })),
     );
     all.sort((x, y) => x.step.t - y.step.t || x.rec - y.rec || x.i - y.i);
-    /** The last state of each page (recording and page). */
-    const lastState = new Map<string, StateRef>();
+    /** The last state of each page (recording and page), with its screenshot. */
+    const lastState = new Map<string, { ref: StateRef; snap: Snapshot }>();
     attempts[a].steps = all.map(({ step, rec, data }) => {
       const page = `${rec}:${step.page ?? 0}`;
       const route = routeName(step.url, data.view);
       const snap = step.state !== undefined ? data.states?.[step.state] : undefined;
       const after = snap && stateRef(snap);
       // A load starts a new document: what the page showed before isn't this step's "before".
-      const before = step.event === 'load' ? undefined : lastState.get(page);
-      if (after) lastState.set(page, after);
+      const prev = step.event === 'load' ? undefined : lastState.get(page);
+      const before = prev?.ref;
+      if (after) lastState.set(page, { ref: after, snap: snap! });
       const out: WalkStep = { t: step.t, event: step.event, url: step.url };
       if (route !== undefined) out.route = route;
-      if (step.target) {
-        out.key = step.target.key;
-        out.label = step.target.label;
+      const target = step.target;
+      if (target) {
+        out.key = target.key;
+        out.label = target.label;
+        if (target.hint && route !== undefined && repeated?.(route, target.key)) out.instance = target.hint;
       } else if (step.name) out.label = step.name;
       if (step.call) out.call = step.call;
       if (before) out.before = before;
       if (after) out.after = after;
+      if (target?.instance && instanceBox) {
+        const b = before && instanceBox(prev!.snap, before, target.key, target.instance);
+        const a = after && instanceBox(snap!, after, target.key, target.instance);
+        if (b !== undefined) out.beforeBox = b;
+        if (a !== undefined) out.afterBox = a;
+      }
       return out;
     });
   }
